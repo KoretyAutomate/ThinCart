@@ -1,0 +1,31 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.11, pytest-9.0.2, pluggy-1.5.0
+rootdir: /home/korety/Project/_ideas/shopping-list
+plugins: anyio-4.12.0, langsmith-0.5.1
+collected 24 items
+
+tests/test_cycles.py .......                                             [ 29%]
+tests/test_ops.py ............                                           [ 79%]
+tests/test_plants.py .....                                               [100%]
+
+=============================== warnings summary ===============================
+server/app.py:196
+  /home/korety/Project/_ideas/shopping-list/server/app.py:196: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @app.on_event("startup")
+
+../../../miniconda3/lib/python3.13/site-packages/fastapi/applications.py:4576
+  /home/korety/miniconda3/lib/python3.13/site-packages/fastapi/applications.py:4576: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    return self.router.on_event(event_type)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================== 24 passed, 2 warnings in 0.45s ========================

@@ -147,10 +147,14 @@ def state(conn: sqlite3.Connection, now=None) -> dict:
                ORDER BY COALESCE(c.category, 'zzz'), i.added_at"""
         )
     ]
+    import catalog
+
+    week = catalog.weekly_plants(conn, now)
     return {
         "revision": get_revision(conn),
         "items": items,
         "suggestions": suggestions(conn, now),
+        "plants": {"count": len(week), "target": 30, "week": week},
     }
 
 

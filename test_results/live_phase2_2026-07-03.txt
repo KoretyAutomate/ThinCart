@@ -1,0 +1,7 @@
+added ほうれん草, catalog_id 2
+enriched after ~3s: category=produce edible=1 plants=["spinach"]
+plant counter after checkoff: {'count': 1, 'target': 30, 'week': ['spinach']}
+/api/ideas in 10.0s
+recipe[0]: {"title": "Sesame Spinach with Tofu (胡麻和え豆腐)", "uses": ["ほうれん草"], "missing": ["firm tofu", "sesame paste", "soy sauce"], "new_plants": ["tofu", "sesame"]}
+diversity: ["ほうれん草", "小松菜", "水菜", "春菊", "三つ葉", "長ネギ", "大根", "かぶ"]
+fixture cleaned; LIVE PHASE-2 TEST PASSED

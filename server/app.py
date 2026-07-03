@@ -27,8 +27,10 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+import catalog
 import cycles
 import db
+import llm
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("plantcart")
@@ -171,6 +173,31 @@ APPLY = {
 }
 
 
+async def enrich_and_push(catalog_id: int) -> None:
+    """Fire-and-forget add-time enrichment; broadcast if categories/plants changed."""
+    try:
+        if await catalog.enrich(conn, write_lock, catalog_id):
+            await broadcast_state()
+    except Exception:
+        log.exception("enrichment failed for catalog_id=%s", catalog_id)
+
+
+async def enrich_sweeper() -> None:
+    """Nightly sweep for rows the add-time task missed (LLM was down, etc.)."""
+    while True:
+        try:
+            if await catalog.sweep(conn, write_lock):
+                await broadcast_state()
+        except Exception:
+            log.exception("enrichment sweep failed")
+        await asyncio.sleep(24 * 3600)
+
+
+@app.on_event("startup")
+async def startup():
+    asyncio.create_task(enrich_sweeper())
+
+
 @app.post("/api/op")
 async def post_op(op: Op):
     async with write_lock:
@@ -186,12 +213,91 @@ async def post_op(op: Op):
         )
         conn.commit()
     await broadcast_state()
+    if op.type == "add" and "catalog_id" in result:
+        row = conn.execute(
+            "SELECT llm_enriched_at FROM item_catalog WHERE id=?",
+            (result["catalog_id"],),
+        ).fetchone()
+        if row and row["llm_enriched_at"] is None:
+            asyncio.create_task(enrich_and_push(result["catalog_id"]))
     return {"ok": True, "result": result, "revision": db.get_revision(conn)}
 
 
 @app.get("/api/state")
 async def get_state():
     return db.state(conn)
+
+
+IDEAS_TTL_H = 6
+ideas_cache: dict = {"data": None, "at": None}
+
+
+def _recipes_prompt(available, on_list, plants) -> str:
+    return (
+        "You help a Japanese/English bilingual household diversify toward 30 different "
+        f"edible plants per week. Plants eaten this week: {json.dumps(plants)}.\n"
+        f"Ingredients they have (bought recently): {json.dumps(available, ensure_ascii=False)}.\n"
+        f"Already on their shopping list: {json.dumps(on_list, ensure_ascii=False)}.\n"
+        'Suggest 3 easy dinner recipes. Reply ONLY JSON: {"recipes": [{'
+        '"title": str (English, may add Japanese in parens), '
+        '"uses": [ingredients they already have], '
+        '"missing": [1-3 grocery items to buy, in the language the ingredient is usually '
+        'listed on their list], '
+        '"new_plants": [lowercase English plant tokens this adds beyond their week]}]}'
+    )
+
+
+def _diversity_prompt(recent_plants) -> str:
+    return (
+        f"A household ate these plants recently: {json.dumps(recent_plants)}.\n"
+        "Suggest 8 DIFFERENT edible plants, common in Japanese supermarkets, to broaden "
+        'their variety toward 30 plants/week. Reply ONLY JSON: {"suggestions": [{'
+        '"plant": lowercase English plant token, '
+        '"buy": the concrete grocery item to put on the list, in Japanese}]}'
+    )
+
+
+@app.get("/api/ideas")
+async def get_ideas(refresh: int = 0):
+    """Recipes + diversity suggestions (LLM). Cached; failure never blocks the list."""
+    if (
+        not refresh
+        and ideas_cache["data"]
+        and (datetime.now(timezone.utc) - ideas_cache["at"]).total_seconds()
+        < IDEAS_TTL_H * 3600
+    ):
+        return ideas_cache["data"]
+
+    available = [p["name"] for p in catalog.recent_purchases(conn)]
+    on_list = [i["name"] for i in db.state(conn)["items"]]
+    week = catalog.weekly_plants(conn)
+    month = catalog.weekly_plants(conn, window_days=30)
+
+    recipes, diversity = await asyncio.gather(
+        llm.chat_json(_recipes_prompt(available, on_list, week), max_tokens=700, timeout=90),
+        llm.chat_json(_diversity_prompt(month), max_tokens=400, timeout=90),
+    )
+    recipes = recipes.get("recipes") if isinstance(recipes, dict) else None
+    diversity = diversity.get("suggestions") if isinstance(diversity, dict) else None
+    if diversity is not None:
+        # the LLM sometimes suggests plants just eaten despite the prompt —
+        # enforce "different" deterministically against the 30-day set
+        eaten = set(month)
+        diversity = [
+            s for s in diversity
+            if isinstance(s, dict) and s.get("buy")
+            and str(s.get("plant", "")).lower() not in eaten
+        ]
+    if recipes is None and diversity is None:
+        raise HTTPException(503, "LLM unavailable — list and sync are unaffected")
+
+    data = {
+        "recipes": recipes or [],
+        "diversity": diversity or [],
+        "generated_at": now_iso(),
+    }
+    ideas_cache["data"], ideas_cache["at"] = data, datetime.now(timezone.utc)
+    return data
 
 
 @app.get("/health")

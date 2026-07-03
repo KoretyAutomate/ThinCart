@@ -113,11 +113,38 @@
     border:none; background:#d3e8d9; color:var(--green-dark); border-radius:999px;
     width:22px; height:22px; font-size:.8rem; line-height:1; cursor:pointer; padding:0;
   }
+  #plants {
+    background:#ffffff2b; border:none; color:#fff; font-size:.8rem; font-weight:700;
+    padding:5px 10px; border-radius:999px; cursor:pointer; white-space:nowrap;
+  }
+  #ideas {
+    position:fixed; inset:0; background:var(--bg); z-index:35; display:none;
+    flex-direction:column;
+  }
+  #ideas header { position:static; }
+  #ideas .body { flex:1; overflow-y:auto; padding:14px 16px 40px; }
+  #ideas h3 { font-size:.78rem; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--muted); margin:18px 2px 8px; }
+  .pchip { display:inline-block; background:#e9f5ec; color:var(--green-dark);
+    border-radius:999px; padding:5px 12px; margin:0 5px 6px 0; font-size:.85rem; }
+  .pchip.new { background:#fff; border:1.5px dashed #9ec7ab; cursor:pointer; }
+  .recipe { background:var(--card); border-radius:14px; padding:14px 15px;
+    margin-bottom:10px; box-shadow:0 1px 2px #0000000a; }
+  .recipe b { font-size:1rem; }
+  .recipe .row { font-size:.85rem; margin-top:6px; color:var(--muted);
+    overflow-wrap:anywhere; }
+  .recipe .np { color:var(--green-dark); font-weight:600; }
+  .recipe button { margin-top:10px; background:var(--green); color:#fff; border:none;
+    border-radius:9px; padding:9px 14px; font-size:.86rem; font-weight:600; cursor:pointer; }
+  #ideas .status { text-align:center; color:var(--muted); margin:40px 12px; font-size:.92rem; }
+  #ideas .topbtn { background:#ffffff2b; border:none; color:#fff; font-size:.8rem;
+    font-weight:700; padding:5px 12px; border-radius:999px; cursor:pointer; }
 </style>
 </head>
 <body>
 <header>
-  <h1>🌱 PlantCart</h1>
+  <h1>PlantCart</h1>
+  <button id="plants">🌱 –/30</button>
   <span id="pill" class="syncing">connecting…</span>
 </header>
 
@@ -145,6 +172,22 @@
   <button class="danger" id="sheet-remove">Remove (didn’t buy)</button>
   <button class="cancel" id="sheet-cancel">Cancel</button>
 </div></div>
+
+<div id="ideas">
+  <header>
+    <h1>🌱 Plants &amp; ideas</h1>
+    <button class="topbtn" id="ideas-refresh">↻ refresh</button>
+    <button class="topbtn" id="ideas-close">✕</button>
+  </header>
+  <div class="body">
+    <h3 id="week-title">This week's plants</h3>
+    <div id="week-plants"></div>
+    <h3>Recipes from what you have</h3>
+    <div id="recipes"><div class="status">…</div></div>
+    <h3>Plants to try — tap to add</h3>
+    <div id="diversity"></div>
+  </div>
+</div>
 
 <div id="namedlg">
   <h2>Who are you?</h2>
@@ -215,6 +258,8 @@ function renderTray() {
 
 function render() {
   renderTray();
+  if (base.plants)
+    $('plants').textContent = `🌱 ${base.plants.count}/${base.plants.target}`;
   const items = view(), list = $('list');
   list.innerHTML = '';
   $('empty').hidden = items.length > 0;
@@ -367,6 +412,64 @@ function setPill() {
   else if (queue.length && !live) { pill.className='offline'; pill.textContent=`offline · ${queue.length} pending`; }
   else if (queue.length)          { pill.className='syncing'; pill.textContent='syncing…'; }
   else                            { pill.className='offline'; pill.textContent='reconnecting…'; }
+}
+
+/* ============ plants & ideas panel (LLM — never blocks the list) ============ */
+$('plants').onclick = () => { $('ideas').style.display = 'flex'; loadIdeas(false); };
+$('ideas-close').onclick = () => $('ideas').style.display = 'none';
+$('ideas-refresh').onclick = () => loadIdeas(true);
+
+function addFromIdeas(name) {
+  enqueue({ type:'add', name, qty_note:'', item_id: uuid() });
+  showToast(`＋ ${name} added to list`, () => {});
+}
+
+async function loadIdeas(refresh) {
+  const wp = $('week-plants');
+  wp.innerHTML = (base.plants?.week || [])
+    .map(() => '<span class="pchip"></span>').join('') || '<span class="pchip">none yet — plants count as you shop</span>';
+  [...wp.children].forEach((el, i) => { if (base.plants?.week[i]) el.textContent = base.plants.week[i]; });
+  $('week-title').textContent =
+    `This week's plants — ${base.plants?.count ?? 0} of ${base.plants?.target ?? 30}`;
+
+  $('recipes').innerHTML = '<div class="status">Asking the kitchen brain… (~30 s)</div>';
+  $('diversity').innerHTML = '';
+  try {
+    const res = await fetch('/api/ideas' + (refresh ? '?refresh=1' : ''));
+    if (!res.ok) throw new Error(res.status);
+    const data = await res.json();
+
+    $('recipes').innerHTML = '';
+    for (const r of data.recipes) {
+      const div = document.createElement('div');
+      div.className = 'recipe';
+      div.innerHTML = `<b></b><div class="row uses"></div><div class="row miss"></div>
+                       <div class="row np"></div><button>＋ Add missing to list</button>`;
+      div.querySelector('b').textContent = r.title;
+      div.querySelector('.uses').textContent = 'Uses: ' + (r.uses || []).join(', ');
+      div.querySelector('.miss').textContent = 'Missing: ' + (r.missing || []).join(', ');
+      div.querySelector('.np').textContent =
+        (r.new_plants || []).length ? `+${r.new_plants.length} new plants: ${r.new_plants.join(', ')}` : '';
+      const btn = div.querySelector('button');
+      if ((r.missing || []).length)
+        btn.onclick = () => { r.missing.forEach(addFromIdeas); btn.disabled = true; btn.textContent = '✓ added'; };
+      else btn.remove();
+      $('recipes').appendChild(div);
+    }
+    if (!data.recipes.length)
+      $('recipes').innerHTML = '<div class="status">No recipes yet — buy a few things first.</div>';
+
+    for (const s of data.diversity) {
+      const chip = document.createElement('span');
+      chip.className = 'pchip new';
+      chip.textContent = `＋ ${s.buy}（${s.plant}）`;
+      chip.onclick = () => { addFromIdeas(s.buy); chip.remove(); };
+      $('diversity').appendChild(chip);
+    }
+  } catch (e) {
+    $('recipes').innerHTML =
+      '<div class="status">Kitchen brain (DGX LLM) is unreachable — the list and sync still work fine.</div>';
+  }
 }
 
 /* ============ boot ============ */
