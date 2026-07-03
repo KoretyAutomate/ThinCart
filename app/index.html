@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#2f6f4f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<title>PlantCart</title>
+<style>
+  :root {
+    --green:#2f6f4f; --green-dark:#245840; --bg:#f6f7f4; --card:#fff;
+    --text:#1d2b23; --muted:#7a8a80; --amber:#c77b1e; --red:#b3402e;
+  }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; height:100%; }
+  body {
+    font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;
+    background:var(--bg); color:var(--text); display:flex; flex-direction:column;
+    padding:env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+  }
+  header {
+    background:var(--green); color:#fff; padding:12px 16px;
+    display:flex; align-items:center; gap:10px; position:sticky; top:0; z-index:10;
+  }
+  header h1 { font-size:1.15rem; margin:0; flex:1; font-weight:700; }
+  #pill {
+    font-size:.72rem; font-weight:600; padding:4px 10px; border-radius:999px;
+    background:#ffffff2b; color:#fff; white-space:nowrap;
+  }
+  #pill.synced::before  { content:"● "; color:#8ee6a1; }
+  #pill.syncing::before { content:"● "; color:#ffd479; }
+  #pill.offline::before { content:"● "; color:#ff9d8a; }
+  form#add {
+    display:flex; gap:8px; padding:12px 16px; background:var(--card);
+    border-bottom:1px solid #e3e7e0; position:sticky; top:48px; z-index:9;
+  }
+  #name {
+    flex:1; font-size:1rem; padding:10px 12px; border:1.5px solid #d4dcd4;
+    border-radius:10px; outline:none; min-width:0;
+  }
+  #name:focus { border-color:var(--green); }
+  #qty { width:74px; font-size:.9rem; padding:10px 8px; border:1.5px solid #d4dcd4; border-radius:10px; outline:none; }
+  button.add-btn {
+    background:var(--green); color:#fff; border:none; border-radius:10px;
+    font-size:1.3rem; width:46px; flex-shrink:0; cursor:pointer;
+  }
+  button.add-btn:active { background:var(--green-dark); }
+  main { flex:1; overflow-y:auto; padding:8px 12px 90px; }
+  .cat { font-size:.72rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
+         color:var(--muted); margin:14px 6px 6px; }
+  ul#list { list-style:none; margin:0; padding:0; }
+  li.item {
+    background:var(--card); border-radius:12px; margin-bottom:8px; padding:13px 14px;
+    display:flex; align-items:center; gap:12px; box-shadow:0 1px 2px #0000000a;
+    user-select:none; -webkit-user-select:none; cursor:pointer;
+  }
+  li.item.pending { opacity:.55; }
+  li.item .box {
+    width:22px; height:22px; border:2px solid #b9c6bc; border-radius:7px; flex-shrink:0;
+  }
+  li.item .nm { flex:1; font-size:1.02rem; overflow-wrap:anywhere; }
+  li.item .qty { color:var(--muted); font-size:.85rem; }
+  li.item .who { color:var(--muted); font-size:.72rem; }
+  #empty { text-align:center; color:var(--muted); margin-top:48px; font-size:.95rem; }
+  #toast {
+    position:fixed; left:50%; bottom:24px; transform:translateX(-50%);
+    background:#243b2f; color:#fff; padding:12px 16px; border-radius:12px;
+    display:none; align-items:center; gap:14px; font-size:.92rem; z-index:20;
+    box-shadow:0 4px 14px #00000040; max-width:92vw;
+  }
+  #toast button {
+    background:none; border:none; color:#8ee6a1; font-weight:700; font-size:.92rem;
+    cursor:pointer; padding:4px;
+  }
+  #sheet {
+    position:fixed; inset:0; background:#0007; display:none; z-index:30;
+    align-items:flex-end;
+  }
+  #sheet .card {
+    background:var(--card); width:100%; border-radius:18px 18px 0 0; padding:20px 18px
+      calc(20px + env(safe-area-inset-bottom));
+  }
+  #sheet h2 { margin:0 0 4px; font-size:1.05rem; }
+  #sheet p { margin:0 0 16px; color:var(--muted); font-size:.88rem; }
+  #sheet button {
+    width:100%; padding:14px; border-radius:12px; border:none; font-size:1rem;
+    font-weight:600; margin-bottom:10px; cursor:pointer;
+  }
+  #sheet .danger { background:#fbe9e5; color:var(--red); }
+  #sheet .cancel { background:#eef1ec; color:var(--text); }
+  #namedlg {
+    position:fixed; inset:0; background:var(--bg); z-index:40; display:none;
+    flex-direction:column; align-items:center; justify-content:center; gap:14px; padding:24px;
+  }
+  #namedlg input { font-size:1.1rem; padding:12px 14px; border:1.5px solid #d4dcd4;
+    border-radius:10px; width:min(320px,90vw); text-align:center; }
+  #namedlg button { background:var(--green); color:#fff; border:none; border-radius:10px;
+    padding:12px 28px; font-size:1rem; font-weight:600; cursor:pointer; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🌱 PlantCart</h1>
+  <span id="pill" class="syncing">connecting…</span>
+</header>
+
+<form id="add" autocomplete="off">
+  <input id="name" placeholder="Add item… (牛乳, apples, …)" enterkeyhint="done">
+  <input id="qty" placeholder="qty">
+  <button class="add-btn" type="submit" aria-label="Add">＋</button>
+</form>
+
+<main>
+  <ul id="list"></ul>
+  <div id="empty" hidden>List is empty — nice work 🎉</div>
+</main>
+
+<div id="toast"><span id="toastmsg"></span><button id="undo">UNDO</button></div>
+
+<div id="sheet"><div class="card">
+  <h2 id="sheet-title"></h2>
+  <p>Remove takes it off the list <b>without</b> counting as a purchase.</p>
+  <button class="danger" id="sheet-remove">Remove (didn’t buy)</button>
+  <button class="cancel" id="sheet-cancel">Cancel</button>
+</div></div>
+
+<div id="namedlg">
+  <h2>Who are you?</h2>
+  <input id="myname" placeholder="Your name" maxlength="20">
+  <button id="namego">Start</button>
+</div>
+
+<script>
+'use strict';
+/* ============ state ============
+ * base   — last full state from the server (source of truth)
+ * queue  — pending ops not yet ACKed (persisted in localStorage; survives
+ *          reloads and dead zones). View = queue applied on top of base.  */
+const $ = id => document.getElementById(id);
+const uuid = () => crypto.randomUUID();
+const LS = { name:'pc_name', queue:'pc_queue', base:'pc_base' };
+
+let base  = JSON.parse(localStorage.getItem(LS.base)  || '{"revision":0,"items":[]}');
+let queue = JSON.parse(localStorage.getItem(LS.queue) || '[]');
+let actor = localStorage.getItem(LS.name) || '';
+let flushing = false, ws = null, wsDelay = 1000, lastToast = null;
+
+const saveQueue = () => localStorage.setItem(LS.queue, JSON.stringify(queue));
+const saveBase  = () => localStorage.setItem(LS.base, JSON.stringify(base));
+
+/* canonical() twin of server db.canonical — NFKC fold handles full-width JP */
+const canon = s => s.normalize('NFKC').toLowerCase().trim().replace(/\s+/g,' ');
+
+/* ============ view = base + pending ops ============ */
+function view() {
+  let items = base.items.map(i => ({...i}));
+  for (const op of queue) {
+    if (op.type === 'add') {
+      if (!items.some(i => canon(i.name) === canon(op.name)))
+        items.push({ id:op.item_id, name:op.name, qty_note:op.qty_note||'',
+                     added_by:op.actor, category:null, pending:true });
+    } else if (op.type === 'checkoff' || op.type === 'remove') {
+      items = items.filter(i => i.id !== op.item_id);
+    }
+  }
+  return items;
+}
+
+function render() {
+  const items = view(), list = $('list');
+  list.innerHTML = '';
+  $('empty').hidden = items.length > 0;
+  let lastCat = undefined;
+  for (const it of items) {
+    const cat = it.category || 'other';
+    if (cat !== lastCat && items.some(i => i.category)) {
+      const h = document.createElement('div');
+      h.className = 'cat'; h.textContent = cat;
+      list.appendChild(h); lastCat = cat;
+    }
+    const li = document.createElement('li');
+    li.className = 'item' + (it.pending ? ' pending' : '');
+    li.dataset.id = it.id;
+    li.innerHTML = `<span class="box"></span><span class="nm"></span>
+                    <span class="qty"></span><span class="who"></span>`;
+    li.querySelector('.nm').textContent  = it.name;
+    li.querySelector('.qty').textContent = it.qty_note || '';
+    li.querySelector('.who').textContent = it.added_by || '';
+    attachGestures(li, it);
+    list.appendChild(li);
+  }
+}
+
+/* ============ gestures: tap=checkoff, long-press=remove sheet ============ */
+function attachGestures(li, it) {
+  let timer = null, longFired = false;
+  li.addEventListener('pointerdown', () => {
+    longFired = false;
+    timer = setTimeout(() => { longFired = true; openSheet(it); }, 550);
+  });
+  const cancel = () => clearTimeout(timer);
+  li.addEventListener('pointermove', cancel);
+  li.addEventListener('pointercancel', cancel);
+  li.addEventListener('pointerup', () => {
+    clearTimeout(timer);
+    if (!longFired) checkoff(it);
+  });
+  li.addEventListener('contextmenu', e => e.preventDefault());
+}
+
+function openSheet(it) {
+  $('sheet-title').textContent = it.name;
+  $('sheet').style.display = 'flex';
+  $('sheet-remove').onclick = () => { $('sheet').style.display='none'; enqueue({type:'remove', item_id:it.id}); };
+}
+$('sheet-cancel').onclick = () => $('sheet').style.display = 'none';
+$('sheet').onclick = e => { if (e.target === $('sheet')) $('sheet').style.display='none'; };
+
+/* ============ ops ============ */
+function enqueue(fields) {
+  const op = { op_id: uuid(), actor, ...fields };
+  queue.push(op); saveQueue(); render(); flush();
+  return op;
+}
+
+function checkoff(it) {
+  const op = enqueue({ type:'checkoff', item_id: it.id });
+  showToast(`✓ ${it.name}`, () => {
+    // undo: if the checkoff is still queued locally, just retract it;
+    // otherwise ask the server to delete the purchase_event + restore.
+    const qi = queue.findIndex(o => o.op_id === op.op_id);
+    if (qi >= 0 && !op.sent) { queue.splice(qi,1); saveQueue(); render(); }
+    else enqueue({ type:'undo_checkoff', target_op_id: op.op_id });
+  });
+}
+
+$('add').addEventListener('submit', e => {
+  e.preventDefault();
+  const name = $('name').value.trim();
+  if (!name) return;
+  enqueue({ type:'add', name, qty_note:$('qty').value.trim(), item_id: uuid() });
+  $('name').value = ''; $('qty').value = '';
+  $('name').focus();
+});
+
+/* ============ toast ============ */
+let toastTimer = null;
+function showToast(msg, onUndo) {
+  $('toastmsg').textContent = msg;
+  $('toast').style.display = 'flex';
+  $('undo').onclick = () => { hideToast(); onUndo(); };
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(hideToast, 8000);
+}
+const hideToast = () => $('toast').style.display = 'none';
+
+/* ============ queue flush (sequential, idempotent server-side) ============ */
+async function flush() {
+  if (flushing) return;
+  flushing = true;
+  setPill();
+  try {
+    while (queue.length) {
+      const op = queue[0];
+      op.sent = true;
+      const res = await fetch('/api/op', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(op),
+      });
+      if (!res.ok && res.status < 500) { // rejected (422 etc.) — drop, don't wedge queue
+        console.error('op rejected', op, await res.text());
+        queue.shift(); saveQueue(); continue;
+      }
+      if (!res.ok) throw new Error('server ' + res.status);
+      const body = await res.json();
+      // dedupe remap: our optimistic uuid → the existing row's id
+      if (op.type === 'add' && body.result?.deduped && body.result.item_id !== op.item_id)
+        for (const q of queue) if (q.item_id === op.item_id) q.item_id = body.result.item_id;
+      queue.shift(); saveQueue();
+    }
+    await resync();
+  } catch (e) { /* offline — queue persists, retry on next trigger */ }
+  flushing = false;
+  setPill();
+}
+
+async function resync() {
+  const res = await fetch('/api/state');
+  if (res.ok) { base = await res.json(); saveBase(); render(); }
+}
+
+/* ============ websocket (downstream-only) + reconnect ============ */
+function connectWS() {
+  if (ws && (ws.readyState === 0 || ws.readyState === 1)) return;
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.onopen = () => { wsDelay = 1000; setPill(); flush(); };
+  ws.onmessage = ev => {
+    base = JSON.parse(ev.data); saveBase(); render(); setPill();
+  };
+  ws.onclose = () => {
+    setPill();
+    setTimeout(connectWS, wsDelay);
+    wsDelay = Math.min(wsDelay * 2, 15000);
+  };
+  ws.onerror = () => ws.close();
+}
+
+/* phone unlock / tab foreground / network back — the NORMAL in-store path */
+const wake = () => { connectWS(); flush(); };
+document.addEventListener('visibilitychange', () => { if (!document.hidden) wake(); });
+window.addEventListener('online', wake);
+window.addEventListener('pageshow', wake);
+
+function setPill() {
+  const pill = $('pill');
+  const live = ws && ws.readyState === 1;
+  if (live && !queue.length)      { pill.className='synced';  pill.textContent='synced'; }
+  else if (queue.length && !live) { pill.className='offline'; pill.textContent=`offline · ${queue.length} pending`; }
+  else if (queue.length)          { pill.className='syncing'; pill.textContent='syncing…'; }
+  else                            { pill.className='offline'; pill.textContent='reconnecting…'; }
+}
+
+/* ============ boot ============ */
+function boot() {
+  if (!actor) {
+    $('namedlg').style.display = 'flex';
+    $('namego').onclick = () => {
+      const v = $('myname').value.trim();
+      if (!v) return;
+      actor = v; localStorage.setItem(LS.name, v);
+      $('namedlg').style.display = 'none';
+    };
+  }
+  render();       // instant paint from cached base (offline-first)
+  connectWS();
+  flush();
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');
+}
+boot();
+</script>
+</body>
+</html>

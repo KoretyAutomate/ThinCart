@@ -12,8 +12,13 @@ off-the-shelf app offers:
    (gut-microbiome guideline), and use the local DGX LLM to suggest recipes and
    new plants that diversify the diet.
 
-> Status: **agent-reviewed 2026-07-03 — pending user approval**
-> (new-infrastructure ULTRAPLAN gate applies: new service + new DB).
+> Status: **approved by user 2026-07-03 — Phase 0 BUILT & verified** (11/11
+> contract tests + live two-client WS test; service live on :8123, backup timer
+> on). Wife's phone confirmed **iPhone**. Implementation deltas: item ids are
+> client-generated UUIDs (offline add→checkoff chains work in dead zones);
+> op queue lives in localStorage, not IndexedDB (page-JS-only, tiny payload).
+> Blocked on user: enable Tailscale Serve + HTTPS certs (see README §setup),
+> then the two-phone in-store test gates Phase 0 done.
 
 ---
 

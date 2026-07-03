@@ -1,0 +1,9 @@
+WS connect state: {'revision': 0, 'items': []}
+add ACK: True rev 1
+WS push after add: ['牛乳'] rev 1
+checkoff: {'event_id': 1, 'item': {'catalog_id': 1, 'qty_note': '1L', 'added_by': 'korehito', 'added_at': '2026-07-03T20:49:11+00:00'}} | replay: True
+WS push after checkoff: item gone, rev 2
+undo: {'item_id': 'b5e2c479-2ce5-4768-8717-52db0afb607a', 'undone_event': 1}
+WS push after undo: 牛乳 restored
+final state: {'revision': 4, 'items': []}
+LIVE SYNC TEST: ALL ASSERTIONS PASSED

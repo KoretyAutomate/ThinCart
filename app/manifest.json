@@ -1,0 +1,13 @@
+{
+  "name": "PlantCart",
+  "short_name": "PlantCart",
+  "description": "Shared shopping list with purchase-cycle and plant-diversity intelligence",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f6f7f4",
+  "theme_color": "#2f6f4f",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

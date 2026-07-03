@@ -1,0 +1,20 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.11, pytest-9.0.2, pluggy-1.5.0 -- /home/korety/miniconda3/bin/python3
+cachedir: .pytest_cache
+rootdir: /home/korety/Project/_ideas/shopping-list
+plugins: anyio-4.12.0, langsmith-0.5.1
+collecting ... collected 11 items
+
+tests/test_ops.py::test_add_and_state PASSED                             [  9%]
+tests/test_ops.py::test_add_idempotent_per_canonical_name PASSED         [ 18%]
+tests/test_ops.py::test_op_replay_is_reacked_not_reapplied PASSED        [ 27%]
+tests/test_ops.py::test_checkoff_logs_event_and_removes PASSED           [ 36%]
+tests/test_ops.py::test_remove_logs_no_event PASSED                      [ 45%]
+tests/test_ops.py::test_checkoff_vs_remove_race_is_noop PASSED           [ 54%]
+tests/test_ops.py::test_undo_checkoff_deletes_event_and_restores_item PASSED [ 63%]
+tests/test_ops.py::test_undo_of_unknown_op_is_noop PASSED                [ 72%]
+tests/test_ops.py::test_revision_monotonic_and_replay_does_not_bump PASSED [ 81%]
+tests/test_ops.py::test_websocket_broadcasts_after_op PASSED             [ 90%]
+tests/test_ops.py::test_rejects_garbage PASSED                           [100%]
+
+============================== 11 passed in 0.29s ==============================
