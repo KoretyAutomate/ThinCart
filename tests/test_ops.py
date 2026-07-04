@@ -170,3 +170,31 @@ def test_suggestions_and_snooze_flow():
     assert "snoozed_until" in res.json()["result"]
     assert not [s for s in client.get("/api/state").json()["suggestions"]
                 if s["catalog_id"] == cid]
+
+
+def test_cycles_endpoint_full_list():
+    """/api/cycles: every learned cycle, most-due first, due/on_list flags."""
+    from datetime import datetime, timedelta, timezone
+
+    t0 = datetime.now(timezone.utc)
+    fixtures = {"cyc_overdue": (7, 9), "cyc_fresh": (7, 1), "cyc_lapsed": (7, 100)}
+    for name, (interval, since) in fixtures.items():
+        cid = db.get_or_create_catalog(appmod.conn, name)
+        for k in range(4):
+            appmod.conn.execute(
+                "INSERT INTO purchase_events(catalog_id, bought_at) VALUES(?,?)",
+                (cid, (t0 - timedelta(days=since + interval * (3 - k))).isoformat(timespec="seconds")))
+    appmod.conn.commit()
+
+    rows = {c["name"]: c for c in client.get("/api/cycles").json()["cycles"]}
+    assert rows["cyc_overdue"]["due"] and rows["cyc_overdue"]["label"] == "weekly"
+    assert not rows["cyc_fresh"]["due"]      # bought yesterday
+    assert not rows["cyc_lapsed"]["due"]     # retired, but still visible in the list
+    scores = [c["score"] for c in client.get("/api/cycles").json()["cycles"]]
+    assert scores == sorted(scores, reverse=True)
+    # an item currently on the list is flagged and not due
+    iid = str(uuid.uuid4())
+    op(type="add", name="cyc_overdue", item_id=iid)
+    row = [c for c in client.get("/api/cycles").json()["cycles"] if c["name"] == "cyc_overdue"][0]
+    assert row["on_list"] and not row["due"]
+    op(type="remove", item_id=iid)

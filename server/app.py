@@ -266,6 +266,41 @@ async def get_catalog():
     ]}
 
 
+@app.get("/api/cycles")
+async def get_cycles():
+    """Every item with a learned cycle (≥3 coalesced purchases): the full
+    suggestion list + what the engine knows, most-due first."""
+    now = datetime.now(timezone.utc)
+    on_list = {r["catalog_id"] for r in conn.execute("SELECT catalog_id FROM items")}
+    out = []
+    for cid, ts in db.purchase_history(conn).items():
+        m = cycles.median_interval_days(ts)
+        if not m:
+            continue
+        since = (now - cycles.coalesce(ts)[-1]).total_seconds() / 86400
+        row = conn.execute(
+            "SELECT display_name, aliases_json, snoozed_until FROM item_catalog WHERE id=?",
+            (cid,),
+        ).fetchone()
+        score = since / m
+        out.append({
+            "catalog_id": cid,
+            "name": row["display_name"],
+            "name_en": db.name_en(row["aliases_json"], row["display_name"]),
+            "label": cycles.cycle_label(m),
+            "median_days": round(m, 1),
+            "days_since": round(since, 1),
+            "score": round(score, 2),
+            "due": cycles.DUE_MIN <= score <= cycles.DUE_MAX
+                   and cid not in on_list
+                   and not (row["snoozed_until"]
+                            and row["snoozed_until"] > now.isoformat(timespec="seconds")),
+            "on_list": cid in on_list,
+        })
+    out.sort(key=lambda x: -x["score"])
+    return {"cycles": out}
+
+
 IDEAS_TTL_H = 6
 ideas_cache: dict = {"data": None, "at": None}
 

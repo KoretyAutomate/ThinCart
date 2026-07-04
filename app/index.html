@@ -163,6 +163,29 @@
   #ideas .status { text-align:center; color:var(--muted); margin:40px 12px; font-size:.92rem; }
   #ideas .topbtn { background:#ffffff2b; border:none; color:#fff; font-size:.8rem;
     font-weight:700; padding:5px 12px; border-radius:999px; cursor:pointer; }
+  #tray .tray-label { cursor:pointer; }
+  #tray .tray-label::after { content:' ▸'; color:var(--green); }
+  .chip.more { background:#eef1ec; border-style:solid; border-color:#d4dcd4; color:var(--muted); }
+  #cyc { position:fixed; inset:0; background:var(--bg); z-index:35; display:none;
+         flex-direction:column; }
+  #cyc header { position:static; }
+  #cyc .body { flex:1; overflow-y:auto; padding:14px 16px 40px; }
+  #cyc h3 { font-size:.78rem; letter-spacing:.08em; text-transform:uppercase;
+            color:var(--muted); margin:18px 2px 8px; }
+  #cyc .topbtn { background:#ffffff2b; border:none; color:#fff; font-size:.8rem;
+    font-weight:700; padding:5px 12px; border-radius:999px; cursor:pointer; }
+  .cycrow { background:var(--card); border-radius:12px; padding:12px 14px; margin-bottom:8px;
+            display:flex; align-items:center; gap:10px; box-shadow:0 1px 2px #0000000a; }
+  .cycrow.due { border-left:4px solid var(--green); cursor:pointer; }
+  .cycrow .nm { flex:1; font-size:.98rem; overflow-wrap:anywhere; }
+  .cycrow .meta { text-align:right; font-size:.74rem; color:var(--muted); line-height:1.5;
+                  white-space:nowrap; }
+  .cycrow .meta b { color:var(--green-dark); font-size:.8rem; }
+  .cycrow .bar { height:4px; border-radius:2px; background:#e6ece6; margin-top:5px;
+                 overflow:hidden; width:84px; }
+  .cycrow .bar i { display:block; height:100%; background:var(--green); }
+  .cycrow.over .bar i { background:var(--amber); }
+  .cyc-note { color:var(--muted); font-size:.8rem; margin:20px 2px; }
 </style>
 </head>
 <body>
@@ -181,8 +204,22 @@
 </form>
 
 <div id="tray">
-  <div class="tray-label" id="tray-label"></div>
+  <div class="tray-label" id="tray-label" role="button"></div>
   <div id="chips"></div>
+</div>
+
+<div id="cyc">
+  <header>
+    <h1 id="cyc-h1"></h1>
+    <button class="topbtn" id="cyc-close">✕</button>
+  </header>
+  <div class="body">
+    <h3 id="cyc-due-h"></h3>
+    <div id="cyc-due"></div>
+    <h3 id="cyc-all-h"></h3>
+    <div id="cyc-all"></div>
+    <p class="cyc-note" id="cyc-note"></p>
+  </div>
 </div>
 
 <main>
@@ -282,6 +319,12 @@ const STR = {
     uses:'Uses: ', missing:'Missing: ', add_missing:'＋ Add missing to list',
     added_btn:'✓ added', added:n=>`＋ ${n} added to list`,
     new_plants:(n,l)=>`+${n} new plants: ${l}`,
+    tray_more:n=>`+${n} more…`, cyc_title:'📊 Purchase cycles',
+    cyc_due_h:'Due now — tap to add', cyc_all_h:'Everything the app is tracking',
+    cyc_none_due:'Nothing due right now.',
+    cyc_none:'No learned cycles yet — items appear after 3 purchases.',
+    cyc_note:'An item earns a cycle after 3 purchases. It gets suggested at ~85% of its cycle and retires if 3× overdue (seasonal). ✓ = already on the list.',
+    last_bought:d=>`bought ${d}d ago`,
     cycles:{'twice a week':'twice a week', weekly:'weekly', 'bi-weekly':'bi-weekly',
             monthly:'monthly', occasional:'occasional'},
   },
@@ -304,6 +347,12 @@ const STR = {
     uses:'使う: ', missing:'足りない: ', add_missing:'＋ 足りない物をリストへ',
     added_btn:'✓ 追加済み', added:n=>`＋ ${n} をリストに追加`,
     new_plants:(n,l)=>`+${n}種の植物: ${l}`,
+    tray_more:n=>`他${n}件…`, cyc_title:'📊 購入サイクル',
+    cyc_due_h:'そろそろ買い時 — タップで追加', cyc_all_h:'追跡中のすべての品目',
+    cyc_none_due:'いま買い時のものはありません。',
+    cyc_none:'学習済みサイクルはまだありません — 3回購入すると表示されます。',
+    cyc_note:'3回購入するとサイクルを学習します。サイクルの約85%で提案され、3倍超過すると（季節品として）引退します。✓ = リストに追加済み。',
+    last_bought:d=>`${d}日前に購入`,
     cycles:{'twice a week':'週2回', weekly:'毎週', 'bi-weekly':'隔週',
             monthly:'毎月', occasional:'たまに'},
   },
@@ -339,6 +388,10 @@ function applyLang() {
   $('ideas-refresh').textContent = T().refresh;
   $('recipes-h').textContent = T().recipes_h;
   $('try-h').textContent = T().try_h;
+  $('cyc-h1').textContent = T().cyc_title;
+  $('cyc-due-h').textContent = T().cyc_due_h;
+  $('cyc-all-h').textContent = T().cyc_all_h;
+  $('cyc-note').textContent = T().cyc_note;
 }
 
 let catalog = JSON.parse(localStorage.getItem('pc_catalog') || '[]');
@@ -367,15 +420,17 @@ function view() {
   return items;
 }
 
+const TRAY_MAX = 5;
 function renderTray() {
   const chips = $('chips');
   chips.innerHTML = '';
   const listed = new Set(view().map(i => canon(i.name)));
   const pendingSnoozes = new Set(
     queue.filter(o => o.type === 'snooze').map(o => o.catalog_id));
-  const sugg = (base.suggestions || []).filter(s =>
+  const all = (base.suggestions || []).filter(s =>
     !listed.has(canon(s.name)) && !pendingSnoozes.has(s.catalog_id));
-  $('tray').style.display = sugg.length ? 'block' : 'none';
+  const sugg = all.slice(0, TRAY_MAX);
+  $('tray').style.display = all.length ? 'block' : 'none';
   for (const s of sugg) {
     const chip = document.createElement('span');
     chip.className = 'chip';
@@ -389,6 +444,51 @@ function renderTray() {
       enqueue({ type:'snooze', catalog_id:s.catalog_id });
     };
     chips.appendChild(chip);
+  }
+  if (all.length > TRAY_MAX) {
+    const more = document.createElement('span');
+    more.className = 'chip more';
+    more.textContent = T().tray_more(all.length - TRAY_MAX);
+    more.onclick = openCycles;
+    chips.appendChild(more);
+  }
+}
+
+/* ============ full suggestion / cycles panel ============ */
+$('tray-label').onclick = openCycles;
+$('cyc-close').onclick = () => $('cyc').style.display = 'none';
+
+async function openCycles() {
+  $('cyc').style.display = 'flex';
+  $('cyc-due').innerHTML = $('cyc-all').innerHTML = '<div class="cyc-note">…</div>';
+  try {
+    const res = await fetch('/api/cycles');
+    const rows = (await res.json()).cycles;
+    const mk = c => {
+      const div = document.createElement('div');
+      div.className = 'cycrow' + (c.due ? ' due' : '') + (c.score > 1.15 ? ' over' : '');
+      div.innerHTML = `<span class="nm"></span>
+        <span class="meta"><b></b><br><span class="ago"></span>
+        <span class="bar"><i></i></span></span>`;
+      div.querySelector('.nm').textContent = (c.due ? '＋ ' : '') + disp(c)
+        + (c.on_list ? ' ✓' : '');
+      div.querySelector('b').textContent = T().cycles[c.label] || c.label;
+      div.querySelector('.ago').textContent = T().last_bought(Math.round(c.days_since));
+      div.querySelector('.bar i').style.width = Math.min(c.score * 100, 100) + '%';
+      if (c.due) div.onclick = () => {
+        enqueue({ type:'add', name:c.name, qty_note:'', item_id: uuid() });
+        div.remove();
+        showToast(T().added(disp(c)), () => {});
+      };
+      return div;
+    };
+    const due = rows.filter(c => c.due), rest = rows.filter(c => !c.due);
+    $('cyc-due').innerHTML = due.length ? '' : `<div class="cyc-note">${T().cyc_none_due}</div>`;
+    due.forEach(c => $('cyc-due').appendChild(mk(c)));
+    $('cyc-all').innerHTML = rest.length ? '' : `<div class="cyc-note">${T().cyc_none}</div>`;
+    rest.forEach(c => $('cyc-all').appendChild(mk(c)));
+  } catch (e) {
+    $('cyc-due').innerHTML = `<div class="cyc-note">offline</div>`;
   }
 }
 
