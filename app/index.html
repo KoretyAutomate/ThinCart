@@ -411,17 +411,25 @@ function render() {
 
 /* ============ gestures: tap=checkoff, long-press=remove sheet ============ */
 function attachGestures(li, it) {
-  let timer = null, longFired = false;
-  li.addEventListener('pointerdown', () => {
-    longFired = false;
-    timer = setTimeout(() => { longFired = true; openSheet(it); }, 550);
+  /* Tap = click (down AND up on this item — a pointerup alone must never
+   * check anything off; the candidates dropdown closing mid-tap used to leak
+   * its pointerup onto the item underneath = ghost purchases).
+   * Long-press = 500 ms hold with <12 px movement (any-jitter cancellation
+   * made long-press unreachable on real phones). */
+  let timer = null, longFired = false, armed = false, sx = 0, sy = 0;
+  const disarm = () => { clearTimeout(timer); armed = false; };
+  li.addEventListener('pointerdown', e => {
+    armed = true; longFired = false; sx = e.clientX; sy = e.clientY;
+    timer = setTimeout(() => { longFired = true; openSheet(it); }, 500);
   });
-  const cancel = () => clearTimeout(timer);
-  li.addEventListener('pointermove', cancel);
-  li.addEventListener('pointercancel', cancel);
-  li.addEventListener('pointerup', () => {
-    clearTimeout(timer);
-    if (!longFired) checkoff(it);
+  li.addEventListener('pointermove', e => {
+    if (Math.hypot(e.clientX - sx, e.clientY - sy) > 12) disarm();  // scroll, not tap
+  });
+  li.addEventListener('pointercancel', disarm);
+  li.addEventListener('pointerup', () => clearTimeout(timer));
+  li.addEventListener('click', () => {
+    if (armed && !longFired) checkoff(it);
+    armed = false;
   });
   li.addEventListener('contextmenu', e => e.preventDefault());
 }
