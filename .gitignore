@@ -2,3 +2,12 @@ __pycache__/
 .pytest_cache/
 server/data/
 *.pyc
+*.db
+*.db-wal
+*.db-shm
+# secrets — never commit; .env.example is the tracked template
+.env
+mobile/node_modules/
+mobile/www/
+mobile/android/
+mobile/ios/

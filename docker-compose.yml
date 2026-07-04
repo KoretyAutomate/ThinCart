@@ -1,0 +1,24 @@
+# PlantCart SaaS — single container + a named volume for the SQLite DB.
+# Copy .env.example to .env and fill it in before `docker compose up -d`.
+services:
+  plantcart:
+    build: .
+    image: plantcart:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Force the DB onto the mounted volume regardless of what .env says.
+      PLANTCART_DB: /data/plantcart.db
+    ports:
+      - "8123:8123"
+    volumes:
+      - plantcart-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8123/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  plantcart-data:

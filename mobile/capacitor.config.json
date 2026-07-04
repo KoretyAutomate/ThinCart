@@ -1,0 +1,15 @@
+{
+  "appId": "com.plantcart.app",
+  "appName": "PlantCart",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https",
+    "cleartext": false
+  },
+  "plugins": {
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_plantcart",
+      "iconColor": "#2f6f4f"
+    }
+  }
+}

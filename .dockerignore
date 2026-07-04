@@ -1,0 +1,39 @@
+# Keep the build context small and never bake local state / secrets into the image.
+.git
+.gitignore
+
+# Local database + runtime data (belongs on a volume, not in the image)
+server/data
+**/data
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Python caches
+__pycache__
+**/__pycache__
+*.pyc
+.pytest_cache
+
+# Test + CI artifacts
+test_results
+tests
+
+# Secrets / local env
+.env
+.env.*
+!.env.example
+
+# JS / mobile build output
+node_modules
+android
+ios
+build
+dist
+
+# Editor / OS cruft
+.vscode
+.idea
+.DS_Store

@@ -1,0 +1,55 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.11, pytest-9.0.2, pluggy-1.5.0 -- /home/korety/miniconda3/bin/python3
+cachedir: .pytest_cache
+rootdir: /home/korety/Project/_ideas/plantcart-saas
+plugins: anyio-4.12.0, langsmith-0.5.1
+collecting ... collected 22 items
+
+tests/test_cycles.py::test_weekly_item PASSED                            [  4%]
+tests/test_cycles.py::test_biweekly_with_one_skip PASSED                 [  9%]
+tests/test_cycles.py::test_burst_coalescing PASSED                       [ 13%]
+tests/test_cycles.py::test_too_few_events_gives_none PASSED              [ 18%]
+tests/test_cycles.py::test_due_scoring_window PASSED                     [ 22%]
+tests/test_cycles.py::test_suggest_orders_and_filters PASSED             [ 27%]
+tests/test_cycles.py::test_bin_labels PASSED                             [ 31%]
+tests/test_saas.py::test_register_login_and_bad_password PASSED          [ 36%]
+tests/test_saas.py::test_unauthenticated_endpoints_401 PASSED            [ 40%]
+tests/test_saas.py::test_duplicate_email_rejected PASSED                 [ 45%]
+tests/test_saas.py::test_two_households_lists_are_isolated PASSED        [ 50%]
+tests/test_saas.py::test_join_by_code_shares_one_list PASSED             [ 54%]
+tests/test_saas.py::test_catalog_frequency_ranking_is_household_scoped PASSED [ 59%]
+tests/test_saas.py::test_cycles_and_plants_scoped PASSED                 [ 63%]
+tests/test_saas.py::test_op_replay_scoped_single_event PASSED            [ 68%]
+tests/test_saas.py::test_skip_no_event_checkoff_event PASSED             [ 72%]
+tests/test_saas.py::test_undo_cannot_cross_households PASSED             [ 77%]
+tests/test_saas.py::test_account_delete_purges_and_revokes_token PASSED  [ 81%]
+tests/test_saas.py::test_delete_keeps_household_for_remaining_member PASSED [ 86%]
+tests/test_saas.py::test_ideas_cache_is_per_household PASSED             [ 90%]
+tests/test_saas.py::test_ws_requires_ticket_and_is_room_scoped PASSED    [ 95%]
+tests/test_saas.py::test_enrichment_merge_cannot_repoint_other_household PASSED [100%]
+
+=============================== warnings summary ===============================
+server/app.py:345
+  /home/korety/Project/_ideas/plantcart-saas/server/app.py:345: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @app.on_event("startup")
+
+../../../miniconda3/lib/python3.13/site-packages/fastapi/applications.py:4576
+  /home/korety/miniconda3/lib/python3.13/site-packages/fastapi/applications.py:4576: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    return self.router.on_event(event_type)
+
+tests/test_saas.py::test_enrichment_merge_cannot_repoint_other_household
+  /home/korety/Project/_ideas/plantcart-saas/tests/test_saas.py:303: DeprecationWarning: There is no current event loop
+    asyncio.get_event_loop().run_until_complete(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================== 22 passed, 3 warnings in 5.49s ========================

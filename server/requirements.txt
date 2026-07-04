@@ -1,3 +1,7 @@
 fastapi
-uvicorn
+uvicorn[standard]
 httpx
+pydantic[email]
+pyjwt
+bcrypt
+anthropic

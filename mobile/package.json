@@ -1,0 +1,19 @@
+{
+  "name": "plantcart-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PlantCart — native mobile wrapper (Capacitor) that bundles the PWA and hits a remote PlantCart API.",
+  "scripts": {
+    "copy-web": "rm -rf www && mkdir -p www && cp -R ../app/. www/ && cp api-base.js www/api-base.js",
+    "sync": "npm run copy-web && cap sync",
+    "build:android": "npm run sync && cd android && ./gradlew assembleDebug",
+    "open:ios": "npm run sync && cap open ios"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.2.1",
+    "@capacitor/cli": "^6.2.1",
+    "@capacitor/core": "^6.2.1",
+    "@capacitor/ios": "^6.2.1",
+    "@capacitor/local-notifications": "^6.1.3"
+  }
+}

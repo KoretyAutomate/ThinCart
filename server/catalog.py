@@ -14,19 +14,20 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 
+import config
 import llm
 
 log = logging.getLogger("plantcart.catalog")
 
-SEARX_URL = "http://127.0.0.1:8080/search"
-
 
 async def web_evidence(name: str) -> list[str] | None:
-    """Quick local-SearXNG lookup: top result titles, or None if search is down.
-    Used only to judge whether a NEW user-typed item is real vs a typo."""
+    """Quick SearXNG lookup: top result titles, or None if search is unconfigured
+    or down. Used only to judge whether a NEW user-typed item is real vs a typo."""
+    if not config.SEARX_URL:
+        return None
     try:
         async with httpx.AsyncClient(timeout=6) as client:
-            r = await client.get(SEARX_URL, params={"q": name, "format": "json"})
+            r = await client.get(config.SEARX_URL, params={"q": name, "format": "json"})
             r.raise_for_status()
             return [x.get("title", "") for x in r.json().get("results", [])[:5]]
     except Exception:
@@ -117,10 +118,23 @@ async def enrich(conn, write_lock, catalog_id: int) -> bool:
     async with write_lock:
         target = None
         if mergeable and alias_of and alias_of != row["canonical_name"]:
-            target = conn.execute(
-                "SELECT id, aliases_json FROM item_catalog WHERE canonical_name=?",
-                (alias_of,),
-            ).fetchone()
+            # SAFETY (multi-tenant): a destructive merge repoints items+events for
+            # THIS shared catalog row across ALL households. Only allow it when the
+            # row is touched by at most one household — i.e. it's a fresh user-typed
+            # variant, not a shared corpus row multiple households already use. This
+            # stops one tenant's (possibly hallucinated) alias_of from corrupting
+            # everyone's history.
+            households_touching = {
+                r["hh"] for r in conn.execute(
+                    "SELECT DISTINCT household_id AS hh FROM purchase_events WHERE catalog_id=? "
+                    "UNION SELECT DISTINCT household_id AS hh FROM items WHERE catalog_id=?",
+                    (row["id"], row["id"]))
+            }
+            if len(households_touching) <= 1:
+                target = conn.execute(
+                    "SELECT id, aliases_json FROM item_catalog WHERE canonical_name=?",
+                    (alias_of,),
+                ).fetchone()
         if target:
             # merge: repoint history + live items, record alias, drop this row
             conn.execute("UPDATE items SET catalog_id=? WHERE catalog_id=?",
@@ -168,31 +182,29 @@ async def sweep(conn, write_lock) -> int:
     return done
 
 
-def weekly_plants(conn, now=None, window_days: int = 7) -> list[str]:
-    """Distinct plants across purchases in the trailing window (rule-based, no LLM)."""
+def weekly_plants(conn, hid: str, now=None, window_days: int = 7) -> list[str]:
+    """Distinct plants across a HOUSEHOLD's purchases in the trailing window."""
     now = now or datetime.now(timezone.utc)
     cutoff = (now - timedelta(days=window_days)).isoformat(timespec="seconds")
     plants: set[str] = set()
     for r in conn.execute(
         """SELECT DISTINCT c.plants_json FROM purchase_events e
            JOIN item_catalog c ON c.id = e.catalog_id
-           WHERE e.bought_at >= ? AND c.plants_json IS NOT NULL""",
-        (cutoff,),
+           WHERE e.household_id=? AND e.bought_at >= ? AND c.plants_json IS NOT NULL""",
+        (hid, cutoff),
     ):
         plants.update(json.loads(r["plants_json"]))
     return sorted(plants)
 
 
-def recent_purchases(conn, days: int = 10) -> list[dict]:
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(
-        timespec="seconds"
-    )
+def recent_purchases(conn, hid: str, days: int = 10) -> list[dict]:
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(timespec="seconds")
     return [
         dict(r)
         for r in conn.execute(
             """SELECT DISTINCT c.display_name AS name, c.plants_json
                FROM purchase_events e JOIN item_catalog c ON c.id = e.catalog_id
-               WHERE e.bought_at >= ? AND c.is_edible = 1""",
-            (cutoff,),
+               WHERE e.household_id=? AND e.bought_at >= ? AND c.is_edible = 1""",
+            (hid, cutoff),
         )
     ]

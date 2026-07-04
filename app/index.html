@@ -122,6 +122,41 @@
     border-radius:10px; width:min(320px,90vw); text-align:center; }
   #namedlg button { background:var(--green); color:#fff; border:none; border-radius:10px;
     padding:12px 28px; font-size:1rem; font-weight:600; cursor:pointer; }
+  #auth {
+    position:fixed; inset:0; background:var(--bg); z-index:50; display:none;
+    align-items:center; justify-content:center; padding:24px;
+  }
+  .auth-card { width:min(360px,92vw); display:flex; flex-direction:column; gap:11px; }
+  .auth-card h1 { text-align:center; color:var(--green); margin:0 0 2px; }
+  #auth-tagline { text-align:center; color:var(--muted); margin:0 0 8px; font-size:.9rem; }
+  .auth-card input { font-size:1rem; padding:12px 14px; border:1.5px solid #d4dcd4;
+    border-radius:10px; outline:none; }
+  .auth-card input:focus { border-color:var(--green); }
+  .auth-card #au-go { background:var(--green); color:#fff; border:none; border-radius:10px;
+    padding:13px; font-size:1rem; font-weight:700; cursor:pointer; margin-top:4px; }
+  .auth-switch { text-align:center; font-size:.85rem; color:var(--muted); margin-top:6px; }
+  .auth-switch a { color:var(--green-dark); cursor:pointer; text-decoration:underline; }
+  .auth-err { color:var(--red); font-size:.85rem; text-align:center; min-height:1em; }
+  #auth.mode-login #au-name, #auth.mode-login #au-code,
+  #auth.mode-join #au-name, #auth.mode-join #au-email, #auth.mode-join #au-pass,
+  #auth.mode-register #au-code { display:none; }
+  #settings { position:fixed; inset:0; background:#0007; display:none; z-index:45;
+    align-items:flex-end; }
+  #settings .card { background:var(--card); width:100%; border-radius:18px 18px 0 0;
+    padding:20px 18px calc(20px + env(safe-area-inset-bottom)); }
+  #settings h2 { margin:0 0 12px; font-size:1.05rem; }
+  #settings button { width:100%; padding:13px; border-radius:12px; border:none;
+    font-size:1rem; font-weight:600; margin-bottom:10px; cursor:pointer; }
+  #settings .cancel { background:#eef1ec; color:var(--text); }
+  #settings .danger { background:#fbe9e5; color:var(--red); }
+  .set-row { display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; }
+  .invite { font-family:ui-monospace,monospace; font-size:1.3rem; letter-spacing:.15em;
+    color:var(--green-dark); }
+  .set-hint { color:var(--muted); font-size:.8rem; margin:0 0 14px; }
+  #set-code { font-size:1rem; padding:11px; border:1.5px solid #d4dcd4; border-radius:10px;
+    width:100%; margin-bottom:10px; text-transform:uppercase; }
+  #settingsBtn { background:#ffffff2b; border:none; color:#fff; font-size:1rem;
+    padding:5px 9px; border-radius:999px; cursor:pointer; }
   #tray { padding:10px 12px 0; display:none; }
   #tray .tray-label { font-size:.72rem; font-weight:700; letter-spacing:.08em;
     text-transform:uppercase; color:var(--muted); margin:0 6px 6px; }
@@ -193,6 +228,7 @@
   <h1>PlantCart</h1>
   <button id="lang">🌐 EN</button>
   <button id="plants">🌱 –/30</button>
+  <button id="settingsBtn" aria-label="Account">⚙</button>
   <span id="pill" class="syncing">…</span>
 </header>
 
@@ -259,6 +295,35 @@
   <button id="namego"></button>
 </div>
 
+<div id="auth">
+  <div class="auth-card">
+    <h1>🌱 PlantCart</h1>
+    <p id="auth-tagline"></p>
+    <div id="auth-err" class="auth-err"></div>
+    <input id="au-name" placeholder="Name" maxlength="40">
+    <input id="au-email" type="email" placeholder="Email" autocomplete="email">
+    <input id="au-pass" type="password" placeholder="Password (min 8)" autocomplete="current-password">
+    <input id="au-code" placeholder="Invite code (to join a partner)" maxlength="12">
+    <button id="au-go"></button>
+    <div class="auth-switch">
+      <a id="au-to-login"></a> · <a id="au-to-register"></a> · <a id="au-to-join"></a>
+    </div>
+  </div>
+</div>
+
+<div id="settings">
+  <div class="card">
+    <h2 id="set-h"></h2>
+    <div class="set-row"><span id="set-invite-label"></span>
+      <b id="set-invite" class="invite"></b></div>
+    <p id="set-invite-hint" class="set-hint"></p>
+    <button class="cancel" id="set-join"></button>
+    <button class="cancel" id="set-logout"></button>
+    <button class="danger" id="set-delete"></button>
+    <button class="cancel" id="set-close"></button>
+  </div>
+</div>
+
 <script>
 'use strict';
 /* ============ state ============
@@ -275,7 +340,14 @@ const uuid = () => {
   const h = [...b].map(x => x.toString(16).padStart(2, '0')).join('');
   return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;
 };
-const LS = { name:'pc_name', queue:'pc_queue', base:'pc_base' };
+const LS = { name:'pc_name', queue:'pc_queue', base:'pc_base', token:'pc_token', hh:'pc_hh', catalog:'pc_catalog' };
+
+/* API base: same-origin for the web build; the native (Capacitor) build injects
+ * window.PLANTCART_API_BASE = "https://your-host" so bundled assets hit the
+ * hosted backend. WS derives from the same base. */
+const API = (window.PLANTCART_API_BASE || '').replace(/\/$/, '');
+let TOKEN = localStorage.getItem(LS.token) || '';
+let household = JSON.parse(localStorage.getItem(LS.hh) || 'null');
 
 let base  = JSON.parse(localStorage.getItem(LS.base)  || '{"revision":0,"items":[]}');
 let queue = JSON.parse(localStorage.getItem(LS.queue) || '[]');
@@ -284,6 +356,30 @@ let flushing = false, ws = null, wsDelay = 1000, lastToast = null;
 
 const saveQueue = () => localStorage.setItem(LS.queue, JSON.stringify(queue));
 const saveBase  = () => localStorage.setItem(LS.base, JSON.stringify(base));
+
+/* authed fetch wrapper: prefixes API base, attaches Bearer token, and on a 401
+ * (expired / deleted account) drops to the login screen instead of looping. */
+async function api(path, opts = {}) {
+  const headers = { ...(opts.headers || {}) };
+  if (opts.body) headers['Content-Type'] = 'application/json';
+  if (TOKEN) headers['Authorization'] = 'Bearer ' + TOKEN;
+  const res = await fetch(API + path, { ...opts, headers });
+  if (res.status === 401 && TOKEN) { logout(); throw new Error('unauthorized'); }
+  return res;
+}
+
+function setSession(tok, hh) {
+  TOKEN = tok; household = hh;
+  localStorage.setItem(LS.token, tok);
+  localStorage.setItem(LS.hh, JSON.stringify(hh));
+}
+function logout() {
+  TOKEN = ''; household = null;
+  [LS.token, LS.hh, LS.base, LS.queue, LS.catalog].forEach(k => localStorage.removeItem(k));
+  base = { revision:0, items:[] }; queue = [];
+  if (ws) { try { ws.close(); } catch (_) {} ws = null; }
+  showAuth();
+}
 
 /* canonical() twin of server db.canonical — NFKC fold handles full-width JP */
 const canon = s => s.normalize('NFKC').toLowerCase().trim().replace(/\s+/g,' ');
@@ -319,6 +415,14 @@ const STR = {
     uses:'Uses: ', missing:'Missing: ', add_missing:'＋ Add missing to list',
     added_btn:'✓ added', added:n=>`＋ ${n} added to list`,
     new_plants:(n,l)=>`+${n} new plants: ${l}`,
+    auth_tagline:'Your shared shopping list', a_login:'Log in', a_register:'Create account',
+    a_join:'Join a partner', a_to_login:'Log in', a_to_register:'Create account',
+    a_to_join:'Have an invite code?', a_err_fields:'Please fill in the fields.',
+    set_title:'Account & household', set_invite:'Invite code',
+    set_invite_hint:'Share this code so your partner can join and see the same list.',
+    set_join:'Join a different household', set_logout:'Log out',
+    set_delete:'Delete my account', set_join_prompt:'Enter invite code:',
+    set_delete_confirm:'Delete your account and data? This cannot be undone.',
     tray_more:n=>`+${n} more…`, cyc_title:'📊 Purchase cycles',
     cyc_due_h:'Due now — tap to add', cyc_all_h:'Everything the app is tracking',
     cyc_none_due:'Nothing due right now.',
@@ -347,6 +451,14 @@ const STR = {
     uses:'使う: ', missing:'足りない: ', add_missing:'＋ 足りない物をリストへ',
     added_btn:'✓ 追加済み', added:n=>`＋ ${n} をリストに追加`,
     new_plants:(n,l)=>`+${n}種の植物: ${l}`,
+    auth_tagline:'夫婦で共有する買い物リスト', a_login:'ログイン', a_register:'アカウント作成',
+    a_join:'パートナーに参加', a_to_login:'ログイン', a_to_register:'アカウント作成',
+    a_to_join:'招待コードをお持ちですか？', a_err_fields:'項目を入力してください。',
+    set_title:'アカウントと世帯', set_invite:'招待コード',
+    set_invite_hint:'このコードを共有すると、パートナーが同じリストに参加できます。',
+    set_join:'別の世帯に参加', set_logout:'ログアウト',
+    set_delete:'アカウントを削除', set_join_prompt:'招待コードを入力:',
+    set_delete_confirm:'アカウントとデータを削除しますか？元に戻せません。',
     tray_more:n=>`他${n}件…`, cyc_title:'📊 購入サイクル',
     cyc_due_h:'そろそろ買い時 — タップで追加', cyc_all_h:'追跡中のすべての品目',
     cyc_none_due:'いま買い時のものはありません。',
@@ -397,7 +509,7 @@ function applyLang() {
 let catalog = JSON.parse(localStorage.getItem('pc_catalog') || '[]');
 async function loadCatalog() {
   try {
-    const res = await fetch('/api/catalog');
+    const res = await api('/api/catalog');
     if (res.ok) {
       catalog = (await res.json()).catalog;
       localStorage.setItem('pc_catalog', JSON.stringify(catalog));
@@ -462,7 +574,7 @@ async function openCycles() {
   $('cyc').style.display = 'flex';
   $('cyc-due').innerHTML = $('cyc-all').innerHTML = '<div class="cyc-note">…</div>';
   try {
-    const res = await fetch('/api/cycles');
+    const res = await api('/api/cycles');
     const rows = (await res.json()).cycles;
     const mk = c => {
       const div = document.createElement('div');
@@ -691,9 +803,8 @@ async function flush() {
     while (queue.length) {
       const op = queue[0];
       op.sent = true;
-      const res = await fetch('/api/op', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify(op),
+      const res = await api('/api/op', {
+        method:'POST', body: JSON.stringify(op),
       });
       if (!res.ok && res.status < 500) { // rejected (422 etc.) — drop, don't wedge queue
         console.error('op rejected', op, await res.text());
@@ -713,16 +824,28 @@ async function flush() {
 }
 
 async function resync() {
-  const res = await fetch('/api/state');
+  const res = await api('/api/state');
   if (res.ok) { base = await res.json(); saveBase(); render(); }
   loadCatalog();  // picks up new items + enrichment updates for candidates
 }
 
 /* ============ websocket (downstream-only) + reconnect ============ */
-function connectWS() {
+/* Auth: fetch a short-lived single-use ticket over authed HTTP, then hand it to
+ * the WS handshake as ?ticket= (keeps the 30-day JWT out of the WS URL/logs). */
+function wsBase() {
+  const origin = API || location.origin;
+  return origin.replace(/^http/, 'ws');
+}
+async function connectWS() {
+  if (!TOKEN) return;
   if (ws && (ws.readyState === 0 || ws.readyState === 1)) return;
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  let ticket;
+  try {
+    const r = await api('/api/ws-ticket', { method:'POST' });
+    if (!r.ok) throw new Error('ticket ' + r.status);
+    ticket = (await r.json()).ticket;
+  } catch (e) { setTimeout(connectWS, wsDelay); return; }
+  ws = new WebSocket(`${wsBase()}/ws?ticket=${encodeURIComponent(ticket)}`);
   ws.onopen = () => { wsDelay = 1000; setPill(); flush(); };
   ws.onmessage = ev => {
     base = JSON.parse(ev.data); saveBase(); render(); setPill();
@@ -778,7 +901,7 @@ async function loadIdeas(refresh) {
   $('recipes').innerHTML = `<div class="status">${T().asking}</div>`;
   $('diversity').innerHTML = '';
   try {
-    const res = await fetch('/api/ideas' + (refresh ? '?refresh=1' : ''));
+    const res = await api('/api/ideas' + (refresh ? '?refresh=1' : ''));
     if (!res.ok) throw new Error(res.status);
     const data = await res.json();
 
@@ -815,23 +938,113 @@ async function loadIdeas(refresh) {
   }
 }
 
-/* ============ boot ============ */
-function boot() {
+/* ============ auth screen ============ */
+let authMode = 'login';
+function showAuth() {
   applyLang();
-  if (!actor) {
-    $('namedlg').style.display = 'flex';
-    $('namego').onclick = () => {
-      const v = $('myname').value.trim();
-      if (!v) return;
-      actor = v; localStorage.setItem(LS.name, v);
-      $('namedlg').style.display = 'none';
-    };
-  }
-  render();       // instant paint from cached base (offline-first)
+  setAuthMode(TOKEN ? 'login' : 'register');  // first-run users land on register
+  $('auth').style.display = 'flex';
+}
+function setAuthMode(m) {
+  authMode = m;
+  $('auth').className = 'mode-' + m;
+  $('auth').style.display = 'flex';
+  $('auth-err').textContent = '';
+  $('au-go').textContent = T()['a_' + m];
+  $('au-to-login').textContent = m === 'login' ? '' : T().a_to_login;
+  $('au-to-register').textContent = m === 'register' ? '' : T().a_to_register;
+  $('au-to-join').textContent = m === 'join' ? '' : T().a_to_join;
+}
+$('au-to-login').onclick = () => setAuthMode('login');
+$('au-to-register').onclick = () => setAuthMode('register');
+$('au-to-join').onclick = () => setAuthMode('join');
+
+$('au-go').onclick = async () => {
+  const name = $('au-name').value.trim(), email = $('au-email').value.trim();
+  const pass = $('au-pass').value, code = $('au-code').value.trim();
+  $('auth-err').textContent = '';
+  try {
+    let path, body;
+    if (authMode === 'register') {
+      if (!email || pass.length < 8) return err(T().a_err_fields);
+      path = '/api/auth/register'; body = { email, password: pass, display_name: name };
+    } else if (authMode === 'login') {
+      if (!email || !pass) return err(T().a_err_fields);
+      path = '/api/auth/login'; body = { email, password: pass };
+    } else {  // join: must already have a token (registered) OR log in first
+      if (!code) return err(T().a_err_fields);
+      if (!TOKEN) {  // join needs an account — register/login handled separately
+        if (!email || pass.length < 8) return err(T().a_err_fields);
+        const r0 = await fetch(API + '/api/auth/register', { method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ email, password: pass, display_name: name }) });
+        if (!r0.ok) return err((await r0.json()).detail || 'error');
+        const d0 = await r0.json(); setSession(d0.token, d0.household);
+      }
+      const rj = await api('/api/households/join', { method:'POST',
+        body: JSON.stringify({ invite_code: code }) });
+      if (!rj.ok) return err((await rj.json()).detail || 'error');
+      const dj = await rj.json();
+      setSession(dj.token, dj.household); actor = name || actor; enterApp(); return;
+    }
+    const res = await fetch(API + path, { method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    if (!res.ok) return err((await res.json()).detail || 'error');
+    const d = await res.json();
+    setSession(d.token, d.household);
+    actor = name || (d.household.members.find(m => m.user_id === d.user_id) || {}).display_name || '';
+    if (actor) localStorage.setItem(LS.name, actor);
+    enterApp();
+  } catch (e) { err(String(e.message || e)); }
+};
+const err = m => { $('auth-err').textContent = m; };
+
+/* ============ account / settings ============ */
+$('settingsBtn').onclick = () => {
+  $('set-h').textContent = T().set_title;
+  $('set-invite-label').textContent = T().set_invite;
+  $('set-invite').textContent = household ? household.invite_code : '——';
+  $('set-invite-hint').textContent = T().set_invite_hint;
+  $('set-join').textContent = T().set_join;
+  $('set-logout').textContent = T().set_logout;
+  $('set-delete').textContent = T().set_delete;
+  $('set-close').textContent = T().cancel;
+  $('settings').style.display = 'flex';
+};
+$('set-close').onclick = () => $('settings').style.display = 'none';
+$('settings').onclick = e => { if (e.target === $('settings')) $('settings').style.display='none'; };
+$('set-logout').onclick = () => { $('settings').style.display='none'; logout(); };
+$('set-join').onclick = async () => {
+  const code = (prompt(T().set_join_prompt) || '').trim();
+  if (!code) return;
+  const r = await api('/api/households/join', { method:'POST', body: JSON.stringify({ invite_code: code }) });
+  if (!r.ok) { alert((await r.json()).detail || 'error'); return; }
+  const d = await r.json(); setSession(d.token, d.household);
+  $('settings').style.display='none';
+  localStorage.removeItem(LS.base); base = { revision:0, items:[] };
+  enterApp();
+};
+$('set-delete').onclick = async () => {
+  if (!confirm(T().set_delete_confirm)) return;
+  await api('/api/account/delete', { method:'POST' }).catch(()=>{});
+  logout();
+};
+
+/* ============ boot ============ */
+function enterApp() {
+  $('auth').style.display = 'none';
+  $('settings').style.display = 'none';
+  applyLang();
+  render();
   connectWS();
   flush();
   loadCatalog();
+}
+function boot() {
+  applyLang();
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');
+  if (TOKEN) enterApp();      // returning user — cached token; a 401 will bounce to auth
+  else showAuth();
 }
 boot();
 </script>
