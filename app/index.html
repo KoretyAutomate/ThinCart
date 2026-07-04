@@ -65,11 +65,21 @@
          color:var(--muted); margin:14px 6px 6px; }
   ul#list { list-style:none; margin:0; padding:0; }
   li.item {
-    background:var(--card); border-radius:12px; margin-bottom:8px; padding:13px 14px;
-    display:flex; align-items:center; gap:12px; box-shadow:0 1px 2px #0000000a;
-    user-select:none; -webkit-user-select:none; cursor:pointer;
+    position:relative; overflow:hidden; border-radius:12px; margin-bottom:8px;
+    box-shadow:0 1px 2px #0000000a; user-select:none; -webkit-user-select:none;
+    cursor:pointer; touch-action:pan-y;   /* vertical scroll native, horizontal = swipe */
   }
-  li.item.pending { opacity:.55; }
+  li.item .under {
+    position:absolute; inset:0; display:flex; align-items:center;
+    font-weight:700; font-size:.95rem; opacity:0; padding:0 18px;
+  }
+  li.item .under.right { background:#dff3e4; color:var(--green-dark); justify-content:flex-start; }
+  li.item .under.left  { background:#fdf3e3; color:var(--amber); justify-content:flex-end; }
+  li.item .row {
+    position:relative; background:var(--card); border-radius:12px;
+    display:flex; align-items:center; gap:12px; padding:13px 14px;
+  }
+  li.item.pending .row { opacity:.55; }
   li.item .box {
     width:22px; height:22px; border:2px solid #b9c6bc; border-radius:7px; flex-shrink:0;
   }
@@ -258,6 +268,7 @@ const STR = {
     empty:'List is empty — nice work 🎉', uncat:'📦 Uncategorized',
     sheet_note:'Neither counts as a purchase. Skipped items get suggested again tomorrow.',
     sheet_skip:'🚫 Out of stock — skip', sheet_remove:'Remove (added by mistake)', cancel:'Cancel',
+    swipe_bought:'Bought', swipe_skip:'Skip',
     who:'Who are you?', name_ph:'Your name', start:'Start',
     synced:'synced', syncing:'syncing…', reconnect:'reconnecting…',
     offline:n=>`offline · ${n} pending`,
@@ -279,6 +290,7 @@ const STR = {
     empty:'リストは空です 🎉', uncat:'📦 未分類',
     sheet_note:'どちらも購入としては記録されません。スキップは明日また提案されます。',
     sheet_skip:'🚫 在庫なし — スキップ', sheet_remove:'削除（間違えて追加）', cancel:'キャンセル',
+    swipe_bought:'購入', swipe_skip:'スキップ',
     who:'あなたの名前は？', name_ph:'名前', start:'開始',
     synced:'同期済み', syncing:'同期中…', reconnect:'再接続中…',
     offline:n=>`オフライン · ${n}件保留`,
@@ -398,8 +410,9 @@ function render() {
     const li = document.createElement('li');
     li.className = 'item' + (it.pending ? ' pending' : '');
     li.dataset.id = it.id;
-    li.innerHTML = `<span class="box"></span><span class="nm"></span>
-                    <span class="qty"></span><span class="who"></span>`;
+    li.innerHTML = `<div class="under"></div>
+                    <div class="row"><span class="box"></span><span class="nm"></span>
+                    <span class="qty"></span><span class="who"></span></div>`;
     li.querySelector('.nm').textContent =
       (it.category ? catEmoji(it.category) + ' ' : '') + disp(it);
     li.querySelector('.qty').textContent = it.qty_note || '';
@@ -415,23 +428,64 @@ function attachGestures(li, it) {
    * check anything off; the candidates dropdown closing mid-tap used to leak
    * its pointerup onto the item underneath = ghost purchases).
    * Long-press = 500 ms hold with <12 px movement (any-jitter cancellation
-   * made long-press unreachable on real phones). */
+   * made long-press unreachable on real phones).
+   * Swipe right = ✓ bought (purchase event) · swipe left = 🚫 skip (no event,
+   * re-suggested tomorrow) — same server ops as tap / sheet, different gesture. */
   let timer = null, longFired = false, armed = false, sx = 0, sy = 0;
+  let swiping = false, dx = 0;
+  const row = li.querySelector('.row'), under = li.querySelector('.under');
+  const THRESH = () => Math.max(72, li.offsetWidth * 0.28);
   const disarm = () => { clearTimeout(timer); armed = false; };
+  const springBack = () => {
+    row.style.transition = 'transform .15s';
+    row.style.transform = '';
+    under.style.opacity = 0;
+    setTimeout(() => row.style.transition = '', 160);
+  };
   li.addEventListener('pointerdown', e => {
-    armed = true; longFired = false; sx = e.clientX; sy = e.clientY;
+    armed = true; longFired = false; swiping = false; dx = 0;
+    sx = e.clientX; sy = e.clientY;
     timer = setTimeout(() => { longFired = true; openSheet(it); }, 500);
   });
   li.addEventListener('pointermove', e => {
-    if (Math.hypot(e.clientX - sx, e.clientY - sy) > 12) disarm();  // scroll, not tap
+    dx = e.clientX - sx;
+    const dy = e.clientY - sy;
+    if (!swiping) {
+      if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) && !longFired) {
+        swiping = true; disarm();
+        try { li.setPointerCapture(e.pointerId); } catch (_) {}
+      } else if (Math.hypot(dx, dy) > 12) {
+        disarm();  // vertical movement: scrolling, not a tap
+      }
+    }
+    if (swiping) {
+      row.style.transform = `translateX(${dx}px)`;
+      under.className = 'under ' + (dx > 0 ? 'right' : 'left');
+      under.textContent = dx > 0 ? '✓ ' + T().swipe_bought : T().swipe_skip + ' 🚫';
+      under.style.opacity = Math.min(Math.abs(dx) / THRESH(), 1);
+    }
   });
-  li.addEventListener('pointercancel', disarm);
-  li.addEventListener('pointerup', () => clearTimeout(timer));
+  li.addEventListener('pointercancel', () => { disarm(); if (swiping) springBack(); swiping = false; });
+  li.addEventListener('pointerup', () => {
+    clearTimeout(timer);
+    if (!swiping) return;
+    if (dx > THRESH())       checkoff(it);      // render() removes the row
+    else if (dx < -THRESH()) skipItem(it);
+    else                     springBack();
+    swiping = false;
+  });
   li.addEventListener('click', () => {
-    if (armed && !longFired) checkoff(it);
+    if (armed && !longFired && !swiping) checkoff(it);
     armed = false;
   });
   li.addEventListener('contextmenu', e => e.preventDefault());
+}
+
+function skipItem(it) {
+  enqueue({ type:'skip', item_id: it.id });
+  // undo for a mis-swipe: put it straight back on the list
+  showToast(`🚫 ${disp(it)}`, () => enqueue({ type:'add', name:it.name,
+    qty_note:it.qty_note || '', item_id: uuid(), cat:it.category }));
 }
 
 function openSheet(it) {
