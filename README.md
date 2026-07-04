@@ -10,15 +10,21 @@ See `PLAN.md` for the full architecture (agent-reviewed, approved 2026-07-03).
 - **Phase 0 — real-time sync**: ✅ live (idempotent ops, WS broadcast, offline queue).
 - **Phase 1 — cycle recommendations**: ✅ live (suggested tray wakes after ~3 buys/item).
 - **Phase 2 — plants + recipes**: ✅ live (LLM enrichment, 🌱 counter, ideas panel).
-- **Candidates + categories** (user feedback 2026-07-03): ✅ live — 173-item seeded
-  catalog, typing dropdown (kana/EN folded), emoji + JP category grouping.
-- **Phase 3 — install**: HTTPS ✅ (`https://spark-d28c.tailae3b9b.ts.net`); remaining:
+- **Candidates + categories**: ✅ live — 173-item seeded catalog, typing dropdown
+  (kana/EN folded), emoji category grouping, swipe gestures (→ bought / ← skip),
+  EN/日本語 toggle, purchase-cycle panel.
+- **Phase 3 — install**: HTTPS ✅ (`https://spark-d28c.<your-tailnet>.ts.net`); remaining:
   A2HS both phones, wife's iPhone Tailscale onboarding, two-phone in-store test.
-- 30/30 tests (`tests/`); live verifications in `test_results/`.
+- 35/35 tests (`tests/`); live verifications in `test_results/`.
+
+Runs on a home DGX box over a private Tailscale tailnet (bind IP + hostname are
+placeholders — swap in your own). Requires Python 3.11+, and a local
+OpenAI-compatible LLM endpoint on `:8000` for the enrichment/recipe features
+(the list + sync work without it). No cloud, no accounts, no app store.
 
 ## Use it
 
-Open **https://spark-d28c.tailae3b9b.ts.net** from any tailnet device (this is the
+Open **https://spark-d28c.<your-tailnet>.ts.net** from any tailnet device (this is the
 URL to Add-to-Home-Screen; plain `http://100.112.171.54:8123` also works in a
 browser). Enter your name once.
 
@@ -30,10 +36,10 @@ browser). Enter your name once.
 ## One-time setup still needed (user actions)
 
 1. ~~Enable Tailscale Serve + HTTPS~~ **done 2026-07-03**:
-   `https://spark-d28c.tailae3b9b.ts.net` → proxy `100.112.171.54:8123`
+   `https://spark-d28c.<your-tailnet>.ts.net` → proxy `100.112.171.54:8123`
    (disable with `tailscale serve --https=443 off`).
 2. **Wife's iPhone**: install Tailscale from the App Store, sign in (invite her
-   or share your account), then open https://spark-d28c.tailae3b9b.ts.net
+   or share your account), then open https://spark-d28c.<your-tailnet>.ts.net
    **in Safari** → Share → *Add to Home Screen*. Do the same on the Pixel
    (Chrome → Install app).
 
