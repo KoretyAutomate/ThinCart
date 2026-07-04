@@ -35,6 +35,14 @@ def fake_llm(response):
     return _fake
 
 
+@pytest.fixture(autouse=True)
+def no_web_search(monkeypatch):
+    """enrich() consults SearXNG for user-typed rows — keep tests offline."""
+    async def _none(name):
+        return None
+    monkeypatch.setattr(catalog, "web_evidence", _none)
+
+
 def seed_purchase(name, days_ago, plants=None, edible=1):
     cid = db.get_or_create_catalog(appmod.conn, name)
     appmod.conn.execute(

@@ -50,7 +50,7 @@ def now_iso() -> str:
 
 class Op(BaseModel):
     op_id: str = Field(..., min_length=8, max_length=64)
-    type: Literal["add", "checkoff", "remove", "undo_checkoff", "snooze"]
+    type: Literal["add", "checkoff", "remove", "skip", "undo_checkoff", "snooze"]
     actor: str = Field("", max_length=40)
     # add
     name: str | None = Field(None, max_length=120)
@@ -126,6 +126,25 @@ def apply_remove(op: Op, ts: str) -> dict:
     return {"removed": op.item_id}
 
 
+def apply_skip(op: Op, ts: str) -> dict:
+    """Out of stock: off the list, NO purchase event (interval data stays clean),
+    and only a 1-day suggestion snooze so the tray re-suggests it next trip."""
+    if op.item_id is None:
+        raise HTTPException(422, "skip requires item_id")
+    row = conn.execute(
+        "SELECT catalog_id FROM items WHERE id=?", (op.item_id,)
+    ).fetchone()
+    if row is None:
+        return {"noop": True}
+    conn.execute("DELETE FROM items WHERE id=?", (op.item_id,))
+    until = (datetime.fromisoformat(ts) + timedelta(days=1)).isoformat(timespec="seconds")
+    conn.execute(
+        "UPDATE item_catalog SET snoozed_until=? WHERE id=?", (until, row["catalog_id"])
+    )
+    db.bump_revision(conn)
+    return {"skipped": op.item_id, "resuggest_after": until}
+
+
 def apply_undo_checkoff(op: Op, ts: str) -> dict:
     """Fat-finger repair: delete the purchase_event, put the item back."""
     if not op.target_op_id:
@@ -168,6 +187,7 @@ APPLY = {
     "add": apply_add,
     "checkoff": apply_checkoff,
     "remove": apply_remove,
+    "skip": apply_skip,
     "undo_checkoff": apply_undo_checkoff,
     "snooze": apply_snooze,
 }
@@ -235,10 +255,12 @@ async def get_catalog():
     rows = conn.execute(
         """SELECT c.id, c.display_name AS name, c.category, c.aliases_json,
                   (SELECT COUNT(*) FROM purchase_events e WHERE e.catalog_id=c.id) AS buys
-           FROM item_catalog c ORDER BY buys DESC, c.display_name"""
+           FROM item_catalog c WHERE c.verified = 1
+           ORDER BY buys DESC, c.display_name"""
     ).fetchall()
     return {"catalog": [
         {"name": r["name"], "category": r["category"],
+         "name_en": db.name_en(r["aliases_json"], r["name"]),
          "aliases": json.loads(r["aliases_json"])}
         for r in rows
     ]}

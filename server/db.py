@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS item_catalog(
   plants_json TEXT,                      -- distinct edible plants (LLM, Phase 2)
   is_edible INTEGER,
   snoozed_until TEXT,                    -- server-side snooze: syncs to both phones
+  verified INTEGER NOT NULL DEFAULT 1,   -- 0 = typo-suspect: hidden from candidates
   llm_enriched_at TEXT
 );
 
@@ -72,6 +73,10 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.executescript(SCHEMA)
+    try:  # migration for DBs created before the typo-verification column
+        conn.execute("ALTER TABLE item_catalog ADD COLUMN verified INTEGER NOT NULL DEFAULT 1")
+    except sqlite3.OperationalError:
+        pass
     conn.execute("INSERT OR IGNORE INTO meta(key, value) VALUES('revision', '0')")
     conn.commit()
     return conn
@@ -109,6 +114,15 @@ def get_or_create_catalog(conn: sqlite3.Connection, name: str) -> int:
     return cur.lastrowid
 
 
+def name_en(aliases_json: str, display: str) -> str | None:
+    """English display name: first ASCII alias, else the display name itself if
+    it's already ASCII (user typed 'milk'), else None (client falls back to JA)."""
+    for a in json.loads(aliases_json or "[]"):
+        if a.isascii() and a.strip():
+            return a
+    return display if display.isascii() else None
+
+
 def purchase_history(conn: sqlite3.Connection) -> dict[int, list[str]]:
     """catalog_id -> ordered purchase timestamps (the cycle-estimator substrate)."""
     hist: dict[int, list[str]] = {}
@@ -130,12 +144,13 @@ def suggestions(conn: sqlite3.Connection, now) -> list[dict]:
         if s["catalog_id"] in on_list:
             continue
         row = conn.execute(
-            "SELECT display_name, snoozed_until FROM item_catalog WHERE id=?",
+            "SELECT display_name, aliases_json, snoozed_until FROM item_catalog WHERE id=?",
             (s["catalog_id"],),
         ).fetchone()
         if row["snoozed_until"] and row["snoozed_until"] > now_iso:
             continue
-        out.append({**s, "name": row["display_name"]})
+        out.append({**s, "name": row["display_name"],
+                    "name_en": name_en(row["aliases_json"], row["display_name"])})
     return out
 
 
@@ -144,15 +159,16 @@ def state(conn: sqlite3.Connection, now=None) -> dict:
     from datetime import datetime, timezone
 
     now = now or datetime.now(timezone.utc)
-    items = [
-        dict(r)
-        for r in conn.execute(
-            """SELECT i.id, c.display_name AS name, c.category, i.qty_note,
-                      i.added_by, i.added_at
-               FROM items i JOIN item_catalog c ON c.id = i.catalog_id
-               ORDER BY COALESCE(c.category, 'zzz'), i.added_at"""
-        )
-    ]
+    items = []
+    for r in conn.execute(
+        """SELECT i.id, c.display_name AS name, c.aliases_json, c.category,
+                  i.qty_note, i.added_by, i.added_at
+           FROM items i JOIN item_catalog c ON c.id = i.catalog_id
+           ORDER BY COALESCE(c.category, 'zzz'), i.added_at"""
+    ):
+        d = dict(r)
+        d["name_en"] = name_en(d.pop("aliases_json"), d["name"])
+        items.append(d)
     import catalog
 
     week = catalog.weekly_plants(conn, now)

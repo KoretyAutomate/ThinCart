@@ -12,9 +12,25 @@ import logging
 import re
 from datetime import datetime, timedelta, timezone
 
+import httpx
+
 import llm
 
 log = logging.getLogger("plantcart.catalog")
+
+SEARX_URL = "http://127.0.0.1:8080/search"
+
+
+async def web_evidence(name: str) -> list[str] | None:
+    """Quick local-SearXNG lookup: top result titles, or None if search is down.
+    Used only to judge whether a NEW user-typed item is real vs a typo."""
+    try:
+        async with httpx.AsyncClient(timeout=6) as client:
+            r = await client.get(SEARX_URL, params={"q": name, "format": "json"})
+            r.raise_for_status()
+            return [x.get("title", "") for x in r.json().get("results", [])[:5]]
+    except Exception:
+        return None
 
 CATEGORIES = [
     "produce", "dairy", "meat_fish", "pantry", "bakery",
@@ -36,17 +52,26 @@ def _clean_plants(raw) -> list[str] | None:
     return out
 
 
-def enrich_prompt(display_name: str, existing_names: list[str]) -> str:
+def enrich_prompt(display_name: str, existing_names: list[str],
+                  evidence: list[str] | None = None) -> str:
     listed = ", ".join(f'"{n}"' for n in existing_names[:200])
+    ev = ""
+    if evidence is not None:
+        ev = ("Web search result titles for this exact text: "
+              + json.dumps(evidence, ensure_ascii=False) + "\n")
     return (
         f'Grocery item (Japanese or English): "{display_name}".\n'
         f'Existing catalog items: [{listed}]\n'
+        f'{ev}'
         'Reply ONLY JSON: {'
+        '"is_real_item": bool — false ONLY if the text looks like a typo or gibberish '
+        'rather than a real product (use the web evidence if given; when unsure, true), '
         f'"category": one of {json.dumps(CATEGORIES)}, '
         '"is_edible": bool, '
         '"plants": [the DISTINCT edible plant species a typical serving contains, '
         'as lowercase English tokens, e.g. curry roux -> ["wheat","turmeric","cumin"], '
         'milk -> []], '
+        '"english_name": short common English name for this grocery item, '
         '"alias_of": ONLY if this item is the IDENTICAL product as one existing catalog '
         'item written in a different script or spelling (e.g. たまねぎ vs 玉ねぎ), that '
         'exact string. A related/similar/sub-type product is NOT an alias (ミニトマト is '
@@ -73,9 +98,15 @@ async def enrich(conn, write_lock, catalog_id: int) -> bool:
             (catalog_id,),
         )
     ]
-    res = await llm.chat_json(enrich_prompt(row["display_name"], existing), max_tokens=200)
+    # user-typed rows (no curated data) get a quick web search to judge typo-ness;
+    # seeded rows are pre-verified — skip the search
+    evidence = await web_evidence(row["display_name"]) if mergeable else None
+    res = await llm.chat_json(
+        enrich_prompt(row["display_name"], existing, evidence), max_tokens=220
+    )
     if not isinstance(res, dict):
         return False
+    verified = 0 if res.get("is_real_item") is False else 1
 
     plants = _clean_plants(res.get("plants")) or []
     category = res.get("category") if res.get("category") in CATEGORIES else "other"
@@ -104,11 +135,20 @@ async def enrich(conn, write_lock, catalog_id: int) -> bool:
             conn.execute("DELETE FROM item_catalog WHERE id=?", (row["id"],))
             log.info("alias-merged %r into %r", row["canonical_name"], alias_of)
         else:
+            # bank the English name as an alias → EN display + search for JP-typed items
+            aliases = json.loads(row["aliases_json"])
+            en = res.get("english_name")
+            if (isinstance(en, str) and en.strip() and en.isascii()
+                    and not any(a.casefold() == en.strip().casefold() for a in aliases)):
+                aliases.append(en.strip().lower())
             conn.execute(
                 "UPDATE item_catalog SET category=?, is_edible=?, plants_json=?, "
-                "llm_enriched_at=? WHERE id=?",
-                (category, is_edible, json.dumps(plants), now, row["id"]),
+                "aliases_json=?, verified=?, llm_enriched_at=? WHERE id=?",
+                (category, is_edible, json.dumps(plants),
+                 json.dumps(aliases, ensure_ascii=False), verified, now, row["id"]),
             )
+            if not verified:
+                log.info("typo-suspect (hidden from candidates): %r", row["display_name"])
         conn.commit()
     return True
 

@@ -202,9 +202,22 @@ def seed(conn) -> int:
     added = 0
     for name, category, is_edible, aliases in SEED:
         canon = db.canonical(name)
-        if conn.execute(
-            "SELECT 1 FROM item_catalog WHERE canonical_name=?", (canon,)
-        ).fetchone():
+        row = conn.execute(
+            "SELECT id, aliases_json, category FROM item_catalog WHERE canonical_name=?",
+            (canon,),
+        ).fetchone()
+        if row:
+            # row predates seeding (user-created): backfill curated aliases +
+            # category so EN display / search work for it too
+            merged = json.loads(row["aliases_json"])
+            merged += [a for a in aliases
+                       if not any(db.canonical(a) == db.canonical(m) for m in merged)]
+            conn.execute(
+                "UPDATE item_catalog SET aliases_json=?, "
+                "category=COALESCE(category, ?), is_edible=COALESCE(is_edible, ?) "
+                "WHERE id=?",
+                (json.dumps(merged, ensure_ascii=False), category, is_edible, row["id"]),
+            )
             continue
         conn.execute(
             "INSERT INTO item_catalog(canonical_name, display_name, aliases_json, "

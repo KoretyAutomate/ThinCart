@@ -7,9 +7,14 @@ See `PLAN.md` for the full architecture (agent-reviewed, approved 2026-07-03).
 
 ## Status
 
-- **Phase 0 — real-time sync**: ✅ built, 11/11 contract tests + live two-client
-  WS test passing. Service running as systemd user unit on `100.112.171.54:8123`.
-- Phase 1 (cycle recommendations), Phase 2 (plants + recipes), Phase 3 (polish): pending.
+- **Phase 0 — real-time sync**: ✅ live (idempotent ops, WS broadcast, offline queue).
+- **Phase 1 — cycle recommendations**: ✅ live (suggested tray wakes after ~3 buys/item).
+- **Phase 2 — plants + recipes**: ✅ live (LLM enrichment, 🌱 counter, ideas panel).
+- **Candidates + categories** (user feedback 2026-07-03): ✅ live — 173-item seeded
+  catalog, typing dropdown (kana/EN folded), emoji + JP category grouping.
+- **Phase 3 — install**: HTTPS ✅ (`https://spark-d28c.tailae3b9b.ts.net`); remaining:
+  A2HS both phones, wife's iPhone Tailscale onboarding, two-phone in-store test.
+- 30/30 tests (`tests/`); live verifications in `test_results/`.
 
 ## Use it
 

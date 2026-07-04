@@ -101,6 +101,7 @@
     width:100%; padding:14px; border-radius:12px; border:none; font-size:1rem;
     font-weight:600; margin-bottom:10px; cursor:pointer;
   }
+  #sheet .skip { background:#fdf3e3; color:var(--amber); }
   #sheet .danger { background:#fbe9e5; color:var(--red); }
   #sheet .cancel { background:#eef1ec; color:var(--text); }
   #namedlg {
@@ -125,10 +126,11 @@
     border:none; background:#d3e8d9; color:var(--green-dark); border-radius:999px;
     width:22px; height:22px; font-size:.8rem; line-height:1; cursor:pointer; padding:0;
   }
-  #plants {
+  #plants, #lang {
     background:#ffffff2b; border:none; color:#fff; font-size:.8rem; font-weight:700;
     padding:5px 10px; border-radius:999px; cursor:pointer; white-space:nowrap;
   }
+  .cand .alt { color:var(--muted); font-size:.8rem; }
   #ideas {
     position:fixed; inset:0; background:var(--bg); z-index:35; display:none;
     flex-direction:column;
@@ -156,8 +158,9 @@
 <body>
 <header>
   <h1>PlantCart</h1>
+  <button id="lang">🌐 EN</button>
   <button id="plants">🌱 –/30</button>
-  <span id="pill" class="syncing">connecting…</span>
+  <span id="pill" class="syncing">…</span>
 </header>
 
 <form id="add" autocomplete="off">
@@ -168,44 +171,45 @@
 </form>
 
 <div id="tray">
-  <div class="tray-label">Suggested — probably due</div>
+  <div class="tray-label" id="tray-label"></div>
   <div id="chips"></div>
 </div>
 
 <main>
   <ul id="list"></ul>
-  <div id="empty" hidden>List is empty — nice work 🎉</div>
+  <div id="empty" hidden></div>
 </main>
 
 <div id="toast"><span id="toastmsg"></span><button id="undo">UNDO</button></div>
 
 <div id="sheet"><div class="card">
   <h2 id="sheet-title"></h2>
-  <p>Remove takes it off the list <b>without</b> counting as a purchase.</p>
-  <button class="danger" id="sheet-remove">Remove (didn’t buy)</button>
-  <button class="cancel" id="sheet-cancel">Cancel</button>
+  <p id="sheet-note"></p>
+  <button class="skip" id="sheet-skip"></button>
+  <button class="danger" id="sheet-remove"></button>
+  <button class="cancel" id="sheet-cancel"></button>
 </div></div>
 
 <div id="ideas">
   <header>
-    <h1>🌱 Plants &amp; ideas</h1>
-    <button class="topbtn" id="ideas-refresh">↻ refresh</button>
+    <h1 id="ideas-h1"></h1>
+    <button class="topbtn" id="ideas-refresh"></button>
     <button class="topbtn" id="ideas-close">✕</button>
   </header>
   <div class="body">
-    <h3 id="week-title">This week's plants</h3>
+    <h3 id="week-title"></h3>
     <div id="week-plants"></div>
-    <h3>Recipes from what you have</h3>
+    <h3 id="recipes-h"></h3>
     <div id="recipes"><div class="status">…</div></div>
-    <h3>Plants to try — tap to add</h3>
+    <h3 id="try-h"></h3>
     <div id="diversity"></div>
   </div>
 </div>
 
 <div id="namedlg">
-  <h2>Who are you?</h2>
-  <input id="myname" placeholder="Your name" maxlength="20">
-  <button id="namego">Start</button>
+  <h2 id="namedlg-h"></h2>
+  <input id="myname" maxlength="20">
+  <button id="namego"></button>
 </div>
 
 <script>
@@ -215,7 +219,15 @@
  * queue  — pending ops not yet ACKed (persisted in localStorage; survives
  *          reloads and dead zones). View = queue applied on top of base.  */
 const $ = id => document.getElementById(id);
-const uuid = () => crypto.randomUUID();
+/* crypto.randomUUID exists ONLY in secure contexts — on plain http:// it is
+ * undefined and every add silently threw. getRandomValues works everywhere. */
+const uuid = () => {
+  if (crypto.randomUUID) return crypto.randomUUID();
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6] & 0x0f) | 0x40; b[8] = (b[8] & 0x3f) | 0x80;
+  const h = [...b].map(x => x.toString(16).padStart(2, '0')).join('');
+  return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;
+};
 const LS = { name:'pc_name', queue:'pc_queue', base:'pc_base' };
 
 let base  = JSON.parse(localStorage.getItem(LS.base)  || '{"revision":0,"items":[]}');
@@ -232,14 +244,90 @@ const canon = s => s.normalize('NFKC').toLowerCase().trim().replace(/\s+/g,' ');
 const fold = s => canon(s).replace(/[ァ-ヶ]/g,
   ch => String.fromCharCode(ch.charCodeAt(0) - 0x60));
 
-/* category → [emoji, Japanese label] */
-const CATS = {
-  produce:['🥬','野菜・果物'], dairy:['🥛','乳製品・卵'], meat_fish:['🍖','肉・魚'],
-  pantry:['🥫','調味料・乾物'], bakery:['🍞','パン'], frozen:['🧊','冷凍'],
-  drinks:['🥤','飲料'], household:['🧻','日用品'], other:['📦','その他'],
+/* ============ i18n ============ */
+const CATS = {  // category → [emoji, JA label, EN label]
+  produce:['🥬','野菜・果物','Produce'], dairy:['🥛','乳製品・卵','Dairy & Eggs'],
+  meat_fish:['🍖','肉・魚','Meat & Fish'], pantry:['🥫','調味料・乾物','Pantry'],
+  bakery:['🍞','パン','Bakery'], frozen:['🧊','冷凍','Frozen'],
+  drinks:['🥤','飲料','Drinks'], household:['🧻','日用品','Household'],
+  other:['📦','その他','Other'],
+};
+const STR = {
+  en: {
+    add_ph:'Add item… (milk, 牛乳 …)', qty_ph:'qty', tray:'Suggested — probably due',
+    empty:'List is empty — nice work 🎉', uncat:'📦 Uncategorized',
+    sheet_note:'Neither counts as a purchase. Skipped items get suggested again tomorrow.',
+    sheet_skip:'🚫 Out of stock — skip', sheet_remove:'Remove (added by mistake)', cancel:'Cancel',
+    who:'Who are you?', name_ph:'Your name', start:'Start',
+    synced:'synced', syncing:'syncing…', reconnect:'reconnecting…',
+    offline:n=>`offline · ${n} pending`,
+    ideas:'🌱 Plants & ideas', refresh:'↻ refresh',
+    week:(n,t)=>`This week's plants — ${n} of ${t}`,
+    recipes_h:'Recipes from what you have', try_h:'Plants to try — tap to add',
+    asking:'Asking the kitchen brain… (~30 s)',
+    no_recipes:'No recipes yet — buy a few things first.',
+    llm_down:'Kitchen brain (DGX LLM) is unreachable — the list and sync still work fine.',
+    none_yet:'none yet — plants count as you shop',
+    uses:'Uses: ', missing:'Missing: ', add_missing:'＋ Add missing to list',
+    added_btn:'✓ added', added:n=>`＋ ${n} added to list`,
+    new_plants:(n,l)=>`+${n} new plants: ${l}`,
+    cycles:{'twice a week':'twice a week', weekly:'weekly', 'bi-weekly':'bi-weekly',
+            monthly:'monthly', occasional:'occasional'},
+  },
+  ja: {
+    add_ph:'追加… (牛乳, milk など)', qty_ph:'数量', tray:'提案 — そろそろ買い時',
+    empty:'リストは空です 🎉', uncat:'📦 未分類',
+    sheet_note:'どちらも購入としては記録されません。スキップは明日また提案されます。',
+    sheet_skip:'🚫 在庫なし — スキップ', sheet_remove:'削除（間違えて追加）', cancel:'キャンセル',
+    who:'あなたの名前は？', name_ph:'名前', start:'開始',
+    synced:'同期済み', syncing:'同期中…', reconnect:'再接続中…',
+    offline:n=>`オフライン · ${n}件保留`,
+    ideas:'🌱 植物とアイデア', refresh:'↻ 更新',
+    week:(n,t)=>`今週の植物 — ${n} / ${t}`,
+    recipes_h:'買った食材でつくれるレシピ', try_h:'試したい植物 — タップで追加',
+    asking:'キッチンAIに問い合わせ中…（約30秒）',
+    no_recipes:'レシピはまだありません — まず買い物をしましょう。',
+    llm_down:'キッチンAI（DGX LLM）に接続できません — リストと同期は正常に動きます。',
+    none_yet:'まだありません — 買い物すると増えます',
+    uses:'使う: ', missing:'足りない: ', add_missing:'＋ 足りない物をリストへ',
+    added_btn:'✓ 追加済み', added:n=>`＋ ${n} をリストに追加`,
+    new_plants:(n,l)=>`+${n}種の植物: ${l}`,
+    cycles:{'twice a week':'週2回', weekly:'毎週', 'bi-weekly':'隔週',
+            monthly:'毎月', occasional:'たまに'},
+  },
+};
+let lang = localStorage.getItem('pc_lang') || 'en';
+const T = () => STR[lang];
+const capFirst = s => s.charAt(0).toUpperCase() + s.slice(1);
+/* display name in the active language; falls back to the canonical (JA) name */
+const disp = it => (lang === 'en' && it.name_en) ? capFirst(it.name_en) : it.name;
+const dispAlt = it => {   // the other-language name, when it differs
+  if (!it.name_en) return '';
+  return lang === 'en' ? (it.name === capFirst(it.name_en) ? '' : it.name)
+                       : capFirst(it.name_en);
 };
 const catEmoji = c => (CATS[c] || CATS.other)[0];
-const catLabel = c => c ? `${(CATS[c]||CATS.other)[0]} ${(CATS[c]||CATS.other)[1]}` : '📦 未分類';
+const catLabel = c => c
+  ? `${(CATS[c]||CATS.other)[0]} ${(CATS[c]||CATS.other)[lang === 'ja' ? 1 : 2]}`
+  : T().uncat;
+
+function applyLang() {
+  $('lang').textContent = lang === 'en' ? '🌐 EN' : '🌐 日本語';
+  $('name').placeholder = T().add_ph;   $('qty').placeholder = T().qty_ph;
+  $('tray-label').textContent = T().tray;
+  $('empty').textContent = T().empty;
+  $('sheet-note').textContent = T().sheet_note;
+  $('sheet-skip').textContent = T().sheet_skip;
+  $('sheet-remove').textContent = T().sheet_remove;
+  $('sheet-cancel').textContent = T().cancel;
+  $('namedlg-h').textContent = T().who;
+  $('myname').placeholder = T().name_ph;
+  $('namego').textContent = T().start;
+  $('ideas-h1').textContent = T().ideas;
+  $('ideas-refresh').textContent = T().refresh;
+  $('recipes-h').textContent = T().recipes_h;
+  $('try-h').textContent = T().try_h;
+}
 
 let catalog = JSON.parse(localStorage.getItem('pc_catalog') || '[]');
 async function loadCatalog() {
@@ -260,7 +348,7 @@ function view() {
       if (!items.some(i => canon(i.name) === canon(op.name)))
         items.push({ id:op.item_id, name:op.name, qty_note:op.qty_note||'',
                      added_by:op.actor, category:op.cat||null, pending:true });
-    } else if (op.type === 'checkoff' || op.type === 'remove') {
+    } else if (op.type === 'checkoff' || op.type === 'remove' || op.type === 'skip') {
       items = items.filter(i => i.id !== op.item_id);
     }
   }
@@ -281,8 +369,8 @@ function renderTray() {
     chip.className = 'chip';
     chip.innerHTML = `<span class="nm"></span><span class="lbl"></span>
                       <button class="snz" aria-label="Snooze">✕</button>`;
-    chip.querySelector('.nm').textContent = '＋ ' + s.name;
-    chip.querySelector('.lbl').textContent = s.label;
+    chip.querySelector('.nm').textContent = '＋ ' + disp(s);
+    chip.querySelector('.lbl').textContent = T().cycles[s.label] || s.label;
     chip.onclick = () => enqueue({ type:'add', name:s.name, qty_note:'', item_id:uuid() });
     chip.querySelector('.snz').onclick = e => {
       e.stopPropagation();
@@ -313,7 +401,7 @@ function render() {
     li.innerHTML = `<span class="box"></span><span class="nm"></span>
                     <span class="qty"></span><span class="who"></span>`;
     li.querySelector('.nm').textContent =
-      (it.category ? catEmoji(it.category) + ' ' : '') + it.name;
+      (it.category ? catEmoji(it.category) + ' ' : '') + disp(it);
     li.querySelector('.qty').textContent = it.qty_note || '';
     li.querySelector('.who').textContent = it.added_by || '';
     attachGestures(li, it);
@@ -339,8 +427,9 @@ function attachGestures(li, it) {
 }
 
 function openSheet(it) {
-  $('sheet-title').textContent = it.name;
+  $('sheet-title').textContent = disp(it);
   $('sheet').style.display = 'flex';
+  $('sheet-skip').onclick   = () => { $('sheet').style.display='none'; enqueue({type:'skip',   item_id:it.id}); };
   $('sheet-remove').onclick = () => { $('sheet').style.display='none'; enqueue({type:'remove', item_id:it.id}); };
 }
 $('sheet-cancel').onclick = () => $('sheet').style.display = 'none';
@@ -355,7 +444,7 @@ function enqueue(fields) {
 
 function checkoff(it) {
   const op = enqueue({ type:'checkoff', item_id: it.id });
-  showToast(`✓ ${it.name}`, () => {
+  showToast(`✓ ${disp(it)}`, () => {
     // undo: if the checkoff is still queued locally, just retract it;
     // otherwise ask the server to delete the purchase_event + restore.
     const qi = queue.findIndex(o => o.op_id === op.op_id);
@@ -402,10 +491,11 @@ function renderCands() {
   for (const [, c] of hits.slice(0, 8)) {
     const div = document.createElement('div');
     div.className = 'cand';
-    div.innerHTML = '<span></span><span></span><span class="cat-tag"></span>';
+    div.innerHTML = '<span></span><span></span><span class="alt"></span><span class="cat-tag"></span>';
     div.children[0].textContent = catEmoji(c.category);
-    div.children[1].textContent = c.name;
-    div.children[2].textContent = c.category ? (CATS[c.category] || CATS.other)[1] : '';
+    div.children[1].textContent = disp(c);
+    div.children[2].textContent = dispAlt(c);
+    div.children[3].textContent = c.category ? (CATS[c.category] || CATS.other)[lang==='ja'?1:2] : '';
     div.addEventListener('pointerdown', e => {
       e.preventDefault();                        // fires before blur → keyboard stays
       enqueue({ type:'add', name:c.name, qty_note:$('qty').value.trim(),
@@ -492,10 +582,10 @@ window.addEventListener('pageshow', wake);
 function setPill() {
   const pill = $('pill');
   const live = ws && ws.readyState === 1;
-  if (live && !queue.length)      { pill.className='synced';  pill.textContent='synced'; }
-  else if (queue.length && !live) { pill.className='offline'; pill.textContent=`offline · ${queue.length} pending`; }
-  else if (queue.length)          { pill.className='syncing'; pill.textContent='syncing…'; }
-  else                            { pill.className='offline'; pill.textContent='reconnecting…'; }
+  if (live && !queue.length)      { pill.className='synced';  pill.textContent=T().synced; }
+  else if (queue.length && !live) { pill.className='offline'; pill.textContent=T().offline(queue.length); }
+  else if (queue.length)          { pill.className='syncing'; pill.textContent=T().syncing; }
+  else                            { pill.className='offline'; pill.textContent=T().reconnect; }
 }
 
 /* ============ plants & ideas panel (LLM — never blocks the list) ============ */
@@ -505,18 +595,25 @@ $('ideas-refresh').onclick = () => loadIdeas(true);
 
 function addFromIdeas(name) {
   enqueue({ type:'add', name, qty_note:'', item_id: uuid() });
-  showToast(`＋ ${name} added to list`, () => {});
+  showToast(T().added(name), () => {});
 }
+$('lang').onclick = () => {
+  lang = lang === 'en' ? 'ja' : 'en';
+  localStorage.setItem('pc_lang', lang);
+  applyLang(); render();
+};
 
 async function loadIdeas(refresh) {
   const wp = $('week-plants');
   wp.innerHTML = (base.plants?.week || [])
-    .map(() => '<span class="pchip"></span>').join('') || '<span class="pchip">none yet — plants count as you shop</span>';
-  [...wp.children].forEach((el, i) => { if (base.plants?.week[i]) el.textContent = base.plants.week[i]; });
+    .map(() => '<span class="pchip"></span>').join('') || '<span class="pchip"></span>';
+  [...wp.children].forEach((el, i) => {
+    el.textContent = base.plants?.week?.[i] || T().none_yet;
+  });
   $('week-title').textContent =
-    `This week's plants — ${base.plants?.count ?? 0} of ${base.plants?.target ?? 30}`;
+    T().week(base.plants?.count ?? 0, base.plants?.target ?? 30);
 
-  $('recipes').innerHTML = '<div class="status">Asking the kitchen brain… (~30 s)</div>';
+  $('recipes').innerHTML = `<div class="status">${T().asking}</div>`;
   $('diversity').innerHTML = '';
   try {
     const res = await fetch('/api/ideas' + (refresh ? '?refresh=1' : ''));
@@ -530,18 +627,19 @@ async function loadIdeas(refresh) {
       div.innerHTML = `<b></b><div class="row uses"></div><div class="row miss"></div>
                        <div class="row np"></div><button>＋ Add missing to list</button>`;
       div.querySelector('b').textContent = r.title;
-      div.querySelector('.uses').textContent = 'Uses: ' + (r.uses || []).join(', ');
-      div.querySelector('.miss').textContent = 'Missing: ' + (r.missing || []).join(', ');
+      div.querySelector('.uses').textContent = T().uses + (r.uses || []).join(', ');
+      div.querySelector('.miss').textContent = T().missing + (r.missing || []).join(', ');
       div.querySelector('.np').textContent =
-        (r.new_plants || []).length ? `+${r.new_plants.length} new plants: ${r.new_plants.join(', ')}` : '';
+        (r.new_plants || []).length ? T().new_plants(r.new_plants.length, r.new_plants.join(', ')) : '';
       const btn = div.querySelector('button');
+      btn.textContent = T().add_missing;
       if ((r.missing || []).length)
-        btn.onclick = () => { r.missing.forEach(addFromIdeas); btn.disabled = true; btn.textContent = '✓ added'; };
+        btn.onclick = () => { r.missing.forEach(addFromIdeas); btn.disabled = true; btn.textContent = T().added_btn; };
       else btn.remove();
       $('recipes').appendChild(div);
     }
     if (!data.recipes.length)
-      $('recipes').innerHTML = '<div class="status">No recipes yet — buy a few things first.</div>';
+      $('recipes').innerHTML = `<div class="status">${T().no_recipes}</div>`;
 
     for (const s of data.diversity) {
       const chip = document.createElement('span');
@@ -551,13 +649,13 @@ async function loadIdeas(refresh) {
       $('diversity').appendChild(chip);
     }
   } catch (e) {
-    $('recipes').innerHTML =
-      '<div class="status">Kitchen brain (DGX LLM) is unreachable — the list and sync still work fine.</div>';
+    $('recipes').innerHTML = `<div class="status">${T().llm_down}</div>`;
   }
 }
 
 /* ============ boot ============ */
 function boot() {
+  applyLang();
   if (!actor) {
     $('namedlg').style.display = 'flex';
     $('namego').onclick = () => {

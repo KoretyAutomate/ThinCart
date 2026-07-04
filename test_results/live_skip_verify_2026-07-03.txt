@@ -1,0 +1,11 @@
+cleanup done; 牛乳 aliases: []
+typo outcome after ~5s: merged
+  → typo resolved to the REAL item: 牛乳 | category: dairy
+Traceback (most recent call last):
+  File "<stdin>", line 57, in <module>
+AssertionError: {'id': '7196049d-5ec1-46f9-8d24-5a54c3a1f6dd', 'name': '牛乳', 'category': 'dairy', 'qty_note': '', 'added_by': 'fixture', 'added_at': '2026-07-04T01:23:17+00:00', 'name_en': None}
+Traceback (most recent call last):
+  File "<stdin>", line 11, in <module>
+IndexError: list index out of range
+牛乳 catalog entry: {"name": "牛乳", "category": "dairy", "name_en": "milk", "aliases": ["ぎゅうにゅう", "ミルク", "milk"]}
+state clean; name_en verified — LIVE TEST PASSED
