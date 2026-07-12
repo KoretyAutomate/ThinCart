@@ -50,7 +50,8 @@ def now_iso() -> str:
 
 class Op(BaseModel):
     op_id: str = Field(..., min_length=8, max_length=64)
-    type: Literal["add", "checkoff", "remove", "skip", "undo_checkoff", "snooze"]
+    type: Literal["add", "checkoff", "remove", "skip", "undo_checkoff",
+                  "undo_purchase", "snooze"]
     actor: str = Field("", max_length=40)
     # add
     name: str | None = Field(None, max_length=120)
@@ -59,6 +60,8 @@ class Op(BaseModel):
     item_id: str | None = Field(None, min_length=8, max_length=64)
     # undo_checkoff: the op_id of the checkoff being undone
     target_op_id: str | None = Field(None, max_length=64)
+    # undo_purchase: the purchase_events.id being corrected from the History panel
+    event_id: int | None = None
     # snooze (suggestion dismissal — server-side so it silences BOTH phones)
     catalog_id: int | None = None
 
@@ -165,6 +168,35 @@ def apply_undo_checkoff(op: Op, ts: str) -> dict:
     return {"item_id": item_id, "undone_event": target["event_id"]}
 
 
+def apply_undo_purchase(op: Op, ts: str) -> dict:
+    """History-panel mis-swipe repair, keyed by the server event id so ANY past
+    purchase can be corrected — not just one still inside the 7-day op ledger
+    (undo_checkoff's limit). Deletes the purchase_event and puts the item back
+    on the list so it isn't silently lost."""
+    if op.event_id is None:
+        raise HTTPException(422, "undo_purchase requires event_id")
+    row = conn.execute(
+        "SELECT catalog_id FROM purchase_events WHERE id=?", (op.event_id,)
+    ).fetchone()
+    if row is None:  # already undone (double-tap / the other phone) → nothing to do
+        return {"noop": True}
+    conn.execute("DELETE FROM purchase_events WHERE id=?", (op.event_id,))
+    catalog_id = row["catalog_id"]
+    rev = db.bump_revision(conn)
+    existing = conn.execute(
+        "SELECT id FROM items WHERE catalog_id=?", (catalog_id,)
+    ).fetchone()
+    if existing:  # already back on the list → the event deletion alone stands
+        return {"undone_event": op.event_id, "item_id": existing["id"], "deduped": True}
+    item_id = str(uuid.uuid4())
+    conn.execute(
+        "INSERT INTO items(id, catalog_id, qty_note, added_by, added_at, revision) "
+        "VALUES(?,?,?,?,?,?)",
+        (item_id, catalog_id, "", op.actor, ts, rev),
+    )
+    return {"undone_event": op.event_id, "item_id": item_id}
+
+
 def apply_snooze(op: Op, ts: str) -> dict:
     """Dismiss a suggestion: snooze for ½ its median cycle (PLAN.md), min 2 days."""
     if op.catalog_id is None:
@@ -189,6 +221,7 @@ APPLY = {
     "remove": apply_remove,
     "skip": apply_skip,
     "undo_checkoff": apply_undo_checkoff,
+    "undo_purchase": apply_undo_purchase,
     "snooze": apply_snooze,
 }
 
@@ -299,6 +332,13 @@ async def get_cycles():
         })
     out.sort(key=lambda x: -x["score"])
     return {"cycles": out}
+
+
+@app.get("/api/history")
+async def get_history(limit: int = 100):
+    """Recent purchases, newest first — the History panel that lets a mis-swipe
+    be corrected (undo_purchase) long after the ~8 s undo toast is gone."""
+    return {"history": db.recent_history(conn, limit)}
 
 
 IDEAS_TTL_H = 6

@@ -237,6 +237,34 @@ public HTTPS host.
 
 ---
 
+## Post-MVP change log
+
+### 2026-07-11 — Purchase-history panel (mis-swipe repair) + history reset
+Delegation: considered, rejected — subtle cross-file UI feature (app.py + db.py +
+index.html) needing design judgment on panel/gesture integration, not mechanical
+or voluminous; no machine-checkable spec short of the output itself.
+
+- **Reset:** cleared test purchase data before real use — wiped `purchase_events`
+  (29) + `applied_ops` (44) + expired `snoozed_until` (2); kept the 176-row
+  `item_catalog` (typing corpus) and the monotonic `revision`. Safety copy taken
+  first via `sqlite3 .backup`.
+- **Feature (why):** a mis-swipe (→ checkoff by accident) logs a spurious
+  `purchase_event` that pollutes the cycle estimator, and the ~8 s undo toast
+  can't reach it once dismissed. Mistypes were already covered (swipe-left = skip,
+  no event). Gap = correcting a purchase *after the fact*.
+- **Backend:** new `undo_purchase` op keyed by the server `purchase_events.id`
+  (works for ANY past purchase, unlike `undo_checkoff` which is bounded by the
+  7-day op ledger) — deletes the event, re-adds the item to the list, deduped;
+  unknown/already-deleted event → no-op ACK; idempotent via the op ledger.
+  New `GET /api/history` (newest-first, joined to catalog). `db.recent_history()`.
+- **Frontend:** header 🕘 button → full-screen History panel (mirrors the cycles
+  panel); each row shows item / when / who + a "Not bought" button that fires
+  `undo_purchase` and toasts. EN/JA strings added. `sw.js` cache → v2.
+- Tests: +4 in `test_ops.py` (history listing, undo repair, unknown-event no-op,
+  replay idempotency).
+
+---
+
 ## Top risks
 
 1. **Wife-phone adoption friction** — Tailscale install + PWA on her phone is

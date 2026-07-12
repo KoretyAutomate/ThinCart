@@ -133,6 +133,33 @@ def purchase_history(conn: sqlite3.Connection) -> dict[int, list[str]]:
     return hist
 
 
+def recent_history(conn: sqlite3.Connection, limit: int = 100) -> list[dict]:
+    """Recent purchase events, newest first, joined to catalog for display.
+
+    The substrate for the History panel: a mis-swipe logs a spurious
+    purchase_event that the ~8 s undo toast can no longer reach once it's gone,
+    so the panel exposes each event (by its server id) for after-the-fact repair.
+    """
+    out = []
+    for r in conn.execute(
+        """SELECT e.id AS event_id, e.catalog_id, e.bought_at, e.bought_by,
+                  c.display_name AS name, c.aliases_json
+           FROM purchase_events e JOIN item_catalog c ON c.id = e.catalog_id
+           ORDER BY e.bought_at DESC, e.id DESC
+           LIMIT ?""",
+        (limit,),
+    ):
+        out.append({
+            "event_id": r["event_id"],
+            "catalog_id": r["catalog_id"],
+            "name": r["name"],
+            "name_en": name_en(r["aliases_json"], r["name"]),
+            "bought_at": r["bought_at"],
+            "bought_by": r["bought_by"],
+        })
+    return out
+
+
 def suggestions(conn: sqlite3.Connection, now) -> list[dict]:
     """Due items (cycles.suggest) minus already-listed and snoozed catalog rows."""
     import cycles

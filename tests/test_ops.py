@@ -112,6 +112,48 @@ def test_undo_of_unknown_op_is_noop():
     assert res.json()["result"] == {"noop": True}
 
 
+def test_history_lists_recent_and_undo_purchase_repairs_mis_swipe():
+    """History panel: a checkoff appears in /api/history; undo_purchase (keyed by
+    the server event id, not the op ledger) deletes it and restores the item."""
+    iid = str(uuid.uuid4())
+    op(type="add", name="edamame", item_id=iid)
+    op(type="checkoff", item_id=iid)
+    assert len(events("edamame")) == 1
+    assert "edamame" not in items()
+
+    hist = client.get("/api/history").json()["history"]
+    mine = [h for h in hist if h["name"] == "edamame"]
+    assert len(mine) == 1
+    event_id = mine[0]["event_id"]
+
+    _, res = op(type="undo_purchase", event_id=event_id)
+    assert res.status_code == 200
+    assert len(events("edamame")) == 0        # spurious purchase gone from the intervals
+    assert "edamame" in items()               # and back on the list to re-buy
+
+
+def test_undo_purchase_unknown_event_is_noop():
+    _, res = op(type="undo_purchase", event_id=999999999)
+    assert res.json()["result"] == {"noop": True}
+
+
+def test_undo_purchase_replay_is_idempotent():
+    """Double-tap 'Not bought' on the same row must delete ONE event, not error."""
+    iid = str(uuid.uuid4())
+    op(type="add", name="okra", item_id=iid)
+    op(type="checkoff", item_id=iid)
+    event_id = [h for h in client.get("/api/history").json()["history"]
+                if h["name"] == "okra"][0]["event_id"]
+    body, _ = op(type="undo_purchase", event_id=event_id)
+    # replay the SAME op_id → re-ACKed from the ledger, no double effect
+    replay = client.post("/api/op", json=body)
+    assert replay.json()["replayed"] is True
+    # a DIFFERENT op targeting the now-deleted event → clean no-op
+    _, res2 = op(type="undo_purchase", event_id=event_id)
+    assert res2.json()["result"] == {"noop": True}
+    assert len(events("okra")) == 0
+
+
 def test_revision_monotonic_and_replay_does_not_bump():
     r0 = client.get("/api/state").json()["revision"]
     iid = str(uuid.uuid4())
