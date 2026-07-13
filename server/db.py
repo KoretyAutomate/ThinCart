@@ -29,7 +29,10 @@ CREATE TABLE IF NOT EXISTS users(
 
 CREATE TABLE IF NOT EXISTS households(
   id TEXT PRIMARY KEY, name TEXT NOT NULL, invite_code TEXT UNIQUE NOT NULL,
-  revision INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL);
+  revision INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL,
+  -- entitlement tier: 'basic' (free: list + sync + plant count) | 'plus'
+  -- (recipes/advice). Operator-set for now; the seam billing later attaches to.
+  tier TEXT NOT NULL DEFAULT 'basic');
 
 CREATE TABLE IF NOT EXISTS household_members(
   household_id TEXT NOT NULL, user_id TEXT NOT NULL, role TEXT NOT NULL,
@@ -97,6 +100,12 @@ def connect(path: Path = None) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.executescript(SCHEMA)
+    # additive migrations for DBs created before a column existed
+    # (CREATE TABLE IF NOT EXISTS won't touch an existing table)
+    try:
+        conn.execute("ALTER TABLE households ADD COLUMN tier TEXT NOT NULL DEFAULT 'basic'")
+    except sqlite3.OperationalError:
+        pass  # column already there
     conn.commit()
     return conn
 

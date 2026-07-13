@@ -353,7 +353,8 @@
     <input id="au-name" placeholder="Name" maxlength="40">
     <input id="au-email" type="email" placeholder="Email" autocomplete="email">
     <input id="au-pass" type="password" placeholder="Password (min 8)" autocomplete="current-password">
-    <input id="au-code" placeholder="Invite code (to join a partner)" maxlength="12">
+    <input id="au-code" placeholder="Invite code (to join a partner)" maxlength="32"
+           autocapitalize="characters" style="text-transform:uppercase">
     <button id="au-go"></button>
     <div class="auth-switch">
       <a id="au-to-login"></a> · <a id="au-to-register"></a> · <a id="au-to-join"></a>
@@ -367,6 +368,7 @@
     <div class="set-row"><span id="set-invite-label"></span>
       <b id="set-invite" class="invite"></b></div>
     <p id="set-invite-hint" class="set-hint"></p>
+    <button class="cancel" id="set-rotate"></button>
     <button class="cancel" id="set-join"></button>
     <button class="cancel" id="set-logout"></button>
     <button class="danger" id="set-delete"></button>
@@ -478,6 +480,8 @@ const STR = {
     set_invite_hint:'Share this code so your partner can join and see the same list.',
     set_join:'Join a different household', set_logout:'Log out',
     set_delete:'Delete my account', set_join_prompt:'Enter invite code:',
+    set_rotate:'New invite code', set_rotate_done:'Invite code rotated — the old one no longer works.',
+    plus_only:'Recipes & advice are a Plus feature. Your list, sync, and plant count are always free.',
     set_delete_confirm:'Delete your account and data? This cannot be undone.',
     tray_more:n=>`+${n} more…`, cyc_title:'📊 Purchase cycles',
     cyc_due_h:'Due now — tap to add', cyc_all_h:'Everything the app is tracking',
@@ -521,6 +525,8 @@ const STR = {
     set_invite_hint:'このコードを共有すると、パートナーが同じリストに参加できます。',
     set_join:'別の世帯に参加', set_logout:'ログアウト',
     set_delete:'アカウントを削除', set_join_prompt:'招待コードを入力:',
+    set_rotate:'招待コードを再発行', set_rotate_done:'招待コードを再発行しました。以前のコードは使えません。',
+    plus_only:'レシピとアドバイスはPlus機能です。リスト・同期・植物カウントはずっと無料です。',
     set_delete_confirm:'アカウントとデータを削除しますか？元に戻せません。',
     tray_more:n=>`他${n}件…`, cyc_title:'📊 購入サイクル',
     cyc_due_h:'そろそろ買い時 — タップで追加', cyc_all_h:'追跡中のすべての品目',
@@ -694,7 +700,9 @@ async function openHistory() {
   box.innerHTML = `<div class="hist-note">…</div>`;
   let hist;
   try {
-    hist = (await (await fetch('/api/history')).json()).history;
+    const hres = await api('/api/history');
+    if (!hres.ok) throw new Error(hres.status);
+    hist = (await hres.json()).history;
   } catch (e) {
     box.innerHTML = `<div class="hist-note">offline</div>`;
     return;
@@ -1060,6 +1068,10 @@ async function loadIdeas(refresh) {
   $('diversity').innerHTML = '';
   try {
     const res = await api('/api/ideas' + (refresh ? '?refresh=1' : ''));
+    if (res.status === 402) {  // paid feature; list + plant count stay free
+      $('recipes').innerHTML = `<div class="status">${T().plus_only}</div>`;
+      return;
+    }
     if (!res.ok) throw new Error(res.status);
     const data = await res.json();
 
@@ -1131,16 +1143,20 @@ $('au-go').onclick = async () => {
       path = '/api/auth/login'; body = { email, password: pass };
     } else {  // join: must already have a token (registered) OR log in first
       if (!code) return err(T().a_err_fields);
-      if (!TOKEN) {  // join needs an account — register/login handled separately
+      if (!TOKEN) {  // join needs an account — register WITH the invite code:
+        // when registration is closed this is the only path that works, and
+        // register-with-code lands the account directly in the household
         if (!email || pass.length < 8) return err(T().a_err_fields);
         const r0 = await fetch(API + '/api/auth/register', { method:'POST',
           headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ email, password: pass, display_name: name }) });
+          body: JSON.stringify({ email, password: pass, display_name: name,
+                                 invite_code: code.toUpperCase() }) });
         if (!r0.ok) return err((await r0.json()).detail || 'error');
-        const d0 = await r0.json(); setSession(d0.token, d0.household);
+        const d0 = await r0.json();
+        setSession(d0.token, d0.household); actor = name || actor; enterApp(); return;
       }
       const rj = await api('/api/households/join', { method:'POST',
-        body: JSON.stringify({ invite_code: code }) });
+        body: JSON.stringify({ invite_code: code.toUpperCase() }) });
       if (!rj.ok) return err((await rj.json()).detail || 'error');
       const dj = await rj.json();
       setSession(dj.token, dj.household); actor = name || actor; enterApp(); return;
@@ -1163,6 +1179,7 @@ $('settingsBtn').onclick = () => {
   $('set-invite-label').textContent = T().set_invite;
   $('set-invite').textContent = household ? household.invite_code : '——';
   $('set-invite-hint').textContent = T().set_invite_hint;
+  $('set-rotate').textContent = T().set_rotate;
   $('set-join').textContent = T().set_join;
   $('set-logout').textContent = T().set_logout;
   $('set-delete').textContent = T().set_delete;
@@ -1172,8 +1189,16 @@ $('settingsBtn').onclick = () => {
 $('set-close').onclick = () => $('settings').style.display = 'none';
 $('settings').onclick = e => { if (e.target === $('settings')) $('settings').style.display='none'; };
 $('set-logout').onclick = () => { $('settings').style.display='none'; logout(); };
+$('set-rotate').onclick = async () => {
+  const r = await api('/api/households/rotate_invite', { method:'POST' });
+  if (!r.ok) { alert((await r.json()).detail || 'error'); return; }
+  const d = await r.json();
+  if (household) { household.invite_code = d.invite_code; localStorage.setItem(LS.hh, JSON.stringify(household)); }
+  $('set-invite').textContent = d.invite_code;
+  alert(T().set_rotate_done);
+};
 $('set-join').onclick = async () => {
-  const code = (prompt(T().set_join_prompt) || '').trim();
+  const code = (prompt(T().set_join_prompt) || '').trim().toUpperCase();
   if (!code) return;
   const r = await api('/api/households/join', { method:'POST', body: JSON.stringify({ invite_code: code }) });
   if (!r.ok) { alert((await r.json()).detail || 'error'); return; }

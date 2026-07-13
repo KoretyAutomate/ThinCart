@@ -74,9 +74,29 @@ _auth_hits: dict[str, list[float]] = {}
 AUTH_WINDOW_S, AUTH_MAX = 300, 20  # 20 attempts / 5 min / IP on /api/auth/*
 
 
+def _client_ip(request: Request) -> str:
+    """Rate-limit key. Behind fly-proxy every request's peer is the proxy's
+    internal IP (one shared bucket → any stranger can 429 the household), so on
+    Fly we key on the Fly-Client-IP header — the only header Fly documents as
+    authoritative. Gated by config.TRUST_FLY_CLIENT_IP because anywhere else
+    (Render, VPS, docker-compose) that header is client-forgeable and trusting
+    it would give every attacker a fresh bucket per request. X-Forwarded-For is
+    never consulted: fly-proxy APPENDS to a client-supplied XFF, so its leftmost
+    entry is attacker-chosen."""
+    if config.TRUST_FLY_CLIENT_IP:
+        hdr = request.headers.get("fly-client-ip", "").strip()
+        if hdr:
+            return hdr
+    return request.client.host if request.client else "?"
+
+
 def _rate_limit(request: Request) -> None:
-    ip = request.client.host if request.client else "?"
+    ip = _client_ip(request)
     now = time.monotonic()
+    # evict idle keys: per-real-IP keying on a public endpoint otherwise grows
+    # one permanent entry per scanner IP until the machine OOMs
+    for k in [k for k, ts in _auth_hits.items() if not ts or now - ts[-1] > AUTH_WINDOW_S]:
+        del _auth_hits[k]
     hits = [t for t in _auth_hits.get(ip, []) if now - t < AUTH_WINDOW_S]
     if len(hits) >= AUTH_MAX:
         raise HTTPException(429, "too many attempts, slow down")
@@ -91,6 +111,9 @@ class RegisterBody(BaseModel):
     password: str = Field(..., min_length=8, max_length=128)
     display_name: str = Field("", max_length=40)
     household_name: str = Field("", max_length=60)
+    # join-at-register: honored in BOTH registration modes; the ONLY way to
+    # create an account when PLANTCART_REGISTRATION=closed
+    invite_code: str | None = Field(None, min_length=4, max_length=32)
 
 
 class LoginBody(BaseModel):
@@ -99,16 +122,31 @@ class LoginBody(BaseModel):
 
 
 class JoinBody(BaseModel):
-    invite_code: str = Field(..., min_length=4, max_length=12)
+    invite_code: str = Field(..., min_length=4, max_length=32)
 
 
 @app.post("/api/auth/register")
 async def register(body: RegisterBody, request: Request):
     _rate_limit(request)
+    code = (body.invite_code or "").strip()
+    if config.REGISTRATION == "closed" and not code:
+        raise HTTPException(403, "registration is closed — an invite code is required")
     async with write_lock:
-        uid = auth.create_user(conn, body.email, body.password, body.display_name)
-        hh_name = body.household_name.strip() or f"{body.display_name or 'My'}'s list"
-        hid = auth.create_household(conn, hh_name, uid)
+        if code:
+            # validate BEFORE creating the user: a bad code must not leave a
+            # stray solo account/household behind (open mode included — the
+            # caller asked to join a household; silently giving them an empty
+            # one of their own would look like a shared list that isn't)
+            if not conn.execute(
+                "SELECT 1 FROM households WHERE invite_code=?", (code.upper(),)
+            ).fetchone():
+                raise HTTPException(403, "invalid invite code")
+            uid = auth.create_user(conn, body.email, body.password, body.display_name)
+            hid = auth.join_household(conn, code, uid)
+        else:
+            uid = auth.create_user(conn, body.email, body.password, body.display_name)
+            hh_name = body.household_name.strip() or f"{body.display_name or 'My'}'s list"
+            hid = auth.create_household(conn, hh_name, uid)
         conn.commit()
     return {"token": auth.make_token(uid, hid), "household": auth.household_summary(conn, hid),
             "user_id": uid}
@@ -155,6 +193,16 @@ async def join(body: JoinBody, ctx: auth.Ctx = Depends(lambda: None), authorizat
 @app.get("/api/households/me")
 async def household_me(ctx: auth.Ctx = Depends(require)):
     return {"household": auth.household_summary(conn, ctx.household_id), "user_id": ctx.user_id}
+
+
+@app.post("/api/households/rotate_invite")
+async def rotate_invite(ctx: auth.Ctx = Depends(require)):
+    """Regenerate the invite code — the old one immediately stops working for
+    join and for closed-mode register. Run after onboarding, or on any leak."""
+    async with write_lock:
+        code = auth.rotate_invite(conn, ctx.household_id)
+        conn.commit()
+    return {"invite_code": code}
 
 
 @app.post("/api/account/delete", status_code=204)
@@ -546,8 +594,15 @@ def _diversity_prompt(recent_plants) -> str:
 
 @app.get("/api/ideas")
 async def get_ideas(refresh: int = 0, ctx: auth.Ctx = Depends(require)):
-    """Recipes + diversity (LLM), cached PER HOUSEHOLD. Failure never blocks the list."""
+    """Recipes + diversity (LLM), cached PER HOUSEHOLD. Failure never blocks the list.
+
+    Paid feature: recipes/advice are 'plus'-tier (per-request LLM cost); the
+    list, sync, and the plant COUNTER (cached enrichment, no per-request LLM)
+    stay free. 402 tells the client to hide/upsell rather than error."""
     hid = ctx.household_id
+    tier = conn.execute("SELECT tier FROM households WHERE id=?", (hid,)).fetchone()
+    if not tier or tier["tier"] != "plus":
+        raise HTTPException(402, "recipes & advice need the plus tier")
     cached = ideas_cache.get(hid)
     if (not refresh and cached
             and (datetime.now(timezone.utc) - cached["at"]).total_seconds() < IDEAS_TTL_H * 3600):

@@ -26,6 +26,16 @@ TOKEN_TTL_DAYS = int(os.environ.get("PLANTCART_TOKEN_TTL_DAYS", "30"))
 # CORS: comma-separated origins, or "*" for dev. Prod should pin the web origin.
 CORS_ORIGINS = [o.strip() for o in os.environ.get("PLANTCART_CORS", "*").split(",") if o.strip()]
 
+# Registration: "open" | "closed". Closed still allows register-with-valid-invite-code
+# (the ONLY way a spouse can be onboarded after the household is set up — /join
+# needs an existing account's bearer token).
+REGISTRATION = os.environ.get("PLANTCART_REGISTRATION", "open").lower()
+
+# Trust the Fly-Client-IP header for auth rate limiting. Fly ONLY (fly-proxy sets
+# it authoritatively); behind any other proxy the header is client-forgeable and
+# this flag must stay off.
+TRUST_FLY_CLIENT_IP = _bool(os.environ.get("PLANTCART_TRUST_FLY_CLIENT_IP", "0"))
+
 # --- LLM provider: "anthropic" | "openai_compatible" | "none" ---
 LLM_PROVIDER = os.environ.get("PLANTCART_LLM_PROVIDER", "none").lower()
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")

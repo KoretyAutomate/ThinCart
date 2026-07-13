@@ -54,9 +54,12 @@ def decode_token(token: str) -> dict:
 
 
 def new_invite_code() -> str:
-    # 6 chars, unambiguous alphabet (no O/0/I/1) — easy to read aloud to a spouse
+    # 16 chars, unambiguous alphabet (no O/0/I/1). Long on purpose: with closed
+    # registration the code is an account-creation credential, and 6 chars
+    # (~30 bits) is guessable at even odds within months by a botnet staying
+    # under every per-IP rate limit. 16 chars ≈ 80 bits; typed once per spouse.
     alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-    return "".join(secrets.choice(alphabet) for _ in range(6))
+    return "".join(secrets.choice(alphabet) for _ in range(16))
 
 
 # ---- user / household creation (called by the register/join endpoints) ----
@@ -104,8 +107,21 @@ def join_household(conn, invite_code: str, user_id: str) -> str:
     return hid
 
 
+def rotate_invite(conn, hid: str) -> str:
+    """Regenerate the household's invite code (the old one stops working for
+    join AND for closed-mode register). Called after onboarding completes, or
+    any time the code may have leaked — it is an account-creation credential."""
+    code = new_invite_code()
+    while conn.execute("SELECT 1 FROM households WHERE invite_code=?", (code,)).fetchone():
+        code = new_invite_code()
+    conn.execute("UPDATE households SET invite_code=? WHERE id=?", (code, hid))
+    return code
+
+
 def household_summary(conn, hid: str) -> dict:
-    hh = conn.execute("SELECT id, name, invite_code FROM households WHERE id=?", (hid,)).fetchone()
+    hh = conn.execute(
+        "SELECT id, name, invite_code, tier FROM households WHERE id=?", (hid,)
+    ).fetchone()
     members = [
         {"user_id": r["user_id"], "display_name": r["display_name"], "role": r["role"]}
         for r in conn.execute(
@@ -115,7 +131,8 @@ def household_summary(conn, hid: str) -> dict:
             (hid,),
         )
     ]
-    return {"id": hh["id"], "name": hh["name"], "invite_code": hh["invite_code"], "members": members}
+    return {"id": hh["id"], "name": hh["name"], "invite_code": hh["invite_code"],
+            "tier": hh["tier"], "members": members}
 
 
 # ---- the request dependency: token -> (user_id, household_id) ----
