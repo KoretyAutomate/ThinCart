@@ -249,7 +249,11 @@ service only — mobile store wrappers (Phase C) stay banked.
      behaviors — verify the actual fold from `git show` at port time rather
      than trusting this note) rewritten household-scoped, plus one NEW test:
      household B cannot `undo_purchase` household A's event.
-3. **Port the full regression suite per step 1's rule (d)** — every test
+3. Delegation: considered, rejected — newest-version sources (795 lines
+   across 4 files) + auth-fixture pattern + DDL exceed the crew's 24k-char
+   context budget, and the same-day cutover favors a direct port with the
+   pattern already in context.
+   **Port the full regression suite per step 1's rule (d)** — every test
    file on either side, NEWEST version, household-scoped. **No fixed test
    COUNT belongs in this plan or in any crew brief** — counts drift with
    master (an earlier revision said "28" when the true newest-version

@@ -239,8 +239,13 @@ def test_ideas_cache_is_per_household(monkeypatch):
             return {"recipes": [{"title": "R", "uses": [], "missing": [], "new_plants": []}]}
         return {"suggestions": []}
     monkeypatch.setattr(llm, "chat_json", fake)
-    ta, _, _ = register("A")
-    tb, _, _ = register("B")
+    ta, hha, _ = register("A")
+    tb, hhb, _ = register("B")
+    # ideas are plus-tier (Phase E entitlement gating); this test is about the
+    # CACHE, so both households get the tier
+    appmod.conn.execute("UPDATE households SET tier='plus' WHERE id IN (?,?)",
+                        (hha["id"], hhb["id"]))
+    appmod.conn.commit()
     da = client.get("/api/ideas?refresh=1", headers=hdr(ta)).json()
     # B's cache must be independent — not served A's entry
     assert appmod.ideas_cache.get(_hid(ta)) is not None
@@ -300,7 +305,6 @@ def test_enrichment_merge_cannot_repoint_other_household(monkeypatch):
         return None
     monkeypatch.setattr(catalog, "web_evidence", no_web)
 
-    asyncio.get_event_loop().run_until_complete(
-        catalog.enrich(appmod.conn, appmod.write_lock, cid))
+    asyncio.run(catalog.enrich(appmod.conn, appmod.write_lock, cid))
     # the row must SURVIVE (two households touch it) — no destructive cross-tenant merge
     assert appmod.conn.execute("SELECT COUNT(*) FROM item_catalog WHERE id=?", (cid,)).fetchone()[0] == 1

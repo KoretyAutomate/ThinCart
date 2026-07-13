@@ -1,39 +1,35 @@
-"""Specificity + editor tests (2026-07-12 user report):
+"""Specificity + editor tests (2026-07-12 user report), ported to multi-tenancy:
 - name_en never lets a banked generic alias shadow an English-typed name
 - the _is_variety backstop keeps 'white rice' / 'fettuccine pasta' out of the
   generic row even if the LLM calls them an alias
 - the alias merge still collapses TRUE script-variant aliases
-- the long-press editor's `edit` op adjusts quantity + category
+- the long-press editor's `edit` op adjusts quantity + category (category via
+  the per-household override, asserted in test_ops/test_saas)
 """
 import asyncio
 import json
-import os
-import sys
 import uuid
-from pathlib import Path
 
-os.environ.setdefault(
-    "PLANTCART_DB",
-    str(Path(os.environ.get("PYTEST_TMP", "/tmp")) / f"plantcart_test_{uuid.uuid4().hex}.db"),
-)
-sys.path.insert(0, str(Path(__file__).parent.parent / "server"))
+from fastapi.testclient import TestClient
 
-from fastapi.testclient import TestClient  # noqa: E402
+from conftest import auth_hdr, register_household
 
 import app as appmod  # noqa: E402
 import catalog  # noqa: E402
 import db  # noqa: E402
 
 client = TestClient(appmod.app)
+TOKEN, HH, _UID = register_household(client, "spec")
+H = auth_hdr(TOKEN)
 
 
 def op(**fields):
     body = {"op_id": str(uuid.uuid4()), "actor": "test", **fields}
-    return body, client.post("/api/op", json=body)
+    return body, client.post("/api/op", json=body, headers=H)
 
 
 def items():
-    return {i["name"]: i for i in client.get("/api/state").json()["items"]}
+    return {i["name"]: i for i in client.get("/api/state", headers=H).json()["items"]}
 
 
 # ── name_en: the user's typed English name always wins ──────────────────────

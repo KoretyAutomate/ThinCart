@@ -8,19 +8,12 @@ under one token; `レモン`+`Lime` → ["citrus"] (genus lump), `オレンジ�
 """
 import contextlib
 import json
-import os
-import sys
-import uuid
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
-os.environ.setdefault(
-    "PLANTCART_DB",
-    str(Path(os.environ.get("PYTEST_TMP", "/tmp")) / f"plantcart_test_{uuid.uuid4().hex}.db"),
-)
-sys.path.insert(0, str(Path(__file__).parent.parent / "server"))
+from conftest import register_household
 
 import app as appmod  # noqa: E402
 import catalog  # noqa: E402
@@ -169,6 +162,11 @@ def test_countable_drops_zero_weight_tokens():
 # --------------------------------------------------------------------------
 # end-to-end through the DB counter
 # --------------------------------------------------------------------------
+_client = TestClient(appmod.app)
+_TOKEN, _HH, _ = register_household(_client, "vocab")
+HID = _HH["id"]
+
+
 def seed(name, days_ago, plants_json):
     cid = db.get_or_create_catalog(appmod.conn, name)
     appmod.conn.execute(
@@ -177,7 +175,8 @@ def seed(name, days_ago, plants_json):
     )
     ts = (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat(timespec="seconds")
     appmod.conn.execute(
-        "INSERT INTO purchase_events(catalog_id, bought_at) VALUES(?,?)", (cid, ts)
+        "INSERT INTO purchase_events(household_id, catalog_id, bought_at) VALUES(?,?,?)",
+        (HID, cid, ts)
     )
     appmod.conn.commit()
     return cid
@@ -189,13 +188,13 @@ def test_weekly_count_is_deduped_across_drifted_rows():
     seed("green bell pepper", 2, ["capsicum"])      # drifted token, same species
     seed("herby thing", 1, ["basil", "oregano"])
 
-    week = catalog.weekly_plants(appmod.conn)
+    week = catalog.weekly_plants(appmod.conn, HID)
     assert week.count("bell pepper") == 1
     assert "capsicum" not in week and "pepper" not in week
 
     # stale rows are re-canonicalized on READ — no re-enrichment needed, so the
     # count is right even with the LLM down
-    assert catalog.weekly_score(appmod.conn) == plants.score(week)
+    assert catalog.weekly_score(appmod.conn, HID) == plants.score(week)
     # the drifted pair collapses to ONE point, not two (normalize is what dedupes;
     # score() takes tokens that are already canonical)
     assert plants.score(plants.normalize(["pepper", "capsicum"],
@@ -204,20 +203,20 @@ def test_weekly_count_is_deduped_across_drifted_rows():
 
 def test_state_reports_count_and_weights():
     seed("garlic bulb", 1, ["garlic"])
-    p = db.state(appmod.conn)["plants"]
+    p = db.state(appmod.conn, HID)["plants"]
     assert p["target"] == 30
     assert p["count"] == plants.score(p["week"])
     # AGP is a flat count → integral total and NO fractional weights to report
     assert p["count"] == int(p["count"])
     assert p["weights"] == {}
     with counting_mode("rossi"):
-        p = db.state(appmod.conn)["plants"]
+        p = db.state(appmod.conn, HID)["plants"]
         assert p["weights"]["garlic"] == 0.25
         # full-point plants are absent from `weights` (only exceptions travel).
         # NB: the suite shares one DB across files — do not seed a plant another
         # test asserts the absence of (test_plants.py owns `kale`).
         seed("collard bag", 1, ["collard"])
-        assert "collard" not in db.state(appmod.conn)["plants"]["weights"]
+        assert "collard" not in db.state(appmod.conn, HID)["plants"]["weights"]
 
 
 def test_counter_works_with_llm_down():
@@ -231,7 +230,7 @@ def test_counter_works_with_llm_down():
     llm.chat_json = _boom
     try:
         seed("miso", 2, ["soybean"])
-        assert "soybean" in catalog.weekly_plants(appmod.conn)
-        assert catalog.weekly_score(appmod.conn) > 0
+        assert "soybean" in catalog.weekly_plants(appmod.conn, HID)
+        assert catalog.weekly_score(appmod.conn, HID) > 0
     finally:
         llm.chat_json = orig
