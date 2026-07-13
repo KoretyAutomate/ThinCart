@@ -176,6 +176,34 @@ Deterministic, testable with synthetic histories, zero LLM dependency.
   union double-counts. Known undercount: monthly-bought staples (rice, flour)
   fall out of a 7-day purchase window while still being eaten — accepted for
   MVP; if the count feels low, widen to 30 days for `pantry`-category items.
+- **Canonical vocabulary + weighted points (2026-07-12):** "canonical lowercase
+  English token" was too weak a spec — the LLM emitted `capsicum` for one bell
+  pepper and `pepper` for another (double-count), one `pepper` for both capsicum
+  and the black-pepper spice (collision), and `citrus` for lemon *and* lime
+  (collision) while splitting `orange` (inconsistent granularity). The token unit
+  is now the **culinary taxon**: one token per species, except where a species is
+  eaten in two unrelated roles (`bell pepper` vs `chili pepper`, both *Capsicum
+  annuum*). Colour, cultivar, brand and refinement never split a token
+  (green/red/yellow bell pepper → `bell pepper`; white/brown/purple rice →
+  `rice`). `server/plants.py` holds the alias map + context-resolved ambiguous
+  tokens + weights, and is the safety net the flaky local LLM cannot drift past —
+  it normalizes on **write and on read**, so the count is right with the DGX down.
+- **Counting method = AGP, not Rossi (user decision 2026-07-12).** Three systems
+  exist and they disagree: the **American Gut Project** (McDonald et al. 2018 — the
+  study that produced the number 30) is a *plain count*, no fractions, no
+  exclusions (its own survey: a soup of carrot+potato+onion = 3 plants; every grain
+  in multigrain bread counts; herbs, spices and juices each score a full 1).
+  **ZOE/Spector** publish no fractions either. Only **Megan Rossi's "plant points"**
+  has fractions (herbs/spices/garlic/olive oil/tea/coffee = ¼). Rossi keeps the
+  target at 30 while making 30 strictly harder to reach, so its 30 ≠ the study's 30.
+  We take AGP so the **target and the method come from the same source**.
+  `plants.COUNTING_MODE = "agp"` is the single chokepoint; Rossi's weight table is
+  retained and switchable (`= "rossi"`) — both modes are tested.
+  Known trade-off: a flat count is gameable (one processed food with a long
+  ingredient list can donate ~7 points) — accepted, because that is exactly what
+  the study measured.
+  - `Delegation: sub-agent (research + vocabulary + counter); director reviewed,
+    re-ran the suite independently, and reversed the weighting to AGP per user.`
 - **Diversity suggestions (LLM):** "Plants you haven't bought in 30+ days +
   plants that pair with what's already on your list" → tap to add to list.
 - **Recipes (LLM):** on demand ("What can we cook?"), from the last ~10 days of
@@ -234,6 +262,81 @@ syntax-validate multi-file edits; commit after each phase gate.
 **Out of MVP (banked):** multiple named lists, manual reorder / per-store aisle
 order, price tracking, quantity math beyond the free-text `qty_note`, accounts,
 public HTTPS host.
+
+---
+
+## Post-MVP change log
+
+### 2026-07-12 — Specificity fixes (brand/type preservation) + long-press editor
+Delegation: considered, rejected — debugging + subtle cross-file UI/backend changes
+(catalog.py + db.py + app.py + index.html) needing design judgment on
+canonicalization aggressiveness and gesture integration; not mechanical/voluminous,
+no machine-checkable spec short of the output itself (delegation.md "do NOT delegate").
+
+User bug report (live shopping trip 2026-07-12): (1) "One Mighty Mill bagel" → bagel
+(brand lost); (2) "White Rice" → rice, "Fettuccine"/"spaghetti" collapsed into pasta;
+(3) "Yellow squash" → zucchini; (4) plant count included un-bought items; (5) want
+long-press → adjustment screen for category/quantity. User choices: preserve
+brands+types (still merge true synonyms); un-merge existing collapsed rows.
+
+Root cause 1-3 (confirmed in live DB): the `alias_of` LLM merge (+ a seeded
+spaghetti→パスタ alias) folded specific/branded items into the generic seed rows, and
+`name_en` then showed the generic English alias instead of the typed text.
+
+**Fixes shipped:**
+- `db.name_en`: an ASCII (English-typed) display now ALWAYS wins over any banked
+  generic alias — "White rice"/"One Mighty Mill bagel" show as typed; the alias
+  fallback is reserved for Japanese displays.
+- `catalog.enrich`: (a) only banks the LLM `english_name` as an alias for non-ASCII
+  (JP) displays — never shadows an English name; (b) new deterministic `_is_variety`
+  backstop blocks any alias merge where the new item is a qualifier-superset of the
+  target ("white rice"⊃"rice", "fettuccine pasta"⊃"pasta"); (c) prompt rewritten to
+  keep brands/types/varieties distinct with the exact failing examples.
+- `apply_edit` op (+ Op.category field): long-press editor writes `items.qty_note`
+  and `item_catalog.category` (validated against CATEGORIES); idempotent, noop on
+  vanished item. Optimistic in `view()`.
+- Frontend: long-press sheet is now a full editor (quantity input + 9-category
+  picker + Save, keeping skip/remove); hold bumped 500→600 ms; EN/JA strings; sw v3.
+- **Issue 4 (no backend bug):** reconciled the op ledger — 43 checkoff ops, 4 undone
+  → 39 `purchase_events` → 29 plants, ALL from client checkoffs. The count only ever
+  reflects checked-off items; no phantom-count path exists. Likeliest cause is a
+  reflow mistap (checkoff removes a row, the list jumps, a follow-up tap lands on the
+  shifted row). Added a 350 ms post-removal tap/swipe lockout to prevent it.
+- **Data repair (un-merge):** backup → `~/backups/shopping-list/plantcart-preunmerge-2026-07-12.db`;
+  split "yellow squash", "white rice", "spaghetti", "fettuccine", "One Mighty Mill
+  bagel" back into their own catalog rows; stripped the bad aliases off ズッキーニ/米/
+  パスタ/ベーグル (kept the legit translation aliases). Past `purchase_events` stay on
+  the generic rows (user's choice) so today's plant count is unchanged. `seed_catalog`
+  パスタ aliases trimmed to `["pasta"]` so a fresh seed won't recollapse.
+- Tests: +9 in `tests/test_specificity.py` (name_en preservation, `_is_variety`,
+  enrich merge-block vs true-alias-merge, edit op qty/category/validation/noop).
+  Full suite **47 passed** (test_results/specificity_fixes_2026-07-12.txt). Live-verified
+  on :8123 after restart: catalog rows distinct, edit round-trip persists qty+category.
+
+
+### 2026-07-11 — Purchase-history panel (mis-swipe repair) + history reset
+Delegation: considered, rejected — subtle cross-file UI feature (app.py + db.py +
+index.html) needing design judgment on panel/gesture integration, not mechanical
+or voluminous; no machine-checkable spec short of the output itself.
+
+- **Reset:** cleared test purchase data before real use — wiped `purchase_events`
+  (29) + `applied_ops` (44) + expired `snoozed_until` (2); kept the 176-row
+  `item_catalog` (typing corpus) and the monotonic `revision`. Safety copy taken
+  first via `sqlite3 .backup`.
+- **Feature (why):** a mis-swipe (→ checkoff by accident) logs a spurious
+  `purchase_event` that pollutes the cycle estimator, and the ~8 s undo toast
+  can't reach it once dismissed. Mistypes were already covered (swipe-left = skip,
+  no event). Gap = correcting a purchase *after the fact*.
+- **Backend:** new `undo_purchase` op keyed by the server `purchase_events.id`
+  (works for ANY past purchase, unlike `undo_checkoff` which is bounded by the
+  7-day op ledger) — deletes the event, re-adds the item to the list, deduped;
+  unknown/already-deleted event → no-op ACK; idempotent via the op ledger.
+  New `GET /api/history` (newest-first, joined to catalog). `db.recent_history()`.
+- **Frontend:** header 🕘 button → full-screen History panel (mirrors the cycles
+  panel); each row shows item / when / who + a "Not bought" button that fires
+  `undo_purchase` and toasts. EN/JA strings added. `sw.js` cache → v2.
+- Tests: +4 in `test_ops.py` (history listing, undo repair, unknown-event no-op,
+  replay idempotency).
 
 ---
 

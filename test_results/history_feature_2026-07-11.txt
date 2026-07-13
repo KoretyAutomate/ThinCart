@@ -1,0 +1,70 @@
+PlantCart — history-panel feature + reset verification
+date: 2026-07-11 14:13:36.458688
+=======================================================
+============================= test session starts ==============================
+platform linux -- Python 3.13.11, pytest-9.0.2, pluggy-1.5.0 -- /home/korety/miniconda3/bin/python3
+cachedir: .pytest_cache
+rootdir: /home/korety/Project/plantcart
+plugins: anyio-4.12.0, langsmith-0.5.1
+collecting ... collected 38 items
+
+tests/test_catalog_candidates.py::test_seed_is_idempotent PASSED         [  2%]
+tests/test_catalog_candidates.py::test_add_via_english_alias_lands_on_seeded_row PASSED [  5%]
+tests/test_catalog_candidates.py::test_api_catalog_shape_and_frequency_order PASSED [  7%]
+tests/test_catalog_candidates.py::test_seeded_rows_have_categories_in_state PASSED [ 10%]
+tests/test_cycles.py::test_weekly_item PASSED                            [ 13%]
+tests/test_cycles.py::test_biweekly_with_one_skip PASSED                 [ 15%]
+tests/test_cycles.py::test_burst_coalescing PASSED                       [ 18%]
+tests/test_cycles.py::test_too_few_events_gives_none PASSED              [ 21%]
+tests/test_cycles.py::test_due_scoring_window PASSED                     [ 23%]
+tests/test_cycles.py::test_suggest_orders_and_filters PASSED             [ 26%]
+tests/test_cycles.py::test_bin_labels PASSED                             [ 28%]
+tests/test_ops.py::test_add_and_state PASSED                             [ 31%]
+tests/test_ops.py::test_add_idempotent_per_canonical_name PASSED         [ 34%]
+tests/test_ops.py::test_op_replay_is_reacked_not_reapplied PASSED        [ 36%]
+tests/test_ops.py::test_checkoff_logs_event_and_removes PASSED           [ 39%]
+tests/test_ops.py::test_remove_logs_no_event PASSED                      [ 42%]
+tests/test_ops.py::test_checkoff_vs_remove_race_is_noop PASSED           [ 44%]
+tests/test_ops.py::test_undo_checkoff_deletes_event_and_restores_item PASSED [ 47%]
+tests/test_ops.py::test_undo_of_unknown_op_is_noop PASSED                [ 50%]
+tests/test_ops.py::test_history_lists_recent_and_undo_purchase_repairs_mis_swipe PASSED [ 52%]
+tests/test_ops.py::test_undo_purchase_unknown_event_is_noop PASSED       [ 55%]
+tests/test_ops.py::test_undo_purchase_replay_is_idempotent PASSED        [ 57%]
+tests/test_ops.py::test_revision_monotonic_and_replay_does_not_bump PASSED [ 60%]
+tests/test_ops.py::test_websocket_broadcasts_after_op PASSED             [ 63%]
+tests/test_ops.py::test_rejects_garbage PASSED                           [ 65%]
+tests/test_ops.py::test_suggestions_and_snooze_flow PASSED               [ 68%]
+tests/test_ops.py::test_cycles_endpoint_full_list PASSED                 [ 71%]
+tests/test_plants.py::test_enrich_updates_catalog PASSED                 [ 73%]
+tests/test_plants.py::test_alias_merge_repoints_history PASSED           [ 76%]
+tests/test_plants.py::test_weekly_plants_union_and_window PASSED         [ 78%]
+tests/test_plants.py::test_ideas_endpoint_shapes_and_cache PASSED        [ 81%]
+tests/test_plants.py::test_ideas_llm_down_returns_503_not_crash PASSED   [ 84%]
+tests/test_plants.py::test_ideas_filters_already_eaten_plants PASSED     [ 86%]
+tests/test_plants.py::test_curated_rows_are_never_alias_merged PASSED    [ 89%]
+tests/test_skip_verify.py::test_skip_removes_without_event_and_short_snoozes PASSED [ 92%]
+tests/test_skip_verify.py::test_skip_of_missing_item_is_noop PASSED      [ 94%]
+tests/test_skip_verify.py::test_typo_suspect_hidden_from_candidates PASSED [ 97%]
+tests/test_skip_verify.py::test_real_item_verified_and_gets_english_alias PASSED [100%]
+
+=============================== warnings summary ===============================
+server/app.py:249
+  /home/korety/Project/plantcart/server/app.py:249: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @app.on_event("startup")
+
+../../miniconda3/lib/python3.13/site-packages/fastapi/applications.py:4576
+  /home/korety/miniconda3/lib/python3.13/site-packages/fastapi/applications.py:4576: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    return self.router.on_event(event_type)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================== 38 passed, 2 warnings in 0.68s ========================

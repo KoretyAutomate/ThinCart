@@ -31,6 +31,7 @@ import config
 import cycles
 import db
 import llm
+import plants
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("plantcart")
@@ -191,12 +192,20 @@ def _redeem_ticket(ticket: str) -> str | None:
 
 class Op(BaseModel):
     op_id: str = Field(..., min_length=8, max_length=64)
-    type: Literal["add", "checkoff", "remove", "skip", "undo_checkoff", "snooze"]
+    type: Literal["add", "checkoff", "remove", "skip", "undo_checkoff",
+                  "undo_purchase", "snooze", "edit"]
     actor: str = Field("", max_length=40)
+    # add / edit
     name: str | None = Field(None, max_length=120)
     qty_note: str | None = Field(None, max_length=120)
+    # edit (category adjustment — one of catalog.CATEGORIES)
+    category: str | None = Field(None, max_length=20)
+    # add (client-generated item uuid) / checkoff / remove
     item_id: str | None = Field(None, min_length=8, max_length=64)
     target_op_id: str | None = Field(None, max_length=64)
+    # undo_purchase: the purchase_events.id being corrected from the History panel
+    event_id: int | None = None
+    # snooze (suggestion dismissal — server-side so it silences BOTH phones)
     catalog_id: int | None = None
 
 
@@ -306,6 +315,73 @@ def apply_undo_checkoff(op: Op, ts: str, hid: str) -> dict:
     return {"item_id": item_id, "undone_event": target["event_id"]}
 
 
+def apply_undo_purchase(op: Op, ts: str, hid: str) -> dict:
+    """History-panel mis-swipe repair, keyed by the server event id so ANY past
+    purchase can be corrected — not just one still inside the 7-day op ledger
+    (undo_checkoff's limit). Deletes the purchase_event and puts the item back
+    on the list so it isn't silently lost. Scoped: an event id belonging to
+    another household is indistinguishable from a nonexistent one (no-op ACK)."""
+    if op.event_id is None:
+        raise HTTPException(422, "undo_purchase requires event_id")
+    row = conn.execute(
+        "SELECT catalog_id FROM purchase_events WHERE id=? AND household_id=?",
+        (op.event_id, hid),
+    ).fetchone()
+    if row is None:  # already undone, double-tap, or not this household's event
+        return {"noop": True}
+    conn.execute("DELETE FROM purchase_events WHERE id=? AND household_id=?",
+                 (op.event_id, hid))
+    catalog_id = row["catalog_id"]
+    rev = db.bump_revision(conn, hid)
+    existing = conn.execute(
+        "SELECT id FROM items WHERE catalog_id=? AND household_id=?", (catalog_id, hid)
+    ).fetchone()
+    if existing:  # already back on the list → the event deletion alone stands
+        return {"undone_event": op.event_id, "item_id": existing["id"], "deduped": True}
+    item_id = str(uuid.uuid4())
+    conn.execute(
+        "INSERT INTO items(id, household_id, catalog_id, qty_note, added_by, added_at, revision) "
+        "VALUES(?,?,?,?,?,?,?)",
+        (item_id, hid, catalog_id, "", op.actor, ts, rev),
+    )
+    return {"undone_event": op.event_id, "item_id": item_id}
+
+
+def apply_edit(op: Op, ts: str, hid: str) -> dict:
+    """Long-press editor: adjust an item's quantity note and/or its category.
+    Quantity is per-item (items.qty_note, household-scoped). Category must NOT
+    write the SHARED item_catalog row — one household's aisle preference would
+    silently re-categorize the item for every household — so it lands in the
+    per-household catalog_category_override table, read-preferred over the
+    global value (same pattern as catalog_snooze)."""
+    if op.item_id is None:
+        raise HTTPException(422, "edit requires item_id")
+    row = conn.execute(
+        "SELECT catalog_id FROM items WHERE id=? AND household_id=?",
+        (op.item_id, hid),
+    ).fetchone()
+    if row is None:  # removed / bought by the other phone → nothing to edit
+        return {"noop": True}
+    changed = False
+    if op.qty_note is not None:
+        conn.execute("UPDATE items SET qty_note=? WHERE id=? AND household_id=?",
+                     (op.qty_note, op.item_id, hid))
+        changed = True
+    if op.category is not None:
+        if op.category not in catalog.CATEGORIES:
+            raise HTTPException(422, "invalid category")
+        conn.execute(
+            "INSERT INTO catalog_category_override(household_id, catalog_id, category) "
+            "VALUES(?,?,?) ON CONFLICT(household_id, catalog_id) "
+            "DO UPDATE SET category=excluded.category",
+            (hid, row["catalog_id"], op.category),
+        )
+        changed = True
+    if changed:
+        db.bump_revision(conn, hid)
+    return {"edited": op.item_id, "changed": changed}
+
+
 def apply_snooze(op: Op, ts: str, hid: str) -> dict:
     """Dismiss a suggestion for ½ its median cycle (min 2 days), scoped to household."""
     if op.catalog_id is None:
@@ -319,8 +395,14 @@ def apply_snooze(op: Op, ts: str, hid: str) -> dict:
 
 
 APPLY = {
-    "add": apply_add, "checkoff": apply_checkoff, "remove": apply_remove,
-    "skip": apply_skip, "undo_checkoff": apply_undo_checkoff, "snooze": apply_snooze,
+    "add": apply_add,
+    "checkoff": apply_checkoff,
+    "remove": apply_remove,
+    "skip": apply_skip,
+    "undo_checkoff": apply_undo_checkoff,
+    "undo_purchase": apply_undo_purchase,
+    "snooze": apply_snooze,
+    "edit": apply_edit,
 }
 
 
@@ -426,6 +508,13 @@ async def get_cycles(ctx: auth.Ctx = Depends(require)):
     return {"cycles": out}
 
 
+@app.get("/api/history")
+async def get_history(limit: int = 100, ctx: auth.Ctx = Depends(require)):
+    """Recent purchases, newest first — the History panel that lets a mis-swipe
+    be corrected (undo_purchase) long after the ~8 s undo toast is gone."""
+    return {"history": db.recent_history(conn, ctx.household_id, min(limit, 500))}
+
+
 IDEAS_TTL_H = 6
 ideas_cache: dict[str, dict] = {}  # household_id -> {"data":..., "at":...}
 
@@ -476,10 +565,16 @@ async def get_ideas(refresh: int = 0, ctx: auth.Ctx = Depends(require)):
     recipes = recipes.get("recipes") if isinstance(recipes, dict) else None
     diversity = diversity.get("suggestions") if isinstance(diversity, dict) else None
     if diversity is not None:
+        # the LLM sometimes suggests plants just eaten despite the prompt —
+        # enforce "different" deterministically against the 30-day set. Canonicalize
+        # the suggestion first, or a synonym ("capsicum" for an eaten "bell pepper")
+        # walks straight through the filter.
         eaten = set(month)
-        diversity = [s for s in diversity
-                     if isinstance(s, dict) and s.get("buy")
-                     and str(s.get("plant", "")).lower() not in eaten]
+        diversity = [
+            s for s in diversity
+            if isinstance(s, dict) and s.get("buy")
+            and not set(plants.normalize([str(s.get("plant", ""))])) & eaten
+        ]
     if recipes is None and diversity is None:
         raise HTTPException(503, "LLM unavailable — list and sync are unaffected")
 

@@ -114,6 +114,20 @@
   #sheet .skip { background:#fdf3e3; color:var(--amber); }
   #sheet .danger { background:#fbe9e5; color:var(--red); }
   #sheet .cancel { background:#eef1ec; color:var(--text); }
+  #sheet .save { background:var(--green); color:#fff; }
+  #sheet .sheet-field { display:flex; align-items:center; gap:10px; margin:0 0 14px; }
+  #sheet .sheet-field span { font-size:.9rem; color:var(--muted); min-width:62px; }
+  #sheet #sheet-qty { flex:1; padding:12px; border:1.5px solid #d4dcd4;
+    border-radius:10px; font-size:1rem; outline:none; }
+  #sheet .sheet-field-label { font-size:.72rem; font-weight:700; letter-spacing:.06em;
+    text-transform:uppercase; color:var(--muted); margin:0 2px 8px; }
+  #sheet #sheet-cats { display:grid; grid-template-columns:repeat(3,1fr); gap:8px;
+    margin-bottom:16px; }
+  #sheet .catopt { margin:0; padding:10px 4px; border:1.5px solid #d4dcd4;
+    border-radius:10px; background:var(--card); font-size:.8rem; font-weight:600;
+    display:flex; flex-direction:column; align-items:center; gap:3px; }
+  #sheet .catopt.sel { border-color:var(--green); background:#e9f5ec; color:var(--green-dark); }
+  #sheet .catopt .em { font-size:1.15rem; }
   #namedlg {
     position:fixed; inset:0; background:var(--bg); z-index:40; display:none;
     flex-direction:column; align-items:center; justify-content:center; gap:14px; padding:24px;
@@ -171,7 +185,7 @@
     border:none; background:#d3e8d9; color:var(--green-dark); border-radius:999px;
     width:22px; height:22px; font-size:.8rem; line-height:1; cursor:pointer; padding:0;
   }
-  #plants, #lang {
+  #plants, #lang, #hist {
     background:#ffffff2b; border:none; color:#fff; font-size:.8rem; font-weight:700;
     padding:5px 10px; border-radius:999px; cursor:pointer; white-space:nowrap;
   }
@@ -221,11 +235,31 @@
   .cycrow .bar i { display:block; height:100%; background:var(--green); }
   .cycrow.over .bar i { background:var(--amber); }
   .cyc-note { color:var(--muted); font-size:.8rem; margin:20px 2px; }
+  #hist-panel { position:fixed; inset:0; background:var(--bg); z-index:35; display:none;
+                flex-direction:column; }
+  #hist-panel header { position:static; }
+  #hist-panel .body { flex:1; overflow-y:auto; padding:14px 16px 40px; }
+  #hist-panel .topbtn { background:#ffffff2b; border:none; color:#fff; font-size:.8rem;
+    font-weight:700; padding:5px 12px; border-radius:999px; cursor:pointer; }
+  .histrow { background:var(--card); border-radius:12px; padding:11px 8px 11px 14px;
+             margin-bottom:8px; display:flex; align-items:center; gap:10px;
+             box-shadow:0 1px 2px #0000000a; }
+  .histrow.undone { opacity:.5; }
+  .histrow .nm { flex:1; font-size:.98rem; overflow-wrap:anywhere; }
+  .histrow .meta { text-align:right; font-size:.74rem; color:var(--muted); line-height:1.4;
+                   white-space:nowrap; }
+  .histrow .undo-btn {
+    flex-shrink:0; border:1.5px solid #e6c6bd; background:#fbe9e5; color:var(--red);
+    border-radius:999px; padding:8px 12px; font-size:.82rem; font-weight:700; cursor:pointer;
+  }
+  .histrow .undo-btn:disabled { opacity:.45; cursor:default; }
+  .hist-note { color:var(--muted); font-size:.8rem; margin:20px 2px; }
 </style>
 </head>
 <body>
 <header>
   <h1>PlantCart</h1>
+  <button id="hist" aria-label="History">🕘</button>
   <button id="lang">🌐 EN</button>
   <button id="plants">🌱 –/30</button>
   <button id="settingsBtn" aria-label="Account">⚙</button>
@@ -258,6 +292,17 @@
   </div>
 </div>
 
+<div id="hist-panel">
+  <header>
+    <h1 id="hist-h1"></h1>
+    <button class="topbtn" id="hist-close">✕</button>
+  </header>
+  <div class="body">
+    <div id="hist-list"></div>
+    <p class="hist-note" id="hist-note"></p>
+  </div>
+</div>
+
 <main>
   <ul id="list"></ul>
   <div id="empty" hidden></div>
@@ -267,6 +312,11 @@
 
 <div id="sheet"><div class="card">
   <h2 id="sheet-title"></h2>
+  <label class="sheet-field"><span id="sheet-qty-label"></span>
+    <input id="sheet-qty" maxlength="120"></label>
+  <div class="sheet-field-label" id="sheet-cat-label"></div>
+  <div id="sheet-cats"></div>
+  <button class="save" id="sheet-save"></button>
   <p id="sheet-note"></p>
   <button class="skip" id="sheet-skip"></button>
   <button class="danger" id="sheet-remove"></button>
@@ -353,6 +403,11 @@ let base  = JSON.parse(localStorage.getItem(LS.base)  || '{"revision":0,"items":
 let queue = JSON.parse(localStorage.getItem(LS.queue) || '[]');
 let actor = localStorage.getItem(LS.name) || '';
 let flushing = false, ws = null, wsDelay = 1000, lastToast = null;
+/* reflow guard (issue: un-touched items getting bought): checking an item off
+ * removes its row and the list jumps up under the finger — a stray follow-up
+ * tap then lands on whatever row slid into that spot. Briefly ignore tap/swipe
+ * checkoffs right after any list removal. */
+let lockUntil = 0;
 
 const saveQueue = () => localStorage.setItem(LS.queue, JSON.stringify(queue));
 const saveBase  = () => localStorage.setItem(LS.base, JSON.stringify(base));
@@ -399,6 +454,7 @@ const STR = {
   en: {
     add_ph:'Add item… (milk, eggs, apples …)', qty_ph:'qty', tray:'Suggested — probably due',
     empty:'List is empty — nice work 🎉', uncat:'📦 Uncategorized',
+    sheet_qty:'Quantity', sheet_cat:'Category', sheet_save:'Save changes',
     sheet_note:'Neither counts as a purchase. Skipped items get suggested again tomorrow.',
     sheet_skip:'🚫 Out of stock — skip', sheet_remove:'Remove (added by mistake)', cancel:'Cancel',
     swipe_bought:'Bought', swipe_skip:'Skip',
@@ -429,12 +485,19 @@ const STR = {
     cyc_none:'No learned cycles yet — items appear after 3 purchases.',
     cyc_note:'An item earns a cycle after 3 purchases. It gets suggested at ~85% of its cycle and retires if 3× overdue (seasonal). ✓ = already on the list.',
     last_bought:d=>`bought ${d}d ago`,
+    hist_title:'🕘 Purchase history',
+    hist_undo:'Not bought',
+    hist_today:'today', hist_by:n=>`by ${n}`,
+    hist_empty:'No purchases yet — checked-off items show up here.',
+    hist_note:'Tap “Not bought” to fix a mis-swipe: it removes the purchase from your history (so it won’t skew the cycle suggestions) and puts the item back on your list. A mistyped item is best handled by swiping it away as skip.',
+    hist_restored:n=>`↩ ${n} back on the list`,
     cycles:{'twice a week':'twice a week', weekly:'weekly', 'bi-weekly':'bi-weekly',
             monthly:'monthly', occasional:'occasional'},
   },
   ja: {
     add_ph:'追加… (牛乳, 卵, りんご など)', qty_ph:'数量', tray:'提案 — そろそろ買い時',
     empty:'リストは空です 🎉', uncat:'📦 未分類',
+    sheet_qty:'数量', sheet_cat:'カテゴリー', sheet_save:'変更を保存',
     sheet_note:'どちらも購入としては記録されません。スキップは明日また提案されます。',
     sheet_skip:'🚫 在庫なし — スキップ', sheet_remove:'削除（間違えて追加）', cancel:'キャンセル',
     swipe_bought:'購入', swipe_skip:'スキップ',
@@ -465,6 +528,12 @@ const STR = {
     cyc_none:'学習済みサイクルはまだありません — 3回購入すると表示されます。',
     cyc_note:'3回購入するとサイクルを学習します。サイクルの約85%で提案され、3倍超過すると（季節品として）引退します。✓ = リストに追加済み。',
     last_bought:d=>`${d}日前に購入`,
+    hist_title:'🕘 購入履歴',
+    hist_undo:'買ってない',
+    hist_today:'今日', hist_by:n=>`${n}`,
+    hist_empty:'まだ購入はありません — チェックした品目がここに表示されます。',
+    hist_note:'スワイプ誤操作の修正:「買ってない」をタップすると、その購入が履歴から削除され（サイクル提案が歪みません）、品目がリストに戻ります。入力ミスはスキップとしてスワイプして消すのが基本です。',
+    hist_restored:n=>`↩ ${n} をリストに戻しました`,
     cycles:{'twice a week':'週2回', weekly:'毎週', 'bi-weekly':'隔週',
             monthly:'毎月', occasional:'たまに'},
   },
@@ -489,6 +558,9 @@ function applyLang() {
   $('name').placeholder = T().add_ph;   $('qty').placeholder = T().qty_ph;
   $('tray-label').textContent = T().tray;
   $('empty').textContent = T().empty;
+  $('sheet-qty-label').textContent = T().sheet_qty;
+  $('sheet-cat-label').textContent = T().sheet_cat;
+  $('sheet-save').textContent = T().sheet_save;
   $('sheet-note').textContent = T().sheet_note;
   $('sheet-skip').textContent = T().sheet_skip;
   $('sheet-remove').textContent = T().sheet_remove;
@@ -504,6 +576,8 @@ function applyLang() {
   $('cyc-due-h').textContent = T().cyc_due_h;
   $('cyc-all-h').textContent = T().cyc_all_h;
   $('cyc-note').textContent = T().cyc_note;
+  $('hist-h1').textContent = T().hist_title;
+  $('hist-note').textContent = T().hist_note;
 }
 
 let catalog = JSON.parse(localStorage.getItem('pc_catalog') || '[]');
@@ -527,6 +601,12 @@ function view() {
                      added_by:op.actor, category:op.cat||null, pending:true });
     } else if (op.type === 'checkoff' || op.type === 'remove' || op.type === 'skip') {
       items = items.filter(i => i.id !== op.item_id);
+    } else if (op.type === 'edit') {
+      const it = items.find(i => i.id === op.item_id);
+      if (it) {
+        if (op.qty_note !== undefined) it.qty_note = op.qty_note;
+        if (op.category !== undefined) it.category = op.category;
+      }
     }
   }
   return items;
@@ -604,6 +684,46 @@ async function openCycles() {
   }
 }
 
+/* ============ purchase-history panel (mis-swipe repair) ============ */
+$('hist').onclick = openHistory;
+$('hist-close').onclick = () => $('hist-panel').style.display = 'none';
+
+async function openHistory() {
+  $('hist-panel').style.display = 'flex';
+  const box = $('hist-list');
+  box.innerHTML = `<div class="hist-note">…</div>`;
+  let hist;
+  try {
+    hist = (await (await fetch('/api/history')).json()).history;
+  } catch (e) {
+    box.innerHTML = `<div class="hist-note">offline</div>`;
+    return;
+  }
+  box.innerHTML = '';
+  if (!hist.length) { box.innerHTML = `<div class="hist-note">${T().hist_empty}</div>`; return; }
+  for (const h of hist) {
+    const days = Math.max(0, Math.floor((Date.now() - Date.parse(h.bought_at)) / 86400000));
+    const when = days === 0 ? T().hist_today : T().last_bought(days);
+    const who = h.bought_by ? ' · ' + T().hist_by(h.bought_by) : '';
+    const div = document.createElement('div');
+    div.className = 'histrow';
+    div.innerHTML = `<span class="nm"></span>
+      <span class="meta"></span><button class="undo-btn"></button>`;
+    div.querySelector('.nm').textContent = disp(h);
+    div.querySelector('.meta').textContent = when + who;
+    const btn = div.querySelector('.undo-btn');
+    btn.textContent = T().hist_undo;
+    btn.onclick = () => {
+      // idempotent server-side: a double-tap / other-phone repeat is a no-op ACK
+      enqueue({ type:'undo_purchase', event_id: h.event_id });
+      div.classList.add('undone');
+      btn.disabled = true;
+      showToast(T().hist_restored(disp(h)), () => {});
+    };
+    box.appendChild(div);
+  }
+}
+
 function render() {
   renderTray();
   if (base.plants)
@@ -634,13 +754,14 @@ function render() {
   }
 }
 
-/* ============ gestures: tap=checkoff, long-press=remove sheet ============ */
+/* ============ gestures: tap=checkoff, long-press=edit sheet ============ */
 function attachGestures(li, it) {
   /* Tap = click (down AND up on this item — a pointerup alone must never
    * check anything off; the candidates dropdown closing mid-tap used to leak
    * its pointerup onto the item underneath = ghost purchases).
-   * Long-press = 500 ms hold with <12 px movement (any-jitter cancellation
-   * made long-press unreachable on real phones).
+   * Long-press = 600 ms hold with <12 px movement (a firm hold: opens the
+   * quantity/category editor + skip/remove; any-jitter cancellation once made
+   * long-press unreachable on real phones, so only distance cancels it).
    * Swipe right = ✓ bought (purchase event) · swipe left = 🚫 skip (no event,
    * re-suggested tomorrow) — same server ops as tap / sheet, different gesture. */
   let timer = null, longFired = false, armed = false, sx = 0, sy = 0;
@@ -657,7 +778,7 @@ function attachGestures(li, it) {
   li.addEventListener('pointerdown', e => {
     armed = true; longFired = false; swiping = false; dx = 0;
     sx = e.clientX; sy = e.clientY;
-    timer = setTimeout(() => { longFired = true; openSheet(it); }, 500);
+    timer = setTimeout(() => { longFired = true; openSheet(it); }, 600);
   });
   li.addEventListener('pointermove', e => {
     dx = e.clientX - sx;
@@ -681,33 +802,64 @@ function attachGestures(li, it) {
   li.addEventListener('pointerup', () => {
     clearTimeout(timer);
     if (!swiping) return;
-    if (dx > THRESH())       checkoff(it);      // render() removes the row
+    if (dx > THRESH())       { if (Date.now() >= lockUntil) checkoff(it); else springBack(); }
     else if (dx < -THRESH()) skipItem(it);
     else                     springBack();
     swiping = false;
   });
   li.addEventListener('click', () => {
-    if (armed && !longFired && !swiping) checkoff(it);
+    if (armed && !longFired && !swiping && Date.now() >= lockUntil) checkoff(it);
     armed = false;
   });
   li.addEventListener('contextmenu', e => e.preventDefault());
 }
 
 function skipItem(it) {
+  lockUntil = Date.now() + 350;
   enqueue({ type:'skip', item_id: it.id });
   // undo for a mis-swipe: put it straight back on the list
   showToast(`🚫 ${disp(it)}`, () => enqueue({ type:'add', name:it.name,
     qty_note:it.qty_note || '', item_id: uuid(), cat:it.category }));
 }
 
-function openSheet(it) {
-  $('sheet-title').textContent = disp(it);
-  $('sheet').style.display = 'flex';
-  $('sheet-skip').onclick   = () => { $('sheet').style.display='none'; enqueue({type:'skip',   item_id:it.id}); };
-  $('sheet-remove').onclick = () => { $('sheet').style.display='none'; enqueue({type:'remove', item_id:it.id}); };
+/* long-press editor: adjust quantity + category, plus the skip / remove actions */
+let editState = null;   // { it, category }
+function renderCatOpts() {
+  const box = $('sheet-cats'); box.innerHTML = '';
+  for (const key of Object.keys(CATS)) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'catopt' + (key === editState.category ? ' sel' : '');
+    b.innerHTML = `<span class="em"></span><span></span>`;
+    b.querySelector('.em').textContent = CATS[key][0];
+    b.children[1].textContent = CATS[key][lang === 'ja' ? 1 : 2];
+    b.onclick = () => { editState.category = key; renderCatOpts(); };
+    box.appendChild(b);
+  }
 }
-$('sheet-cancel').onclick = () => $('sheet').style.display = 'none';
-$('sheet').onclick = e => { if (e.target === $('sheet')) $('sheet').style.display='none'; };
+function closeSheet() { $('sheet').style.display = 'none'; editState = null; }
+function openSheet(it) {
+  editState = { it, category: it.category || 'other' };
+  $('sheet-title').textContent = disp(it);
+  $('sheet-qty').value = it.qty_note || '';
+  renderCatOpts();
+  $('sheet').style.display = 'flex';
+  $('sheet-skip').onclick   = () => { closeSheet(); enqueue({ type:'skip',   item_id:it.id }); };
+  $('sheet-remove').onclick = () => { closeSheet(); enqueue({ type:'remove', item_id:it.id }); };
+}
+function saveSheet() {
+  if (!editState) return;
+  const it = editState.it, qty = $('sheet-qty').value.trim();
+  const fields = { type:'edit', item_id: it.id };
+  let changed = false;
+  if (qty !== (it.qty_note || ''))                 { fields.qty_note = qty;              changed = true; }
+  if (editState.category !== (it.category || 'other')) { fields.category = editState.category; changed = true; }
+  if (changed) enqueue(fields);
+  closeSheet();
+}
+$('sheet-save').onclick = saveSheet;
+$('sheet-cancel').onclick = closeSheet;
+$('sheet').onclick = e => { if (e.target === $('sheet')) closeSheet(); };
 
 /* ============ ops ============ */
 function enqueue(fields) {
@@ -717,6 +869,7 @@ function enqueue(fields) {
 }
 
 function checkoff(it) {
+  lockUntil = Date.now() + 350;
   const op = enqueue({ type:'checkoff', item_id: it.id });
   showToast(`✓ ${disp(it)}`, () => {
     // undo: if the checkoff is still queued locally, just retract it;
@@ -893,7 +1046,12 @@ async function loadIdeas(refresh) {
   wp.innerHTML = (base.plants?.week || [])
     .map(() => '<span class="pchip"></span>').join('') || '<span class="pchip"></span>';
   [...wp.children].forEach((el, i) => {
-    el.textContent = base.plants?.week?.[i] || T().none_yet;
+    const tok = base.plants?.week?.[i];
+    // herbs/spices/garlic/oil/tea/coffee score a fraction of a plant point —
+    // show it, or the chip count won't add up to the header number
+    const w = tok && base.plants?.weights?.[tok];
+    el.textContent = tok ? (w ? `${tok} ·${w === 0.25 ? '¼' : w === 0.5 ? '½' : w}` : tok)
+                         : T().none_yet;
   });
   $('week-title').textContent =
     T().week(base.plants?.count ?? 0, base.plants?.target ?? 30);

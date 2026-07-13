@@ -113,7 +113,8 @@ SEED = [
     ("豆乳", "dairy", 1, ["とうにゅう", "soy milk"]),
     # ── pantry ──
     ("米", "pantry", 1, ["こめ", "お米", "ごはん", "rice"]),
-    ("パスタ", "pantry", 1, ["スパゲッティ", "pasta", "spaghetti"]),
+    # pasta types stay distinct (spaghetti/fettuccine ≠ generic pasta) — user 2026-07-12
+    ("パスタ", "pantry", 1, ["pasta"]),
     ("そば", "pantry", 1, ["ソバ", "蕎麦", "soba"]),
     ("うどん", "pantry", 1, ["ウドン", "udon"]),
     ("そうめん", "pantry", 1, ["ソウメン", "素麺", "somen"]),

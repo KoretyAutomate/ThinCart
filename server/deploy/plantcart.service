@@ -22,7 +22,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/korety/Project/_ideas/shopping-list/server
+WorkingDirectory=/home/korety/Project/plantcart/server
 # SECURITY: bind the Tailscale IP, not 0.0.0.0 — the LAN must never see this port.
 # If tailscale0 isn't up yet at boot, the bind fails and Restart retries until it is.
 ExecStart=/home/korety/miniconda3/bin/python3 -m uvicorn app:app --host 100.112.171.54 --port 8123 --no-access-log

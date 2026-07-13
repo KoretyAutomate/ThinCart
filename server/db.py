@@ -66,6 +66,14 @@ CREATE TABLE IF NOT EXISTS catalog_snooze(
   household_id TEXT NOT NULL, catalog_id INTEGER NOT NULL,
   snoozed_until TEXT NOT NULL, PRIMARY KEY(household_id, catalog_id));
 
+-- Per-household category preference (long-press editor). The shared
+-- item_catalog.category stays the corpus default; a household's edit must not
+-- re-categorize the item for everyone. No FK on purpose: alias-merge repoints
+-- these rows explicitly (a FK would make the merge DELETE raise instead).
+CREATE TABLE IF NOT EXISTS catalog_category_override(
+  household_id TEXT NOT NULL, catalog_id INTEGER NOT NULL,
+  category TEXT NOT NULL, PRIMARY KEY(household_id, catalog_id));
+
 CREATE TABLE IF NOT EXISTS applied_ops(
   op_id TEXT PRIMARY KEY, household_id TEXT NOT NULL,
   applied_at TEXT NOT NULL, result_json TEXT NOT NULL DEFAULT '{}');
@@ -123,10 +131,18 @@ def get_or_create_catalog(conn: sqlite3.Connection, name: str) -> int:
 
 
 def name_en(aliases_json: str, display: str) -> str | None:
+    """English display name.
+
+    If the user typed English/ASCII ('White rice', 'One Mighty Mill bagel'),
+    ALWAYS show exactly that — a banked generic alias ('rice', 'bagel') must
+    never shadow the specific name the user chose. Only for a non-ASCII
+    (Japanese) display do we fall back to the first ASCII alias, else None."""
+    if display.isascii() and display.strip():
+        return display
     for a in json.loads(aliases_json or "[]"):
         if a.isascii() and a.strip():
             return a
-    return display if display.isascii() else None
+    return None
 
 
 # ---- per-household reads (all REQUIRE hid) ----
@@ -151,7 +167,36 @@ def _snoozed_map(conn, hid: str, now_iso: str) -> set[int]:
     }
 
 
+def recent_history(conn: sqlite3.Connection, hid: str, limit: int = 100) -> list[dict]:
+    """Recent purchase events for ONE household, newest first, joined to catalog.
+
+    The substrate for the History panel: a mis-swipe logs a spurious
+    purchase_event that the ~8 s undo toast can no longer reach once it's gone,
+    so the panel exposes each event (by its server id) for after-the-fact repair.
+    """
+    out = []
+    for r in conn.execute(
+        """SELECT e.id AS event_id, e.catalog_id, e.bought_at, e.bought_by,
+                  c.display_name AS name, c.aliases_json
+           FROM purchase_events e JOIN item_catalog c ON c.id = e.catalog_id
+           WHERE e.household_id=?
+           ORDER BY e.bought_at DESC, e.id DESC
+           LIMIT ?""",
+        (hid, limit),
+    ):
+        out.append({
+            "event_id": r["event_id"],
+            "catalog_id": r["catalog_id"],
+            "name": r["name"],
+            "name_en": name_en(r["aliases_json"], r["name"]),
+            "bought_at": r["bought_at"],
+            "bought_by": r["bought_by"],
+        })
+    return out
+
+
 def suggestions(conn: sqlite3.Connection, hid: str, now) -> list[dict]:
+    """Due items (cycles.suggest) minus already-listed and snoozed catalog rows."""
     import cycles
 
     on_list = {r["catalog_id"] for r in conn.execute(
@@ -174,24 +219,38 @@ def state(conn: sqlite3.Connection, hid: str, now=None) -> dict:
     now = now or datetime.now(timezone.utc)
     items = []
     for r in conn.execute(
-        """SELECT i.id, c.display_name AS name, c.aliases_json, c.category,
+        """SELECT i.id, c.display_name AS name, c.aliases_json,
+                  COALESCE(o.category, c.category) AS category,
                   i.qty_note, i.added_by, i.added_at
            FROM items i JOIN item_catalog c ON c.id = i.catalog_id
+           LEFT JOIN catalog_category_override o
+                  ON o.household_id = i.household_id AND o.catalog_id = i.catalog_id
            WHERE i.household_id=?
-           ORDER BY COALESCE(c.category, 'zzz'), i.added_at""",
+           ORDER BY COALESCE(o.category, c.category, 'zzz'), i.added_at""",
         (hid,),
     ):
         d = dict(r)
         d["name_en"] = name_en(d.pop("aliases_json"), d["name"])
         items.append(d)
     import catalog
+    import plants as plantvocab
 
     week = catalog.weekly_plants(conn, hid, now)
     return {
         "revision": get_revision(conn, hid),
         "items": items,
         "suggestions": suggestions(conn, hid, now),
-        "plants": {"count": len(week), "target": 30, "week": week},
+        # count is plant points per plants.COUNTING_MODE — currently "agp": a flat
+        # count of distinct plant species (the study's own method, no fractions).
+        # Under "rossi" it becomes fractional (herbs/spices ¼). `weights` carries
+        # any non-1.0 token so the panel can mark it; it is empty under AGP.
+        "plants": {
+            "count": plantvocab.score(week),
+            "target": 30,
+            "week": week,
+            "weights": {t: plantvocab.weight(t) for t in week
+                        if plantvocab.weight(t) != 1.0},
+        },
     }
 
 
@@ -237,7 +296,8 @@ def delete_user(conn, user_id: str) -> None:
         remaining = conn.execute(
             "SELECT COUNT(*) FROM household_members WHERE household_id=?", (hid,)).fetchone()[0]
         if remaining == 0:
-            for tbl in ("items", "purchase_events", "catalog_snooze", "applied_ops"):
+            for tbl in ("items", "purchase_events", "catalog_snooze",
+                        "catalog_category_override", "applied_ops"):
                 conn.execute(f"DELETE FROM {tbl} WHERE household_id=?", (hid,))
             conn.execute("DELETE FROM households WHERE id=?", (hid,))
     conn.commit()

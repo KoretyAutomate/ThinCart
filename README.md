@@ -28,8 +28,10 @@ Open **https://spark-d28c.<your-tailnet>.ts.net** from any tailnet device (this 
 URL to Add-to-Home-Screen; plain `http://100.112.171.54:8123` also works in a
 browser). Enter your name once.
 
-- **Tap an item** → bought (checked off + counted in purchase history). Undo toast for 8 s.
-- **Long-press** → remove *without* buying (doesn't pollute the frequency data).
+- **Tap / swipe right** → bought (checked off + counted in purchase history). Undo toast for 8 s.
+- **Swipe left** → skip (out of stock; no purchase logged, re-suggested tomorrow).
+- **Long-press (hold ~0.6 s)** → item editor: adjust **quantity** and **category**,
+  or *remove without buying* / *skip* (neither pollutes the frequency data).
 - Works offline in store dead zones — ops queue and flush on reconnect;
   the pill in the header shows synced / syncing / offline.
 
