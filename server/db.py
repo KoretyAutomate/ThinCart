@@ -115,12 +115,18 @@ def get_or_create_catalog(conn: sqlite3.Connection, name: str) -> int:
 
 
 def name_en(aliases_json: str, display: str) -> str | None:
-    """English display name: first ASCII alias, else the display name itself if
-    it's already ASCII (user typed 'milk'), else None (client falls back to JA)."""
+    """English display name.
+
+    If the user typed English/ASCII ('White rice', 'One Mighty Mill bagel'),
+    ALWAYS show exactly that — a banked generic alias ('rice', 'bagel') must
+    never shadow the specific name the user chose. Only for a non-ASCII
+    (Japanese) display do we fall back to the first ASCII alias, else None."""
+    if display.isascii() and display.strip():
+        return display
     for a in json.loads(aliases_json or "[]"):
         if a.isascii() and a.strip():
             return a
-    return display if display.isascii() else None
+    return None
 
 
 def purchase_history(conn: sqlite3.Connection) -> dict[int, list[str]]:

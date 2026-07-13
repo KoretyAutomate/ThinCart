@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 
 import llm
+from db import canonical
 
 log = logging.getLogger("plantcart.catalog")
 
@@ -38,6 +39,20 @@ CATEGORIES = [
 ]
 
 _TOKEN = re.compile(r"^[a-z][a-z \-]{0,40}$")
+
+
+def _is_variety(source_canon: str, target_names: list[str]) -> bool:
+    """Deterministic backstop for the alias merge: True if the new item is a
+    more-specific variety/brand of the merge target — its word set strictly
+    CONTAINS a target name's word set ('white rice' ⊃ 'rice', 'fettuccine pasta'
+    ⊃ 'pasta', 'green bell pepper' ⊃ 'bell pepper'). Such items must stay their
+    own catalog row no matter what the LLM says."""
+    src = set(source_canon.split())
+    for name in target_names:
+        tw = set(canonical(name).split())
+        if tw and tw < src:            # all target words present + extra qualifier
+            return True
+    return False
 
 
 def _clean_plants(raw) -> list[str] | None:
@@ -71,11 +86,19 @@ def enrich_prompt(display_name: str, existing_names: list[str],
         '"plants": [the DISTINCT edible plant species a typical serving contains, '
         'as lowercase English tokens, e.g. curry roux -> ["wheat","turmeric","cumin"], '
         'milk -> []], '
-        '"english_name": short common English name for this grocery item, '
+        '"english_name": the common English name for THIS specific item — PRESERVE '
+        'brand names and the specific type/variety, never generalize. '
+        '"One Mighty Mill bagel" -> "one mighty mill bagel" (NOT "bagel"); '
+        '"white rice" -> "white rice" (NOT "rice"); "fettuccine" -> "fettuccine" '
+        '(NOT "pasta"); "yellow squash" -> "yellow squash" (NOT "zucchini"), '
         '"alias_of": ONLY if this item is the IDENTICAL product as one existing catalog '
-        'item written in a different script or spelling (e.g. たまねぎ vs 玉ねぎ), that '
-        'exact string. A related/similar/sub-type product is NOT an alias (ミニトマト is '
-        'NOT トマト; 冷凍ブロッコリー is NOT ブロッコリー). When unsure: null}'
+        'item written in a different script/spelling or an exact translation '
+        '(たまねぎ vs 玉ねぎ; ﾐﾙｸ vs ミルク; coriander vs cilantro; aubergine vs eggplant). '
+        'A different TYPE, VARIETY, BRAND, or SUB-TYPE is NOT an alias — keep it separate: '
+        'white rice is NOT rice/米; brown rice is NOT rice; spaghetti and fettuccine are '
+        'NOT pasta/パスタ (they are types of pasta); yellow squash is NOT zucchini/ズッキーニ '
+        '(different vegetable); "One Mighty Mill bagel" is NOT bagel/ベーグル (it is a brand); '
+        'ミニトマト is NOT トマト; 冷凍ブロッコリー is NOT ブロッコリー. When unsure: null}'
     )
 
 
@@ -121,6 +144,12 @@ async def enrich(conn, write_lock, catalog_id: int) -> bool:
                 "SELECT id, aliases_json FROM item_catalog WHERE canonical_name=?",
                 (alias_of,),
             ).fetchone()
+        if target and _is_variety(
+            row["canonical_name"], [alias_of] + json.loads(target["aliases_json"])
+        ):
+            log.info("merge blocked (variety/brand): %r kept distinct from %r",
+                     row["canonical_name"], alias_of)
+            target = None
         if target:
             # merge: repoint history + live items, record alias, drop this row
             conn.execute("UPDATE items SET catalog_id=? WHERE catalog_id=?",
@@ -135,10 +164,14 @@ async def enrich(conn, write_lock, catalog_id: int) -> bool:
             conn.execute("DELETE FROM item_catalog WHERE id=?", (row["id"],))
             log.info("alias-merged %r into %r", row["canonical_name"], alias_of)
         else:
-            # bank the English name as an alias → EN display + search for JP-typed items
+            # bank the English name as an alias → EN display + search for JP-typed
+            # items ONLY. For an English-typed item the display already IS English
+            # and name_en() shows it verbatim; banking a generic english_name here
+            # would both shadow the user's specific name and mis-route future adds.
             aliases = json.loads(row["aliases_json"])
             en = res.get("english_name")
-            if (isinstance(en, str) and en.strip() and en.isascii()
+            if (not row["display_name"].isascii()
+                    and isinstance(en, str) and en.strip() and en.isascii()
                     and not any(a.casefold() == en.strip().casefold() for a in aliases)):
                 aliases.append(en.strip().lower())
             conn.execute(

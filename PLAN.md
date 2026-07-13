@@ -239,6 +239,53 @@ public HTTPS host.
 
 ## Post-MVP change log
 
+### 2026-07-12 — Specificity fixes (brand/type preservation) + long-press editor
+Delegation: considered, rejected — debugging + subtle cross-file UI/backend changes
+(catalog.py + db.py + app.py + index.html) needing design judgment on
+canonicalization aggressiveness and gesture integration; not mechanical/voluminous,
+no machine-checkable spec short of the output itself (delegation.md "do NOT delegate").
+
+User bug report (live shopping trip 2026-07-12): (1) "One Mighty Mill bagel" → bagel
+(brand lost); (2) "White Rice" → rice, "Fettuccine"/"spaghetti" collapsed into pasta;
+(3) "Yellow squash" → zucchini; (4) plant count included un-bought items; (5) want
+long-press → adjustment screen for category/quantity. User choices: preserve
+brands+types (still merge true synonyms); un-merge existing collapsed rows.
+
+Root cause 1-3 (confirmed in live DB): the `alias_of` LLM merge (+ a seeded
+spaghetti→パスタ alias) folded specific/branded items into the generic seed rows, and
+`name_en` then showed the generic English alias instead of the typed text.
+
+**Fixes shipped:**
+- `db.name_en`: an ASCII (English-typed) display now ALWAYS wins over any banked
+  generic alias — "White rice"/"One Mighty Mill bagel" show as typed; the alias
+  fallback is reserved for Japanese displays.
+- `catalog.enrich`: (a) only banks the LLM `english_name` as an alias for non-ASCII
+  (JP) displays — never shadows an English name; (b) new deterministic `_is_variety`
+  backstop blocks any alias merge where the new item is a qualifier-superset of the
+  target ("white rice"⊃"rice", "fettuccine pasta"⊃"pasta"); (c) prompt rewritten to
+  keep brands/types/varieties distinct with the exact failing examples.
+- `apply_edit` op (+ Op.category field): long-press editor writes `items.qty_note`
+  and `item_catalog.category` (validated against CATEGORIES); idempotent, noop on
+  vanished item. Optimistic in `view()`.
+- Frontend: long-press sheet is now a full editor (quantity input + 9-category
+  picker + Save, keeping skip/remove); hold bumped 500→600 ms; EN/JA strings; sw v3.
+- **Issue 4 (no backend bug):** reconciled the op ledger — 43 checkoff ops, 4 undone
+  → 39 `purchase_events` → 29 plants, ALL from client checkoffs. The count only ever
+  reflects checked-off items; no phantom-count path exists. Likeliest cause is a
+  reflow mistap (checkoff removes a row, the list jumps, a follow-up tap lands on the
+  shifted row). Added a 350 ms post-removal tap/swipe lockout to prevent it.
+- **Data repair (un-merge):** backup → `~/backups/shopping-list/plantcart-preunmerge-2026-07-12.db`;
+  split "yellow squash", "white rice", "spaghetti", "fettuccine", "One Mighty Mill
+  bagel" back into their own catalog rows; stripped the bad aliases off ズッキーニ/米/
+  パスタ/ベーグル (kept the legit translation aliases). Past `purchase_events` stay on
+  the generic rows (user's choice) so today's plant count is unchanged. `seed_catalog`
+  パスタ aliases trimmed to `["pasta"]` so a fresh seed won't recollapse.
+- Tests: +9 in `tests/test_specificity.py` (name_en preservation, `_is_variety`,
+  enrich merge-block vs true-alias-merge, edit op qty/category/validation/noop).
+  Full suite **47 passed** (test_results/specificity_fixes_2026-07-12.txt). Live-verified
+  on :8123 after restart: catalog rows distinct, edit round-trip persists qty+category.
+
+
 ### 2026-07-11 — Purchase-history panel (mis-swipe repair) + history reset
 Delegation: considered, rejected — subtle cross-file UI feature (app.py + db.py +
 index.html) needing design judgment on panel/gesture integration, not mechanical

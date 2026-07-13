@@ -1,0 +1,23 @@
+PlantCart specificity+editor fixes — 2026-07-12T21:19:56-04:00
+...............................................                          [100%]
+=============================== warnings summary ===============================
+server/app.py:278
+  /home/korety/Project/plantcart/server/app.py:278: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @app.on_event("startup")
+
+../../miniconda3/envs/podcast_flow/lib/python3.11/site-packages/fastapi/applications.py:4576
+  /home/korety/miniconda3/envs/podcast_flow/lib/python3.11/site-packages/fastapi/applications.py:4576: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    return self.router.on_event(event_type)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+47 passed, 2 warnings in 1.17s

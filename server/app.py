@@ -51,11 +51,13 @@ def now_iso() -> str:
 class Op(BaseModel):
     op_id: str = Field(..., min_length=8, max_length=64)
     type: Literal["add", "checkoff", "remove", "skip", "undo_checkoff",
-                  "undo_purchase", "snooze"]
+                  "undo_purchase", "snooze", "edit"]
     actor: str = Field("", max_length=40)
-    # add
+    # add / edit
     name: str | None = Field(None, max_length=120)
     qty_note: str | None = Field(None, max_length=120)
+    # edit (category adjustment — one of catalog.CATEGORIES)
+    category: str | None = Field(None, max_length=20)
     # add (client-generated item uuid) / checkoff / remove
     item_id: str | None = Field(None, min_length=8, max_length=64)
     # undo_checkoff: the op_id of the checkoff being undone
@@ -197,6 +199,32 @@ def apply_undo_purchase(op: Op, ts: str) -> dict:
     return {"undone_event": op.event_id, "item_id": item_id}
 
 
+def apply_edit(op: Op, ts: str) -> dict:
+    """Long-press editor: adjust an item's quantity note and/or its category.
+    Quantity is per-item (items.qty_note); category is per-catalog-row and so
+    shared by every list entry of that item — the coarse aisle grouping."""
+    if op.item_id is None:
+        raise HTTPException(422, "edit requires item_id")
+    row = conn.execute(
+        "SELECT catalog_id FROM items WHERE id=?", (op.item_id,)
+    ).fetchone()
+    if row is None:  # removed / bought by the other phone → nothing to edit
+        return {"noop": True}
+    changed = False
+    if op.qty_note is not None:
+        conn.execute("UPDATE items SET qty_note=? WHERE id=?", (op.qty_note, op.item_id))
+        changed = True
+    if op.category is not None:
+        if op.category not in catalog.CATEGORIES:
+            raise HTTPException(422, "invalid category")
+        conn.execute("UPDATE item_catalog SET category=? WHERE id=?",
+                     (op.category, row["catalog_id"]))
+        changed = True
+    if changed:
+        db.bump_revision(conn)
+    return {"edited": op.item_id, "changed": changed}
+
+
 def apply_snooze(op: Op, ts: str) -> dict:
     """Dismiss a suggestion: snooze for ½ its median cycle (PLAN.md), min 2 days."""
     if op.catalog_id is None:
@@ -223,6 +251,7 @@ APPLY = {
     "undo_checkoff": apply_undo_checkoff,
     "undo_purchase": apply_undo_purchase,
     "snooze": apply_snooze,
+    "edit": apply_edit,
 }
 
 

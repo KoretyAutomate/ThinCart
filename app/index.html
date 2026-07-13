@@ -114,6 +114,20 @@
   #sheet .skip { background:#fdf3e3; color:var(--amber); }
   #sheet .danger { background:#fbe9e5; color:var(--red); }
   #sheet .cancel { background:#eef1ec; color:var(--text); }
+  #sheet .save { background:var(--green); color:#fff; }
+  #sheet .sheet-field { display:flex; align-items:center; gap:10px; margin:0 0 14px; }
+  #sheet .sheet-field span { font-size:.9rem; color:var(--muted); min-width:62px; }
+  #sheet #sheet-qty { flex:1; padding:12px; border:1.5px solid #d4dcd4;
+    border-radius:10px; font-size:1rem; outline:none; }
+  #sheet .sheet-field-label { font-size:.72rem; font-weight:700; letter-spacing:.06em;
+    text-transform:uppercase; color:var(--muted); margin:0 2px 8px; }
+  #sheet #sheet-cats { display:grid; grid-template-columns:repeat(3,1fr); gap:8px;
+    margin-bottom:16px; }
+  #sheet .catopt { margin:0; padding:10px 4px; border:1.5px solid #d4dcd4;
+    border-radius:10px; background:var(--card); font-size:.8rem; font-weight:600;
+    display:flex; flex-direction:column; align-items:center; gap:3px; }
+  #sheet .catopt.sel { border-color:var(--green); background:#e9f5ec; color:var(--green-dark); }
+  #sheet .catopt .em { font-size:1.15rem; }
   #namedlg {
     position:fixed; inset:0; background:var(--bg); z-index:40; display:none;
     flex-direction:column; align-items:center; justify-content:center; gap:14px; padding:24px;
@@ -262,6 +276,11 @@
 
 <div id="sheet"><div class="card">
   <h2 id="sheet-title"></h2>
+  <label class="sheet-field"><span id="sheet-qty-label"></span>
+    <input id="sheet-qty" maxlength="120"></label>
+  <div class="sheet-field-label" id="sheet-cat-label"></div>
+  <div id="sheet-cats"></div>
+  <button class="save" id="sheet-save"></button>
   <p id="sheet-note"></p>
   <button class="skip" id="sheet-skip"></button>
   <button class="danger" id="sheet-remove"></button>
@@ -312,6 +331,11 @@ let base  = JSON.parse(localStorage.getItem(LS.base)  || '{"revision":0,"items":
 let queue = JSON.parse(localStorage.getItem(LS.queue) || '[]');
 let actor = localStorage.getItem(LS.name) || '';
 let flushing = false, ws = null, wsDelay = 1000, lastToast = null;
+/* reflow guard (issue: un-touched items getting bought): checking an item off
+ * removes its row and the list jumps up under the finger — a stray follow-up
+ * tap then lands on whatever row slid into that spot. Briefly ignore tap/swipe
+ * checkoffs right after any list removal. */
+let lockUntil = 0;
 
 const saveQueue = () => localStorage.setItem(LS.queue, JSON.stringify(queue));
 const saveBase  = () => localStorage.setItem(LS.base, JSON.stringify(base));
@@ -334,6 +358,7 @@ const STR = {
   en: {
     add_ph:'Add item… (milk, eggs, apples …)', qty_ph:'qty', tray:'Suggested — probably due',
     empty:'List is empty — nice work 🎉', uncat:'📦 Uncategorized',
+    sheet_qty:'Quantity', sheet_cat:'Category', sheet_save:'Save changes',
     sheet_note:'Neither counts as a purchase. Skipped items get suggested again tomorrow.',
     sheet_skip:'🚫 Out of stock — skip', sheet_remove:'Remove (added by mistake)', cancel:'Cancel',
     swipe_bought:'Bought', swipe_skip:'Skip',
@@ -368,6 +393,7 @@ const STR = {
   ja: {
     add_ph:'追加… (牛乳, 卵, りんご など)', qty_ph:'数量', tray:'提案 — そろそろ買い時',
     empty:'リストは空です 🎉', uncat:'📦 未分類',
+    sheet_qty:'数量', sheet_cat:'カテゴリー', sheet_save:'変更を保存',
     sheet_note:'どちらも購入としては記録されません。スキップは明日また提案されます。',
     sheet_skip:'🚫 在庫なし — スキップ', sheet_remove:'削除（間違えて追加）', cancel:'キャンセル',
     swipe_bought:'購入', swipe_skip:'スキップ',
@@ -420,6 +446,9 @@ function applyLang() {
   $('name').placeholder = T().add_ph;   $('qty').placeholder = T().qty_ph;
   $('tray-label').textContent = T().tray;
   $('empty').textContent = T().empty;
+  $('sheet-qty-label').textContent = T().sheet_qty;
+  $('sheet-cat-label').textContent = T().sheet_cat;
+  $('sheet-save').textContent = T().sheet_save;
   $('sheet-note').textContent = T().sheet_note;
   $('sheet-skip').textContent = T().sheet_skip;
   $('sheet-remove').textContent = T().sheet_remove;
@@ -460,6 +489,12 @@ function view() {
                      added_by:op.actor, category:op.cat||null, pending:true });
     } else if (op.type === 'checkoff' || op.type === 'remove' || op.type === 'skip') {
       items = items.filter(i => i.id !== op.item_id);
+    } else if (op.type === 'edit') {
+      const it = items.find(i => i.id === op.item_id);
+      if (it) {
+        if (op.qty_note !== undefined) it.qty_note = op.qty_note;
+        if (op.category !== undefined) it.category = op.category;
+      }
     }
   }
   return items;
@@ -607,13 +642,14 @@ function render() {
   }
 }
 
-/* ============ gestures: tap=checkoff, long-press=remove sheet ============ */
+/* ============ gestures: tap=checkoff, long-press=edit sheet ============ */
 function attachGestures(li, it) {
   /* Tap = click (down AND up on this item — a pointerup alone must never
    * check anything off; the candidates dropdown closing mid-tap used to leak
    * its pointerup onto the item underneath = ghost purchases).
-   * Long-press = 500 ms hold with <12 px movement (any-jitter cancellation
-   * made long-press unreachable on real phones).
+   * Long-press = 600 ms hold with <12 px movement (a firm hold: opens the
+   * quantity/category editor + skip/remove; any-jitter cancellation once made
+   * long-press unreachable on real phones, so only distance cancels it).
    * Swipe right = ✓ bought (purchase event) · swipe left = 🚫 skip (no event,
    * re-suggested tomorrow) — same server ops as tap / sheet, different gesture. */
   let timer = null, longFired = false, armed = false, sx = 0, sy = 0;
@@ -630,7 +666,7 @@ function attachGestures(li, it) {
   li.addEventListener('pointerdown', e => {
     armed = true; longFired = false; swiping = false; dx = 0;
     sx = e.clientX; sy = e.clientY;
-    timer = setTimeout(() => { longFired = true; openSheet(it); }, 500);
+    timer = setTimeout(() => { longFired = true; openSheet(it); }, 600);
   });
   li.addEventListener('pointermove', e => {
     dx = e.clientX - sx;
@@ -654,33 +690,64 @@ function attachGestures(li, it) {
   li.addEventListener('pointerup', () => {
     clearTimeout(timer);
     if (!swiping) return;
-    if (dx > THRESH())       checkoff(it);      // render() removes the row
+    if (dx > THRESH())       { if (Date.now() >= lockUntil) checkoff(it); else springBack(); }
     else if (dx < -THRESH()) skipItem(it);
     else                     springBack();
     swiping = false;
   });
   li.addEventListener('click', () => {
-    if (armed && !longFired && !swiping) checkoff(it);
+    if (armed && !longFired && !swiping && Date.now() >= lockUntil) checkoff(it);
     armed = false;
   });
   li.addEventListener('contextmenu', e => e.preventDefault());
 }
 
 function skipItem(it) {
+  lockUntil = Date.now() + 350;
   enqueue({ type:'skip', item_id: it.id });
   // undo for a mis-swipe: put it straight back on the list
   showToast(`🚫 ${disp(it)}`, () => enqueue({ type:'add', name:it.name,
     qty_note:it.qty_note || '', item_id: uuid(), cat:it.category }));
 }
 
-function openSheet(it) {
-  $('sheet-title').textContent = disp(it);
-  $('sheet').style.display = 'flex';
-  $('sheet-skip').onclick   = () => { $('sheet').style.display='none'; enqueue({type:'skip',   item_id:it.id}); };
-  $('sheet-remove').onclick = () => { $('sheet').style.display='none'; enqueue({type:'remove', item_id:it.id}); };
+/* long-press editor: adjust quantity + category, plus the skip / remove actions */
+let editState = null;   // { it, category }
+function renderCatOpts() {
+  const box = $('sheet-cats'); box.innerHTML = '';
+  for (const key of Object.keys(CATS)) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'catopt' + (key === editState.category ? ' sel' : '');
+    b.innerHTML = `<span class="em"></span><span></span>`;
+    b.querySelector('.em').textContent = CATS[key][0];
+    b.children[1].textContent = CATS[key][lang === 'ja' ? 1 : 2];
+    b.onclick = () => { editState.category = key; renderCatOpts(); };
+    box.appendChild(b);
+  }
 }
-$('sheet-cancel').onclick = () => $('sheet').style.display = 'none';
-$('sheet').onclick = e => { if (e.target === $('sheet')) $('sheet').style.display='none'; };
+function closeSheet() { $('sheet').style.display = 'none'; editState = null; }
+function openSheet(it) {
+  editState = { it, category: it.category || 'other' };
+  $('sheet-title').textContent = disp(it);
+  $('sheet-qty').value = it.qty_note || '';
+  renderCatOpts();
+  $('sheet').style.display = 'flex';
+  $('sheet-skip').onclick   = () => { closeSheet(); enqueue({ type:'skip',   item_id:it.id }); };
+  $('sheet-remove').onclick = () => { closeSheet(); enqueue({ type:'remove', item_id:it.id }); };
+}
+function saveSheet() {
+  if (!editState) return;
+  const it = editState.it, qty = $('sheet-qty').value.trim();
+  const fields = { type:'edit', item_id: it.id };
+  let changed = false;
+  if (qty !== (it.qty_note || ''))                 { fields.qty_note = qty;              changed = true; }
+  if (editState.category !== (it.category || 'other')) { fields.category = editState.category; changed = true; }
+  if (changed) enqueue(fields);
+  closeSheet();
+}
+$('sheet-save').onclick = saveSheet;
+$('sheet-cancel').onclick = closeSheet;
+$('sheet').onclick = e => { if (e.target === $('sheet')) closeSheet(); };
 
 /* ============ ops ============ */
 function enqueue(fields) {
@@ -690,6 +757,7 @@ function enqueue(fields) {
 }
 
 function checkoff(it) {
+  lockUntil = Date.now() + 350;
   const op = enqueue({ type:'checkoff', item_id: it.id });
   showToast(`✓ ${disp(it)}`, () => {
     // undo: if the checkoff is still queued locally, just retract it;
