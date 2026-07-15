@@ -1,8 +1,8 @@
 {
-  "name": "plantcart-app",
+  "name": "thincart-app",
   "version": "0.1.0",
   "private": true,
-  "description": "PlantCart — native mobile wrapper (Capacitor) that bundles the PWA and hits a remote PlantCart API.",
+  "description": "ThinCart — native mobile wrapper (Capacitor) that bundles the PWA and hits a remote ThinCart API.",
   "scripts": {
     "copy-web": "rm -rf www && mkdir -p www && cp -R ../app/. www/ && cp api-base.js www/api-base.js",
     "sync": "npm run copy-web && cap sync",

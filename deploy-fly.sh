@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Turnkey Fly.io deploy for PlantCart. Run AFTER `flyctl auth login`.
+# Turnkey Fly.io deploy for ThinCart. Run AFTER `flyctl auth login`.
 #
 #   ./deploy-fly.sh <unique-app-name>
 #
@@ -11,7 +11,7 @@ set -euo pipefail
 APP="${1:-}"
 REGION="${FLY_REGION:-nrt}"   # Tokyo
 if [[ -z "$APP" ]]; then
-  echo "usage: ./deploy-fly.sh <unique-app-name>   (e.g. plantcart-arai)" >&2
+  echo "usage: ./deploy-fly.sh <unique-app-name>   (e.g. thincart-arai)" >&2
   exit 1
 fi
 
@@ -27,9 +27,9 @@ flyctl apps create "$APP" 2>/dev/null || echo "   (app already exists — reusin
 sed -i "s/^app = .*/app = \"$APP\"/" fly.toml
 echo "==> fly.toml app pinned to '$APP'"
 
-echo "==> Ensuring persistent volume 'plantcart_data' in $REGION"
-if ! flyctl volumes list -a "$APP" 2>/dev/null | grep -q plantcart_data; then
-  flyctl volumes create plantcart_data --size 1 --region "$REGION" -a "$APP" --yes
+echo "==> Ensuring persistent volume 'thincart_data' in $REGION"
+if ! flyctl volumes list -a "$APP" 2>/dev/null | grep -q thincart_data; then
+  flyctl volumes create thincart_data --size 1 --region "$REGION" -a "$APP" --yes
 else
   echo "   (volume exists — reusing)"
 fi
@@ -38,19 +38,19 @@ fi
 # on any config redeploy (LLM flip, registration flip) and force-logout every
 # session mid-use. Deliberate rotation (lost phone, leaked token) is a manual
 # runbook step — see DEPLOY.md.
-if flyctl secrets list -a "$APP" 2>/dev/null | grep -q PLANTCART_SECRET; then
-  echo "==> PLANTCART_SECRET already set — keeping it (rotation is manual; see DEPLOY.md)"
+if flyctl secrets list -a "$APP" 2>/dev/null | grep -q THINCART_SECRET; then
+  echo "==> THINCART_SECRET already set — keeping it (rotation is manual; see DEPLOY.md)"
 else
-  echo "==> Setting PLANTCART_SECRET (generated, not stored anywhere else)"
+  echo "==> Setting THINCART_SECRET (generated, not stored anywhere else)"
   SECRET="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')"
-  flyctl secrets set "PLANTCART_SECRET=$SECRET" -a "$APP" >/dev/null
+  flyctl secrets set "THINCART_SECRET=$SECRET" -a "$APP" >/dev/null
   echo "   secret set."
 fi
 
 # CORS derives from the app name — never hardcoded (a mismatched origin makes
 # every browser API call fail after deploy).
-flyctl secrets set "PLANTCART_CORS=https://$APP.fly.dev" -a "$APP" --stage >/dev/null
-echo "==> PLANTCART_CORS=https://$APP.fly.dev (staged; applies with this deploy)"
+flyctl secrets set "THINCART_CORS=https://$APP.fly.dev" -a "$APP" --stage >/dev/null
+echo "==> THINCART_CORS=https://$APP.fly.dev (staged; applies with this deploy)"
 
 echo "==> Deploying (remote builder)"
 flyctl deploy -a "$APP" --remote-only --ha=false --yes
@@ -61,13 +61,13 @@ echo "==> Deployed. Verifying /health ..."
 sleep 5
 curl -fsS "$URL/health" && echo
 echo
-echo "PlantCart is live at:  $URL"
+echo "ThinCart is live at:  $URL"
 echo "Open it, create an account, and share the invite code with your wife."
 echo
 echo "To close registration after the household is set up (invite-code-only from then on):"
-echo "  flyctl secrets set PLANTCART_REGISTRATION=closed -a $APP"
+echo "  flyctl secrets set THINCART_REGISTRATION=closed -a $APP"
 echo
 echo "To enable recipes / plant enrichment later (ONLY after registration is closed):"
 echo "  1) flyctl secrets set ANTHROPIC_API_KEY=sk-ant-... -a $APP"
-echo "  2) set PLANTCART_LLM_PROVIDER = \"anthropic\" in fly.toml, then: ./deploy-fly.sh $APP"
+echo "  2) set THINCART_LLM_PROVIDER = \"anthropic\" in fly.toml, then: ./deploy-fly.sh $APP"
 echo "     (config-only redeploys are token-safe: the JWT secret is never regenerated)"

@@ -19,7 +19,7 @@ import llm
 import plants
 from db import canonical
 
-log = logging.getLogger("plantcart.catalog")
+log = logging.getLogger("thincart.catalog")
 
 
 async def web_evidence(name: str) -> list[str] | None:

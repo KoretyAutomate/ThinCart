@@ -1,4 +1,4 @@
-# PlantCart → real app service — productization PLAN (branch `saas`)
+# ThinCart → real app service — productization PLAN (branch `saas`)
 
 Turn the single-tenant, Tailscale-only DGX app into a **multi-tenant service**
 deployable three ways from one codebase:
@@ -23,7 +23,7 @@ deployable three ways from one codebase:
 >
 > **Not done (needs the user — see "what only the user can do"):** actually hosting
 > it, Anthropic key, the two developer accounts + a Mac for iOS, wiring
-> `window.PLANTCART_API_BASE` into index.html for the bundled native build (one
+> `window.THINCART_API_BASE` into index.html for the bundled native build (one
 > documented change), and implementing the local-notifications native feature.
 
 > **App Store note (user raised it):** neither store bans AI-assisted code. What
@@ -70,7 +70,7 @@ catalog_snooze(household_id TEXT, catalog_id INT, snoozed_until TEXT,
 ```
 
 Auth: **pbkdf2_hmac-sha256** password hashing (stdlib, 200k iters, per-user salt);
-**JWT** (HS256, `PLANTCART_SECRET`) carrying `user_id` + `household_id`, 30-day.
+**JWT** (HS256, `THINCART_SECRET`) carrying `user_id` + `household_id`, 30-day.
 Every `/api/*` except `/api/auth/*` requires `Authorization: Bearer <jwt>`;
 the token resolves the caller's household and scopes every query.
 
@@ -96,7 +96,7 @@ WS   /ws?token=...   (joins household room)
 
 ## Build sequence (each step verified by execution in the worktree)
 
-Worktree runs on a **throwaway port + DB** (`:8124`, `PLANTCART_DB=/tmp/…`) so it
+Worktree runs on a **throwaway port + DB** (`:8124`, `THINCART_DB=/tmp/…`) so it
 never touches the live :8123 service or its real data.
 
 **Phase A — multi-tenant backend (the foundation)**
@@ -160,7 +160,7 @@ NEWEST-version rule (e.g. master's reworked test_plants.py, never
 `3ddedb5`'s), since unverified or stale fixture claims are unfixable by
 retries.
 
-Goal: the hosted, public-HTTPS PlantCart becomes the **primary** instance the
+Goal: the hosted, public-HTTPS ThinCart becomes the **primary** instance the
 two phones use daily; the DGX tailnet instance is retired after a soak. Web
 service only — mobile store wrappers (Phase C) stay banked.
 
@@ -168,11 +168,11 @@ service only — mobile store wrappers (Phase C) stay banked.
 
 | Decision | Recommendation | Why |
 |---|---|---|
-| Host | **Fly.io** | `fly.toml` + `deploy-fly.sh` already built; Render/VPS remain fallbacks in DEPLOY.md (which E1 updates — it still hardcodes `plantcart.fly.dev`) |
-| App name | **`thincart`** (user-chosen 2026-07-13; Fly names are lowercase DNS labels, so "ThinCart" deploys as `thincart` → `https://thincart.fly.dev`; if taken, user picks a variant) (bare "plantcart" is almost certainly taken). `deploy-fly.sh` will `sed` the chosen name into fly.toml's `app =` line before deploying — `flyctl deploy -a <name>` against a mismatched fly.toml is an UNVERIFIED path (the script has never run past its auth check), so make the two agree instead of assuming the flag wins. All URLs/CORS derive from the real name; nothing hardcoded |
+| Host | **Fly.io** | `fly.toml` + `deploy-fly.sh` already built; Render/VPS remain fallbacks in DEPLOY.md (which E1 updates — it still hardcodes `thincart.fly.dev`) |
+| App name | **`thincart`** (user-chosen 2026-07-13; Fly names are lowercase DNS labels, so "ThinCart" deploys as `thincart` → `https://thincart.fly.dev`; if taken, user picks a variant) (bare "thincart" is almost certainly taken). `deploy-fly.sh` will `sed` the chosen name into fly.toml's `app =` line before deploying — `flyctl deploy -a <name>` against a mismatched fly.toml is an UNVERIFIED path (the script has never run past its auth check), so make the two agree instead of assuming the flag wins. All URLs/CORS derive from the real name; nothing hardcoded |
 | Machines | **`min_machines_running = 1`** (change from current `0`); `auto_start_machines` stays `true` (harmless once the DB swap no longer stops the machine — see E4) | auto-stop would cold-start on nearly every phone unlock in-store; one always-on shared-cpu machine is ~$3–5/mo |
-| LLM | launch with `PLANTCART_LLM_PROVIDER=none`; flip to `anthropic` + Haiku 4.5 key AFTER first deploy | the app must exist before `flyctl secrets set … -a <app>` can run, so key-then-deploy is impossible in one pass; flipping later is a config-only redeploy, token-safe per E1 step 8 |
-| Registration | **closed after E3**, via a new flag `PLANTCART_REGISTRATION=open\|closed` where closed still allows **register-with-valid-invite-code** (plain closed would lock out the invited spouse — `/api/households/join` needs a bearer token, i.e. an existing account). Because the invite code then becomes an account-creation credential, E0 also adds **invite-code rotation** (`POST /api/households/rotate_invite`) — today's code is permanent, printed by the import script, and shown in settings; unrotatable = anyone who ever saw it can join forever | a public endpoint with open signup + LLM calls is a cost/abuse surface; rate limits throttle but don't cap spend |
+| LLM | launch with `THINCART_LLM_PROVIDER=none`; flip to `anthropic` + Haiku 4.5 key AFTER first deploy | the app must exist before `flyctl secrets set … -a <app>` can run, so key-then-deploy is impossible in one pass; flipping later is a config-only redeploy, token-safe per E1 step 8 |
+| Registration | **closed after E3**, via a new flag `THINCART_REGISTRATION=open\|closed` where closed still allows **register-with-valid-invite-code** (plain closed would lock out the invited spouse — `/api/households/join` needs a bearer token, i.e. an existing account). Because the invite code then becomes an account-creation credential, E0 also adds **invite-code rotation** (`POST /api/households/rotate_invite`) — today's code is permanent, printed by the import script, and shown in settings; unrotatable = anyone who ever saw it can join forever | a public endpoint with open signup + LLM calls is a cost/abuse surface; rate limits throttle but don't cap spend |
 | DGX instance | keep running untouched through the 1-week soak, then disable | rollback = point phones back at the tailnet URL — **but see Rollback: post-cutover data lives only on Fly** |
 
 ## E0 — branch reconciliation (code only, worktree :8124 + throwaway DB)
@@ -272,7 +272,7 @@ service only — mobile store wrappers (Phase C) stay banked.
    them. All 28 get household-scoped ports (or a written note per test if one
    is genuinely obsolete under multi-tenancy — no silent drops).
    *(Crew-delegable under the brief constraints in the Delegation note.)*
-4. `PLANTCART_REGISTRATION` flag: `open` (default) | `closed`. The
+4. `THINCART_REGISTRATION` flag: `open` (default) | `closed`. The
    `invite_code` register-body field is honored in **BOTH modes** (present
    + valid → account auto-joins that household; present + invalid → 403,
    never a silent solo household — an early-onboarding spouse must not end
@@ -332,7 +332,7 @@ service only — mobile store wrappers (Phase C) stay banked.
    unlimited brute-force). Instead, key the limiter on the
    **`Fly-Client-IP` header** (set authoritatively by fly-proxy, the only
    header Fly documents as trustworthy) — **but ONLY when
-   `PLANTCART_TRUST_FLY_CLIENT_IP=1`** (set in fly.toml's `[env]`,
+   `THINCART_TRUST_FLY_CLIENT_IP=1`** (set in fly.toml's `[env]`,
    default OFF): on the non-Fly deploy paths DEPLOY.md keeps (Render, VPS,
    docker-compose, the DGX worktree) nothing strips a client-forged
    Fly-Client-IP, so unconditional trust would reintroduce the exact
@@ -355,15 +355,15 @@ service only — mobile store wrappers (Phase C) stay banked.
 ## E1 — pre-deploy hardening gate (still local)
 
 8. **Fix `deploy-fly.sh`** (three edits, one commit):
-   - `PLANTCART_SECRET`: set **only if absent** (`flyctl secrets list` check)
+   - `THINCART_SECRET`: set **only if absent** (`flyctl secrets list` check)
      — today it regenerates on every run, so any config redeploy (LLM flip,
      registration flip) would rotate the JWT secret and force-logout both
      phones mid-soak. Because this removes the only (accidental) rotation
      mechanism, the DEPLOY.md rewrite (step 10) must document DELIBERATE
-     rotation as a runbook: `flyctl secrets set PLANTCART_SECRET=<new> -a
+     rotation as a runbook: `flyctl secrets set THINCART_SECRET=<new> -a
      <app>` — force-logs-out every session by design; this is the
      break-glass for a lost phone or leaked token;
-   - set `PLANTCART_CORS=https://$APP.fly.dev` (derived, never hardcoded);
+   - set `THINCART_CORS=https://$APP.fly.dev` (derived, never hardcoded);
    - `sed` the app name into fly.toml's `app =` line so toml and `-a` agree.
 9. **Dockerfile/entrypoint fixes** (the image as-is is dead on arrival on a
    Fly volume), then `docker build`:
@@ -390,23 +390,23 @@ service only — mobile store wrappers (Phase C) stay banked.
      pass through a remote shell; nested-quote handling is not guaranteed)
      and no extra CLI package for a capability python3 already has;
    - Fly mounts the `/data` volume **root-owned**, but the app runs as
-     `USER plantcart` (uid 10001) → first boot cannot create
-     `/data/plantcart.db` and crash-loops; likewise anything `fly sftp`/
+     `USER thincart` (uid 10001) → first boot cannot create
+     `/data/thincart.db` and crash-loops; likewise anything `fly sftp`/
      `fly ssh` places on the volume is root-owned. Fix: an `entrypoint.sh`
-     that starts as root, `chown -R plantcart /data` when present, then
+     that starts as root, `chown -R thincart /data` when present, then
      drops privileges and execs uvicorn with the exact incantation
-     `exec setpriv --reuid plantcart --regid plantcart --clear-groups
+     `exec setpriv --reuid thincart --regid thincart --clear-groups
      uvicorn app:app --host 0.0.0.0 --port 8123` — the `--clear-groups` is
      load-bearing: setpriv REFUSES `--regid` without a group-handling flag
      (verified locally: exits 1, "requires --keep-groups, --clear-groups,
-     …"). This also requires **removing the Dockerfile's `USER plantcart`
+     …"). This also requires **removing the Dockerfile's `USER thincart`
      directive** (line 32) — with it in place the entrypoint runs as uid
      10001 and both the chown and the setpriv fail. The boot-time chown
      also self-heals ownership of any root-uploaded file after the E4
      swap's restart.
    - Verify locally: run the container with a **root-owned** bind-mounted
      data dir (simulating the Fly volume) **and
-     `-e PLANTCART_DB=/data/plantcart.db`** — without pinning the env var
+     `-e THINCART_DB=/data/thincart.db`** — without pinning the env var
      the app writes to the image's build-time-chowned `/srv/server/data`,
      the health check goes green, and the entrypoint chown/setpriv fix
      ships unexercised. Check health via
@@ -419,13 +419,13 @@ service only — mobile store wrappers (Phase C) stay banked.
      so it needs a check aimed at the actual server process; the user runs any browser/curl
      spot-check per env-constraints.
 10. Checklist: no secrets in repo; `.env.example` covers every config key
-    including `PLANTCART_REGISTRATION`; `fly.toml` gets
+    including `THINCART_REGISTRATION`; `fly.toml` gets
     `min_machines_running = 1`; **update DEPLOY.md** — its Fly section still
-    hardcodes `plantcart.fly.dev` in the CORS secret + health-check lines and
+    hardcodes `thincart.fly.dev` in the CORS secret + health-check lines and
     duplicates what deploy-fly.sh now does; rewrite it around the script and
     `<app>` placeholders (Render/VPS sections keep manual CORS but with
     placeholder domains). The rewrite must also document the
-    `PLANTCART_TRUST_FLY_CLIENT_IP` flag: **Fly only** — enabling it behind
+    `THINCART_TRUST_FLY_CLIENT_IP` flag: **Fly only** — enabling it behind
     Render/Caddy/nginx (which pass unknown headers through) would let a
     client-forged `Fly-Client-IP` bypass the auth rate limiter per-request.
 11. Dry-run migration against a **fresh `sqlite3 .backup` copy of the live
@@ -433,9 +433,9 @@ service only — mobile store wrappers (Phase C) stay banked.
     usage resumed hours after the 2026-07-11 reset (39 purchase events +
     207 catalog rows verified read-only on 2026-07-12 evening) and it only
     grows richer while E0 runs. Secondary fixture if ever needed:
-    `~/backups/plantcart/keep-dryrun-plantcart-2026-07-11.db` (the 29-event
+    `~/backups/thincart/keep-dryrun-thincart-2026-07-11.db` (the 29-event
     pre-reset backup, already copied 2026-07-12 to a name the nightly
-    keep-14 prune glob `plantcart-*.db` cannot sweep — the original dated
+    keep-14 prune glob `thincart-*.db` cannot sweep — the original dated
     copy gets pruned ~2026-07-25). Gate precondition either way: assert the
     fixture's `purchase_events` count is > 0 first — an events-empty
     fixture makes this gate vacuous. Throwaway
@@ -466,7 +466,7 @@ service only — mobile store wrappers (Phase C) stay banked.
     the recipe/enrichment endpoints; the rate limiter throttles but does
     not cap spend). When the time comes: user runs
     `flyctl secrets set ANTHROPIC_API_KEY=… -a <app>`, sets
-    `PLANTCART_LLM_PROVIDER = "anthropic"` in fly.toml, re-runs
+    `THINCART_LLM_PROVIDER = "anthropic"` in fly.toml, re-runs
     `./deploy-fly.sh <app>` — a config-only redeploy, token-safe after
     step 8, so nothing is lost by sequencing it late.
 
@@ -486,7 +486,7 @@ service only — mobile store wrappers (Phase C) stay banked.
 17. PWA install check on a real phone over the public HTTPS origin (secure
     context: SW caching + A2HS must both work — untestable publicly before).
 18. **Close registration for good**: `flyctl secrets set
-    PLANTCART_REGISTRATION=closed -a <app>` (a secrets set restarts the
+    THINCART_REGISTRATION=closed -a <app>` (a secrets set restarts the
     machine — fine pre-cutover). Then **live-verify the closed-mode invite
     path on the deployed app** — register one more throwaway account using
     the throwaway household's **current (post-step-16-rotation)** invite
@@ -516,28 +516,28 @@ service only — mobile store wrappers (Phase C) stay banked.
     confirm the **synced** pill (queue flushed), and the household agrees
     not to touch the app until step 22 completes (a same-evening window).
     Then freeze the source for real: `systemctl --user disable --now
-    plantcart.service` — **disable, not just stop**: the unit is
+    thincart.service` — **disable, not just stop**: the unit is
     `WantedBy=default.target`, so a mere stop resurrects the "frozen"
     service on any DGX reboot or re-login during the soak, and a phone
     still carrying the old PWA would write to the stale DB. Re-enable only
     on rollback. **In the same sitting, disarm the two automation paths
     that would restart it anyway** (`systemctl restart` starts even a
-    disabled unit): the `preflight-plantcart` skill auto-restarts
-    plantcart.service unconditionally — and mid-soak glitches are exactly
+    disabled unit): the `preflight-thincart` skill auto-restarts
+    thincart.service unconditionally — and mid-soak glitches are exactly
     its documented trigger — and the `restartservice` skill covers
-    plantcart too. Edit both NOW (not at step 24) to mark plantcart
+    thincart too. Edit both NOW (not at step 24) to mark thincart
     "FROZEN — cutover in progress, do NOT start; the Fly instance is
     primary"; step 24 does the full rewrite. Then
     take the final snapshot with the guarded helper (absolute path — the
     script lives on the saas branch, i.e. the WORKTREE, until step 24's
     merge) —
-    `python3 ~/Project/plantcart-saas/server/backup_db.py --db ~/Project/plantcart/server/data/plantcart.db`
+    `python3 ~/Project/thincart-saas/server/backup_db.py --db ~/Project/thincart/server/data/thincart.db`
     (integrity-checked, not a bare `.backup`), then **`cp` the printed
     `backup-<stamp>.db` artifact** (the helper always writes next to the
     DB and has no --out flag; without this copy the documented rollback
     file never exists) — saved as
-    `~/backups/plantcart/pre-migration-final.db` — a name that does NOT
-    match the nightly prune glob `plantcart-*.db`, because the old backup
+    `~/backups/thincart/pre-migration-final.db` — a name that does NOT
+    match the nightly prune glob `thincart-*.db`, because the old backup
     timer keeps running through the soak and its keep-14 sweep would
     silently delete a conventionally-named "kept indefinitely" snapshot
     around day 13. The service stays stopped unless rolling back — any
@@ -552,21 +552,21 @@ service only — mobile store wrappers (Phase C) stay banked.
 21. **DB swap — the machine stays RUNNING throughout** (`fly sftp`/`fly ssh`
     need a started machine; stopping first is physically impossible to
     follow, and a stopped window would race `auto_start_machines`):
-    a. `fly sftp` put the imported DB to `/data/plantcart.db.incoming`;
+    a. `fly sftp` put the imported DB to `/data/thincart.db.incoming`;
     b. `fly ssh console`: **checkpoint the old DB first** via
-       `python3 /srv/server/backup_db.py --db /data/plantcart.db --checkpoint`
+       `python3 /srv/server/backup_db.py --db /data/thincart.db --checkpoint`
        (E1 step 9's script
        — it verifies the checkpoint result row reports `busy=0` and exits
        non-zero otherwise; a bare CLI checkpoint exits 0 even when a
        lingering reader — health check, WS holdover — blocks it, which
        would strand committed writes in the WAL the next command deletes).
        Retry until it exits clean. Then move the old DB aside
-       (`mv /data/plantcart.db /data/plantcart.db.pre-migration`) **and
-       delete its now-empty stale sidecars** (`rm -f /data/plantcart.db-wal
-       /data/plantcart.db-shm` — the app never closes its connection, so a
+       (`mv /data/thincart.db /data/thincart.db.pre-migration`) **and
+       delete its now-empty stale sidecars** (`rm -f /data/thincart.db-wal
+       /data/thincart.db-shm` — the app never closes its connection, so a
        leftover WAL would otherwise be replayed INTO the new file on boot,
        silently corrupting it), then atomic
-       `mv /data/plantcart.db.incoming /data/plantcart.db` (same volume;
+       `mv /data/thincart.db.incoming /data/thincart.db` (same volume;
        ownership self-heals via the entrypoint chown on the next restart);
     c. `fly machine restart` — the app's module-level connection holds the
        old inode until the process dies; restart forces a clean open of the
@@ -579,7 +579,7 @@ service only — mobile store wrappers (Phase C) stay banked.
        list + history counts + suggested tray, performs one write op, and
        then after ANOTHER `fly machine restart` confirms the write survived
        — proving persistence landed in the new file.
-    Keep `/data/plantcart.db.pre-migration` on the volume as the
+    Keep `/data/thincart.db.pre-migration` on the volume as the
     instant-rollback copy **for the soak week only** (deleted in step 24 —
     the 1 GB volume shouldn't carry a stale twin forever); the DGX-side
     snapshot from step 19 is the copy kept indefinitely.
@@ -593,13 +593,13 @@ service only — mobile store wrappers (Phase C) stay banked.
     service-worker cache against the dead origin, accepts writes into its
     offline queue, and shows them as saved — a muscle-memory tap in-store
     silently loses data for the whole soak and beyond.
-23. **Off-Fly backups as a NEW standalone unit** `plantcart-fly-backup.timer`
+23. **Off-Fly backups as a NEW standalone unit** `thincart-fly-backup.timer`
     (nightly): `fly ssh console -a <app> -C "python3 /srv/server/backup_db.py
-    --db /data/plantcart.db"` (the
+    --db /data/thincart.db"` (the
     quote-free script from E1 step 9 — `-C` does not pass through a remote
     shell, so a nested-quote `sqlite3 '.backup …'` one-liner is not
     guaranteed to parse) then `fly sftp get` **today's date-stamped
-    artifact** into `~/backups/plantcart-fly/` (keep 14). **One clock, one
+    artifact** into `~/backups/thincart-fly/` (keep 14). **One clock, one
     name authority**: `backup_db.py` stamps the artifact with the **UTC**
     date (the Fly container has no TZ set) and **prints the artifact
     filename to stdout on a pinned protocol line** (`ARTIFACT:<name>`,
@@ -631,8 +631,8 @@ service only — mobile store wrappers (Phase C) stay banked.
     (DGX asleep at 03:30, linger lost, unit disabled in a cleanup). Two
     guards: `Persistent=true` on the timer (missed ticks run on wake), and
     a **freshness watchdog outside the unit itself** — the
-    `preflight-plantcart` skill asserts the newest
-    `~/backups/plantcart-fly/` artifact is <48 h old. **This assertion is
+    `preflight-thincart` skill asserts the newest
+    `~/backups/thincart-fly/` artifact is <48 h old. **This assertion is
     added in the SAME step-19 freeze-time skill edit that adds the FROZEN
     marker** (not deferred to step 24's rewrite) — otherwise the watchdog
     doesn't exist during the soak week, exactly when the pipeline is
@@ -647,17 +647,17 @@ service only — mobile store wrappers (Phase C) stay banked.
     cannot take the hosted primary's backups down with it. This unit runs
     from day one of the soak and **permanently thereafter**.
 24. 1-week soak, DGX instance disabled-but-intact as rollback. After soak:
-    `systemctl --user disable --now plantcart-backup.timer` (the service
-    was already disabled at step 19; `plantcart-fly-backup.timer` stays),
+    `systemctl --user disable --now thincart-backup.timer` (the service
+    was already disabled at step 19; `thincart-fly-backup.timer` stays),
     turn off the `tailscale serve` proxy for :8123, delete
-    `/data/plantcart.db.pre-migration` from the volume, keep all DGX-side
+    `/data/thincart.db.pre-migration` from the volume, keep all DGX-side
     backup history; merge `saas` → `master` so one branch is the deployed
     truth; repoint or retire the worktree. **Disposition BOTH frozen skills
     in the same sitting** (the step-19 markers are temporary, not an end
-    state): rewrite `preflight-plantcart` around the Fly primary (health
+    state): rewrite `preflight-thincart` around the Fly primary (health
     via public URL, fly-backup artifact freshness) dropping the DGX-service
     auto-restart, and remove or retarget the `restartservice` skill's
-    plantcart entry — left merely frozen, it would claim "cutover in
+    thincart entry — left merely frozen, it would claim "cutover in
     progress" about a retired service forever.
 
 ## Rollback — and what it costs
@@ -681,14 +681,14 @@ invariant in REVERSE — as an ordered checklist, mirroring step 19:
 3. Delete the fly.dev PWA icons from both phones; **re-A2HS the tailnet
    PWA** (step 22 deleted those icons — without this, no phone has any
    installed app after rollback).
-4. Re-enable + start plantcart.service; **revert the step-19 FROZEN
-   markers in both skills** (preflight-plantcart, restartservice) —
+4. Re-enable + start thincart.service; **revert the step-19 FROZEN
+   markers in both skills** (preflight-thincart, restartservice) —
    otherwise the resurrected primary has no automation path willing to
    restart it on the next glitch.
-5. **Stand down the step-23 pipeline**: disable plantcart-fly-backup.timer
+5. **Stand down the step-23 pipeline**: disable thincart-fly-backup.timer
    and remove the fly-artifact freshness watchdog — left running against
    a scaled-to-zero app, the timer fails (and alarms) nightly, and its
-   `fly ssh console` has nothing to reach. Mitigations: `/data/plantcart.db.pre-migration` on the volume
+   `fly ssh console` has nothing to reach. Mitigations: `/data/thincart.db.pre-migration` on the volume
 covers instant same-day reversal of a botched swap; the nightly checkpointed
 pulls (step 23) bound later loss to <24 h, and a pulled SaaS DB can be
 inspected with sqlite3 to hand-copy the delta (deliberately no automated

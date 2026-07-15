@@ -5,10 +5,10 @@ Used by four call sites against three different databases, so --db is REQUIRED
 (a config-default resolution here once nearly checkpointed the wrong DB while
 exiting 0, stranding freshly imported rows in a -wal the upload omitted):
 
-  nightly on-machine backup ... python3 /srv/server/backup_db.py --db /data/plantcart.db
-  E4 swap checkpoint .......... python3 /srv/server/backup_db.py --db /data/plantcart.db --checkpoint
+  nightly on-machine backup ... python3 /srv/server/backup_db.py --db /data/thincart.db
+  E4 swap checkpoint .......... python3 /srv/server/backup_db.py --db /data/thincart.db --checkpoint
   E1 dry-run finalize ......... python3 server/backup_db.py --db <fresh-import.db> --checkpoint
-  step-19 DGX final snapshot .. python3 server/backup_db.py --db ~/.../plantcart.db
+  step-19 DGX final snapshot .. python3 server/backup_db.py --db ~/.../thincart.db
 
 Default mode: `Connection.backup()` to a UTC-timestamped artifact next to the
 DB (backup-YYYY-MM-DDTHHMMZ.db — minute granularity so a freshness check is

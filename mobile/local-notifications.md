@@ -7,7 +7,7 @@ capability that carries the store submission (see below).
 ## Why this exists
 
 Apple guideline **4.2 (Minimum Functionality)** rejects apps that are "just a
-web page bundled in a wrapper." PlantCart's mitigation is a genuine native
+web page bundled in a wrapper." ThinCart's mitigation is a genuine native
 feature that a website cannot provide: **local notifications** that remind the
 household when an item is probably due to be repurchased — e.g. *"You're
 probably due for milk."*
@@ -89,7 +89,7 @@ async function scheduleDueReminders(cycles) {
     const label = c.name_en || c.name;
     toSchedule.push({
       id: hashId(c.catalog_id),                    // stable small int per item
-      title: 'PlantCart',
+      title: 'ThinCart',
       body: `You're probably due for ${label}.`,
       schedule: { at: fireAt, allowWhileIdle: true },
       extra: { catalog_id: c.catalog_id },
@@ -126,7 +126,7 @@ LocalNotifications.addListener('localNotificationActionPerformed', (ev) => {
 - **Only in the native build.** Guard calls with `Capacitor.isNativePlatform()`
   so the web PWA is unaffected (the plugin is a no-op / unavailable on web).
 - **iOS icon/color** come from `capacitor.config.json` `LocalNotifications`
-  plugin config (`ic_stat_plantcart`, `#2f6f4f`). Provide the small-icon asset
+  plugin config (`ic_stat_thincart`, `#2f6f4f`). Provide the small-icon asset
   in the Android project when generating it.
 - **Quiet hours (optional polish).** Clamp `fireAt` to daytime so reminders
   don't fire at 3am.

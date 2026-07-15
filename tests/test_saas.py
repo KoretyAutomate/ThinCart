@@ -11,11 +11,11 @@ from pathlib import Path
 import pytest
 
 os.environ.setdefault(
-    "PLANTCART_DB",
+    "THINCART_DB",
     str(Path(os.environ.get("PYTEST_TMP", "/tmp")) / f"saas_test_{uuid.uuid4().hex}.db"),
 )
-os.environ.setdefault("PLANTCART_SECRET", "test-secret")
-os.environ.setdefault("PLANTCART_LLM_PROVIDER", "none")
+os.environ.setdefault("THINCART_SECRET", "test-secret")
+os.environ.setdefault("THINCART_LLM_PROVIDER", "none")
 sys.path.insert(0, str(Path(__file__).parent.parent / "server"))
 
 from fastapi.testclient import TestClient  # noqa: E402

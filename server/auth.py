@@ -18,7 +18,7 @@ from fastapi import Depends, Header, HTTPException
 
 import config
 
-log = logging.getLogger("plantcart.auth")
+log = logging.getLogger("thincart.auth")
 
 
 def now_iso() -> str:

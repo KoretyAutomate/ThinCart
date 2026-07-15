@@ -1,6 +1,6 @@
 {
-  "appId": "com.plantcart.app",
-  "appName": "PlantCart",
+  "appId": "com.thincart.app",
+  "appName": "ThinCart",
   "webDir": "www",
   "server": {
     "androidScheme": "https",
@@ -8,7 +8,7 @@
   },
   "plugins": {
     "LocalNotifications": {
-      "smallIcon": "ic_stat_plantcart",
+      "smallIcon": "ic_stat_thincart",
       "iconColor": "#2f6f4f"
     }
   }

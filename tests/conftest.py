@@ -1,7 +1,7 @@
 """
 Shared test wiring for the multi-tenant suite.
 
-One pytest process = one app instance = one throwaway DB (PLANTCART_DB is set
+One pytest process = one app instance = one throwaway DB (THINCART_DB is set
 here, BEFORE any test module imports `app`). Isolation between test modules
 comes from multi-tenancy itself: each module registers its own household, so
 cross-file interference is impossible by the same mechanism that isolates
@@ -15,11 +15,11 @@ from pathlib import Path
 import pytest
 
 os.environ.setdefault(
-    "PLANTCART_DB",
+    "THINCART_DB",
     str(Path(os.environ.get("PYTEST_TMP", "/tmp")) / f"saas_test_{uuid.uuid4().hex}.db"),
 )
-os.environ.setdefault("PLANTCART_SECRET", "test-secret")
-os.environ.setdefault("PLANTCART_LLM_PROVIDER", "none")
+os.environ.setdefault("THINCART_SECRET", "test-secret")
+os.environ.setdefault("THINCART_LLM_PROVIDER", "none")
 sys.path.insert(0, str(Path(__file__).parent.parent / "server"))
 
 

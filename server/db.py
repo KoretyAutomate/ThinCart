@@ -1,5 +1,5 @@
 """
-db.py — PlantCart multi-tenant SQLite layer (WAL).
+db.py — ThinCart multi-tenant SQLite layer (WAL).
 
 Tenancy model:
 - item_catalog is GLOBAL (a shared product corpus — the 173-item seed + LLM

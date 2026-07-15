@@ -1,6 +1,6 @@
-# Deploying PlantCart (service name: thincart)
+# Deploying ThinCart (service name: thincart)
 
-PlantCart is a single FastAPI process serving the API and the PWA, backed by one
+ThinCart is a single FastAPI process serving the API and the PWA, backed by one
 SQLite file. All config is via environment variables (see `.env.example` /
 `server/config.py`). The schema auto-creates (and additively migrates) on boot.
 
@@ -29,13 +29,13 @@ The script is safe to re-run for config redeploys. What it does:
 
 - `flyctl apps create` / volume create — idempotent, reused when present.
 - Pins `app = "<app>"` into fly.toml (flyctl errors on a name mismatch).
-- Sets `PLANTCART_SECRET` **only if absent** — re-runs never rotate the JWT
+- Sets `THINCART_SECRET` **only if absent** — re-runs never rotate the JWT
   secret, so config redeploys don't log the household out.
-- Sets `PLANTCART_CORS=https://<app>.fly.dev` — always derived, never typed.
+- Sets `THINCART_CORS=https://<app>.fly.dev` — always derived, never typed.
 - Deploys via the remote builder and curls `/health`.
 
 `fly.toml` ships production defaults: `min_machines_running = 1` (no cold-start
-lag on phone unlocks), LLM off, and `PLANTCART_TRUST_FLY_CLIENT_IP = "1"`
+lag on phone unlocks), LLM off, and `THINCART_TRUST_FLY_CLIENT_IP = "1"`
 (**Fly only** — see the warning below).
 
 ### Post-launch runbooks (all against the live app)
@@ -44,7 +44,7 @@ lag on phone unlocks), LLM off, and `PLANTCART_TRUST_FLY_CLIENT_IP = "1"`
 still works — it's the only account-creation path from then on):
 
 ```bash
-flyctl secrets set PLANTCART_REGISTRATION=closed -a <app>
+flyctl secrets set THINCART_REGISTRATION=closed -a <app>
 ```
 
 **Enable the LLM (recipes / enrichment)** — only AFTER registration is closed
@@ -52,7 +52,7 @@ flyctl secrets set PLANTCART_REGISTRATION=closed -a <app>
 
 ```bash
 flyctl secrets set ANTHROPIC_API_KEY=sk-ant-... -a <app>
-# then set PLANTCART_LLM_PROVIDER = "anthropic" in fly.toml and:
+# then set THINCART_LLM_PROVIDER = "anthropic" in fly.toml and:
 ./deploy-fly.sh <app>
 ```
 
@@ -60,14 +60,14 @@ flyctl secrets set ANTHROPIC_API_KEY=sk-ant-... -a <app>
 Operator-set for now — this is the seam billing will later attach to:
 
 ```bash
-fly ssh console -a <app> -C "python3 -c \"import sqlite3;c=sqlite3.connect('/data/plantcart.db');c.execute('UPDATE households SET tier=\\\"plus\\\" WHERE invite_code=\\\"<CODE>\\\"');c.commit()\""
+fly ssh console -a <app> -C "python3 -c \"import sqlite3;c=sqlite3.connect('/data/thincart.db');c.execute('UPDATE households SET tier=\\\"plus\\\" WHERE invite_code=\\\"<CODE>\\\"');c.commit()\""
 ```
 
 **Rotate the JWT secret** (lost phone, leaked token). Deliberate and manual —
 force-logs-out every session by design:
 
 ```bash
-flyctl secrets set PLANTCART_SECRET="$(python3 -c 'import secrets;print(secrets.token_urlsafe(48))')" -a <app>
+flyctl secrets set THINCART_SECRET="$(python3 -c 'import secrets;print(secrets.token_urlsafe(48))')" -a <app>
 ```
 
 **Break-glass password reset** (there is no email reset flow; registering again
@@ -76,7 +76,7 @@ flyctl secrets set PLANTCART_SECRET="$(python3 -c 'import secrets;print(secrets.
 ```bash
 fly ssh console -a <app> -C "python3 -c \"
 import sqlite3,sys; sys.path.insert(0,'/srv/server'); import auth
-c=sqlite3.connect('/data/plantcart.db')
+c=sqlite3.connect('/data/thincart.db')
 c.execute('UPDATE users SET pw_hash=? WHERE email=?', (auth.hash_password('NEW-PASSWORD'),'user@example.com'))
 c.commit()\""
 ```
@@ -85,7 +85,7 @@ c.commit()\""
 code stops working for join AND for closed-mode register immediately.
 
 **Nightly off-Fly backup** (run from any trusted box; see the systemd units in
-`server/deploy/`): call `python3 /srv/server/backup_db.py --db /data/plantcart.db`
+`server/deploy/`): call `python3 /srv/server/backup_db.py --db /data/thincart.db`
 over `fly ssh console -a <app> -C …`, grep stdout for the final `ARTIFACT:<name>`
 line, `fly sftp get` exactly that file, then verify locally: non-empty, `PRAGMA
 integrity_check` = ok, stamp within 24 h. Judge success from the artifact only —
@@ -95,13 +95,13 @@ never from remote exit codes.
 
 ## (b) Any VPS with Docker Compose + Caddy (fallback)
 
-> ⚠️ **Never set `PLANTCART_TRUST_FLY_CLIENT_IP` here.** Caddy/nginx pass a
+> ⚠️ **Never set `THINCART_TRUST_FLY_CLIENT_IP` here.** Caddy/nginx pass a
 > client-forged `Fly-Client-IP` header straight through — trusting it lets an
 > attacker mint a fresh rate-limit bucket per request (unlimited brute force).
 
 ```bash
 cp .env.example .env
-# edit .env: real PLANTCART_SECRET, PLANTCART_CORS=https://your.domain
+# edit .env: real THINCART_SECRET, THINCART_CORS=https://your.domain
 docker compose up -d
 ```
 
@@ -119,11 +119,11 @@ Update: `git pull && docker compose up -d --build`.
 
 ## (c) Render.com (fallback)
 
-Same warning as (b): leave `PLANTCART_TRUST_FLY_CLIENT_IP` unset.
+Same warning as (b): leave `THINCART_TRUST_FLY_CLIENT_IP` unset.
 
 1. New **Web Service** → connect repo → Runtime: Docker. **Instance count: 1.**
 2. Disk: mount `/data`, 1 GB.
-3. Env vars: `PLANTCART_ENV=production`, `PLANTCART_DB=/data/plantcart.db`,
-   `PLANTCART_SECRET` (secret), `PLANTCART_CORS=https://<service>.onrender.com`,
-   `PLANTCART_LLM_PROVIDER=none` (flip later with the key, as secrets).
+3. Env vars: `THINCART_ENV=production`, `THINCART_DB=/data/thincart.db`,
+   `THINCART_SECRET` (secret), `THINCART_CORS=https://<service>.onrender.com`,
+   `THINCART_LLM_PROVIDER=none` (flip later with the key, as secrets).
 4. Health check path: `/health`.

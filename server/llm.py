@@ -17,7 +17,7 @@ import httpx
 
 import config
 
-log = logging.getLogger("plantcart.llm")
+log = logging.getLogger("thincart.llm")
 
 
 async def _anthropic(prompt: str, max_tokens: int, temperature: float) -> dict | list | None:

@@ -1,4 +1,4 @@
-# PlantCart SaaS — FastAPI + SQLite, single-image deploy.
+# ThinCart SaaS — FastAPI + SQLite, single-image deploy.
 # Layout inside the image mirrors the repo so app.py's `Path(__file__).parent.parent / "app"`
 # resolves: code lives at /srv/server, the PWA at /srv/app, WORKDIR is /srv/server.
 FROM python:3.11-slim
@@ -13,7 +13,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Non-root runtime user.
-RUN useradd --create-home --uid 10001 plantcart
+RUN useradd --create-home --uid 10001 thincart
 
 WORKDIR /srv/server
 
@@ -27,9 +27,9 @@ COPY app/ /srv/app/
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# Default DB location; override with PLANTCART_DB to point at a mounted volume.
+# Default DB location; override with THINCART_DB to point at a mounted volume.
 # The dir is owned by the runtime user so SQLite can create the file on boot.
-RUN mkdir -p /srv/server/data && chown -R plantcart:plantcart /srv
+RUN mkdir -p /srv/server/data && chown -R thincart:thincart /srv
 
 # NO `USER` directive: the entrypoint must start as root to chown the Fly
 # volume mount (/data is root-owned on first boot, and sftp'd files are too),

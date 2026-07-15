@@ -1,8 +1,8 @@
-# PlantCart — native mobile wrapper (Capacitor)
+# ThinCart — native mobile wrapper (Capacitor)
 
-Scaffolding to ship the PlantCart PWA as native **Android** and **iOS** apps.
+Scaffolding to ship the ThinCart PWA as native **Android** and **iOS** apps.
 The web assets in `../app/` are **bundled** into the app; the app then talks to
-the **hosted** PlantCart API over the network (there is no server inside the
+the **hosted** ThinCart API over the network (there is no server inside the
 app). This directory contains only scaffolding + docs — no `npm install` or
 Capacitor build has been run here.
 
@@ -10,9 +10,9 @@ Capacitor build has been run here.
 
 | File | Purpose |
 |---|---|
-| `capacitor.config.json` | Capacitor config. `appId=com.plantcart.app`, `appName=PlantCart`, `webDir=www`, bundled assets (no remote-URL wrapper), `androidScheme=https`, `cleartext=false`. |
+| `capacitor.config.json` | Capacitor config. `appId=com.thincart.app`, `appName=ThinCart`, `webDir=www`, bundled assets (no remote-URL wrapper), `androidScheme=https`, `cleartext=false`. |
 | `package.json` | Capacitor deps (core, cli, android, ios, local-notifications) + scripts. |
-| `api-base.js` | Build-time shim that publishes `window.PLANTCART_API_BASE`. Copied into `www/` by `copy-web`. |
+| `api-base.js` | Build-time shim that publishes `window.THINCART_API_BASE`. Copied into `www/` by `copy-web`. |
 | `local-notifications.md` | Design + JS sketch for on-device due-cycle reminders (the native capability for Apple 4.2). |
 | `SUBMISSION.md` | Full Google Play + Apple App Store runbook. |
 
@@ -44,13 +44,13 @@ The PWA makes **same-origin** calls today (`fetch('/api/...')`,
 `new WebSocket(...location.host...)`). That only works on the web because the
 FastAPI server serves `index.html` itself. In a bundled app the "origin" is
 `capacitor://localhost` / `https://localhost` — there's nothing there — so the
-app must target the **remote** PlantCart server.
+app must target the **remote** ThinCart server.
 
 Mechanism:
 
 1. **`api-base.js` sets a global** before the app loads:
    ```js
-   window.PLANTCART_API_BASE = 'https://api.plantcart.example.com';
+   window.THINCART_API_BASE = 'https://api.thincart.example.com';
    ```
    Edit this to your production API origin (no trailing slash) before
    `npm run sync`. `copy-web` copies it into `www/`.
@@ -65,7 +65,7 @@ Mechanism:
 
 3. **The app reads the global** via a small `apiUrl()` / `wsUrl()` helper — see
    the contract in `api-base.js`. **This helper is NOT wired into `index.html`
-   yet**: honoring `window.PLANTCART_API_BASE` (falling back to same-origin) is
+   yet**: honoring `window.THINCART_API_BASE` (falling back to same-origin) is
    the one required web-layer code change before a store build, tracked as a
    follow-up in `SUBMISSION.md` §0.
 
@@ -76,6 +76,6 @@ for the app origin and the JWT must travel as `Authorization: Bearer <jwt>`
 ## Status
 
 Scaffolding + docs only. Follow-ups before a real store build:
-- Wire `index.html` to honor `window.PLANTCART_API_BASE` (§0 of `SUBMISSION.md`).
+- Wire `index.html` to honor `window.THINCART_API_BASE` (§0 of `SUBMISSION.md`).
 - Implement the local due-cycle notifications (`local-notifications.md`).
 - Fill in and host `../PRIVACY.md`.

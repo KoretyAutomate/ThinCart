@@ -1,9 +1,9 @@
-# PlantCart — App Store submission runbook
+# ThinCart — App Store submission runbook
 
-This is the end-to-end runbook for shipping the PlantCart native wrapper to
+This is the end-to-end runbook for shipping the ThinCart native wrapper to
 **Google Play** and the **Apple App Store**. It assumes the Capacitor scaffold
 in this `mobile/` directory. The app bundles the PWA (`app/`) and talks to the
-**hosted** PlantCart API (not a local server) — see `api-base.js`.
+**hosted** ThinCart API (not a local server) — see `api-base.js`.
 
 ---
 
@@ -12,7 +12,7 @@ in this `mobile/` directory. The app bundles the PWA (`app/`) and talks to the
 The web layer currently hardcodes same-origin API/WS URLs
 (`fetch('/api/...')`, `new WebSocket(...location.host...)`). A bundled native
 app has no same-origin server, so **before any store build** `app/index.html`
-must honor `window.PLANTCART_API_BASE`, falling back to same-origin for the web
+must honor `window.THINCART_API_BASE`, falling back to same-origin for the web
 build. The exact one-change approach (an `apiUrl()` / `wsUrl()` helper) is
 documented in `mobile/api-base.js`. **This is a deliberate follow-up and is NOT
 implemented yet.** Everything below assumes it has been wired and the backend
@@ -29,7 +29,7 @@ Also required before submission:
 ## 1. Minimum-functionality / native-capability story (read first)
 
 Apple **4.2** (and, less strictly, Play policy) rejects "just a website in a
-wrapper." PlantCart's answer is the **on-device due-cycle local
+wrapper." ThinCart's answer is the **on-device due-cycle local
 notifications** feature (`mobile/local-notifications.md`): the app schedules
 reminders like *"You're probably due for milk"* computed from `/api/cycles`,
 entirely on-device via `@capacitor/local-notifications` — **no push server**.
@@ -54,8 +54,8 @@ social login is genuinely needed, and budget the Sign in with Apple work then.
 ### 2.2 Signing keys (human — keep secret, never commit)
 - Generate an **upload key** (keystore):
   ```bash
-  keytool -genkey -v -keystore plantcart-upload.jks \
-    -alias plantcart -keyalg RSA -keysize 2048 -validity 10000
+  keytool -genkey -v -keystore thincart-upload.jks \
+    -alias thincart -keyalg RSA -keysize 2048 -validity 10000
   ```
 - Enroll in **Play App Signing** (recommended): you upload with the *upload
   key*; Google holds the *app signing key*. Store the keystore + passwords in a
@@ -80,11 +80,11 @@ cd android
 
 ### 2.4 Store listing & policy forms (human)
 - **Data safety form** — declare exactly what's collected and why. For
-  PlantCart: **email** (account), **shopping-list / purchase data** (app
+  ThinCart: **email** (account), **shopping-list / purchase data** (app
   function), whether data is encrypted in transit (yes), and that **account
   deletion** is available in-app (`POST /api/account/delete`). Note the optional
   LLM processing of item names by the recipe/diversity feature (`/api/ideas`).
-- **Content rating** questionnaire (IARC) — PlantCart is a utility with no
+- **Content rating** questionnaire (IARC) — ThinCart is a utility with no
   objectionable content; expect an "Everyone" rating.
 - **Target audience & content**, ads declaration (no ads), news/COVID = no.
 - **Store listing assets:**
@@ -115,9 +115,9 @@ cd android
 - Access to **App Store Connect** and the Developer portal.
 
 ### 3.2 Bundle ID & app record (human)
-- Register the **bundle identifier `com.plantcart.app`** in the Developer portal
+- Register the **bundle identifier `com.thincart.app`** in the Developer portal
   (matches `appId` in `capacitor.config.json`).
-- Create the app record in **App Store Connect** (name "PlantCart", primary
+- Create the app record in **App Store Connect** (name "ThinCart", primary
   language, bundle id).
 
 ### 3.3 Generate & open the iOS project (on the Mac)
@@ -130,7 +130,7 @@ npm run open:ios        # sync + cap open ios  -> opens Xcode
 ```
 In Xcode:
 - Set the **Signing team** (automatic signing with your Developer account).
-- Confirm the bundle id is `com.plantcart.app`.
+- Confirm the bundle id is `com.thincart.app`.
 - **Product → Archive**, then **Distribute App → App Store Connect → Upload**.
 
 ### 3.4 Export compliance — Info.plist
@@ -152,7 +152,7 @@ encryption questionnaire (the app uses only standard HTTPS/TLS, which is exempt)
 - Provide the hosted **Privacy Policy URL**.
 
 ### 3.6 Demo reviewer account (REQUIRED — login-walled app)
-PlantCart is **login-walled**: App Review cannot see anything without
+ThinCart is **login-walled**: App Review cannot see anything without
 credentials. Guideline **5.1.1(i)** requires you to provide a **working demo
 account**. In App Store Connect → **App Review Information**:
 - Supply a **demo email + password** for a pre-seeded household with sample
@@ -195,14 +195,14 @@ owner:
 
 ## 5. Quick checklist
 
-- [ ] `index.html` honors `window.PLANTCART_API_BASE` (§0) — **follow-up**
+- [ ] `index.html` honors `window.THINCART_API_BASE` (§0) — **follow-up**
 - [ ] Local due-cycle notifications implemented (`local-notifications.md`)
 - [ ] `PRIVACY.md` filled in and hosted; URL ready
 - [ ] Backend CORS allows the app origin; JWT via `Authorization: Bearer`
 - [ ] Android: upload keystore created; release AAB via `bundleRelease`
 - [ ] Play: Data Safety, content rating, listing assets (512 icon, 1024×500
       feature graphic, screenshots), internal-testing track
-- [ ] Apple: bundle id `com.plantcart.app` registered; `npx cap open ios` →
+- [ ] Apple: bundle id `com.thincart.app` registered; `npx cap open ios` →
       archive → upload
 - [ ] Apple: `ITSAppUsesNonExemptEncryption=false` in Info.plist
 - [ ] Apple: App Privacy questionnaire + demo reviewer account (5.1.1(i))

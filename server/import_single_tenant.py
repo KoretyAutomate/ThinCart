@@ -1,14 +1,14 @@
 """
-import_single_tenant.py — one-off import of a MASTER (single-tenant) PlantCart
+import_single_tenant.py — one-off import of a MASTER (single-tenant) ThinCart
 database into the multi-tenant SaaS DB, under one freshly-created household.
 
 The master schema has no household_id and keeps snooze on item_catalog; this maps
 its global list + history into a single household owned by the given user.
 
 Usage:
-    python import_single_tenant.py --source /path/to/master/plantcart.db \\
+    python import_single_tenant.py --source /path/to/master/thincart.db \\
         --email you@example.com --password 'yourpass' --name Korehito \\
-        [--household "Home"] [--db /path/to/saas/plantcart.db]
+        [--household "Home"] [--db /path/to/saas/thincart.db]
 
 Idempotency: catalog rows merge by canonical_name; re-running would duplicate the
 household + list, so run once into a fresh SaaS DB (or a throwaway to preview).

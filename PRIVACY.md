@@ -1,4 +1,4 @@
-# PlantCart — Privacy Policy
+# ThinCart — Privacy Policy
 
 _Last updated: **[YYYY-MM-DD]**_
 
@@ -10,7 +10,7 @@ App Store consoles. Have it reviewed by counsel before relying on it.
 
 ## 1. Who we are
 
-PlantCart ("PlantCart", "we", "us") is a shared shopping-list app that learns
+ThinCart ("ThinCart", "we", "us") is a shared shopping-list app that learns
 your household's repurchase cycles and suggests recipes and produce variety.
 This policy explains what data we collect, why, and your choices.
 
@@ -98,7 +98,7 @@ protect your information.
 
 ## 9. Children
 
-PlantCart is not directed to children under **[13 / 16, per your jurisdiction]**
+ThinCart is not directed to children under **[13 / 16, per your jurisdiction]**
 and we do not knowingly collect their data.
 
 ## 10. Changes

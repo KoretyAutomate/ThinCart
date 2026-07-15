@@ -1,5 +1,5 @@
 """
-app.py — PlantCart multi-tenant server: accounts + households, per-household
+app.py — ThinCart multi-tenant server: accounts + households, per-household
 shopping lists with real-time sync, purchase-cycle recommendations, plant
 tracking, and pluggable LLM recipes.
 
@@ -34,11 +34,11 @@ import llm
 import plants
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-log = logging.getLogger("plantcart")
+log = logging.getLogger("thincart")
 
 APP_DIR = Path(__file__).parent.parent / "app"
 
-app = FastAPI(title="PlantCart", version="1.0")
+app = FastAPI(title="ThinCart", version="1.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config.CORS_ORIGINS,
@@ -112,7 +112,7 @@ class RegisterBody(BaseModel):
     display_name: str = Field("", max_length=40)
     household_name: str = Field("", max_length=60)
     # join-at-register: honored in BOTH registration modes; the ONLY way to
-    # create an account when PLANTCART_REGISTRATION=closed
+    # create an account when THINCART_REGISTRATION=closed
     invite_code: str | None = Field(None, min_length=4, max_length=32)
 
 
