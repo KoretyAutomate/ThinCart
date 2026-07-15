@@ -384,3 +384,24 @@ shopping-list/
 ├─ test_results/
 └─ PLAN.md
 ```
+
+---
+
+## Phase 4 — per-item emoji icons (2026-07-15)
+
+Item rows show an icon that looks like the actual item (🥑 avocado, 🍌 banana)
+instead of only the category emoji. Three-tier resolution: curated map
+(`server/emoji.py`, ~120 EN+JA items, instant/offline) → LLM-picked emoji at
+enrich time for anything unmatched (validated single-grapheme) → category emoji
+as the UI floor. New `item_catalog.emoji` column (migration in `db.connect`),
+carried in `state()`; frontend `render()` prefers `it.emoji`. Backfill:
+`scripts/backfill_emoji.py` (74/208 live rows on first run). Tests: `test_emoji.py`.
+
+Delegation: considered, rejected — emoji-map authoring needs per-item judgment
+and Unicode/rendering correctness (not cleanly machine-checkable), and the wiring
+is subtle cross-file changes on the live service (db + catalog + frontend).
+
+Brand images (product logos for branded items): DEFERRED. Legally fine for the
+private tailnet app (nominative fair use, no distribution) but NOT for any public
+build (trademark/copyright in commerce) — never bake brand assets into the SaaS
+build. Emoji is the legally-clean default everywhere.

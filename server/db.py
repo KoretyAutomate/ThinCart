@@ -10,6 +10,8 @@ import sqlite3
 import unicodedata
 from pathlib import Path
 
+import emoji
+
 DB_PATH = Path(os.environ.get("THINCART_DB", Path(__file__).parent / "data" / "thincart.db"))
 
 SCHEMA = """
@@ -77,6 +79,10 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
         conn.execute("ALTER TABLE item_catalog ADD COLUMN verified INTEGER NOT NULL DEFAULT 1")
     except sqlite3.OperationalError:
         pass
+    try:  # migration for DBs created before per-item emoji icons
+        conn.execute("ALTER TABLE item_catalog ADD COLUMN emoji TEXT")
+    except sqlite3.OperationalError:
+        pass
     conn.execute("INSERT OR IGNORE INTO meta(key, value) VALUES('revision', '0')")
     conn.commit()
     return conn
@@ -107,9 +113,11 @@ def get_or_create_catalog(conn: sqlite3.Connection, name: str) -> int:
     ):
         if any(canonical(a) == canon for a in json.loads(r["aliases_json"])):
             return r["id"]
+    # curated emoji is instant/offline for common items; the LLM enrichment
+    # (catalog.enrich) fills one for anything not in the map.
     cur = conn.execute(
-        "INSERT INTO item_catalog(canonical_name, display_name) VALUES(?, ?)",
-        (canon, name.strip()),
+        "INSERT INTO item_catalog(canonical_name, display_name, emoji) VALUES(?, ?, ?)",
+        (canon, name.strip(), emoji.lookup(canon)),
     )
     return cur.lastrowid
 
@@ -194,7 +202,7 @@ def state(conn: sqlite3.Connection, now=None) -> dict:
     now = now or datetime.now(timezone.utc)
     items = []
     for r in conn.execute(
-        """SELECT i.id, c.display_name AS name, c.aliases_json, c.category,
+        """SELECT i.id, c.display_name AS name, c.aliases_json, c.category, c.emoji,
                   i.qty_note, i.added_by, i.added_at
            FROM items i JOIN item_catalog c ON c.id = i.catalog_id
            ORDER BY COALESCE(c.category, 'zzz'), i.added_at"""

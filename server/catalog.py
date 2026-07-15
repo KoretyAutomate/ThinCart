@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 
+import emoji
 import llm
 import plants
 from db import canonical
@@ -90,6 +91,8 @@ def enrich_prompt(display_name: str, existing_names: list[str],
         '"is_real_item": bool — false ONLY if the text looks like a typo or gibberish '
         'rather than a real product (use the web evidence if given; when unsure, true), '
         f'"category": one of {json.dumps(CATEGORIES)}, '
+        '"emoji": a single emoji that best pictures THIS specific item '
+        '(🥑 avocado, 🍌 banana, 🥯 bagel, 🍝 pasta, 🐟 salmon); null if none fits, '
         '"is_edible": bool, '
         '"plants": [the DISTINCT edible plant species a typical serving contains, '
         'as canonical tokens per the PLANT TOKEN RULES above. Examples: '
@@ -116,7 +119,7 @@ def enrich_prompt(display_name: str, existing_names: list[str],
 async def enrich(conn, write_lock, catalog_id: int) -> bool:
     """Enrich one catalog row via the LLM. Returns True if state-visible change."""
     row = conn.execute(
-        "SELECT id, canonical_name, display_name, category, aliases_json "
+        "SELECT id, canonical_name, display_name, category, aliases_json, emoji "
         "FROM item_catalog WHERE id=?",
         (catalog_id,),
     ).fetchone()
@@ -146,6 +149,10 @@ async def enrich(conn, write_lock, catalog_id: int) -> bool:
     category = res.get("category") if res.get("category") in CATEGORIES else "other"
     is_edible = 1 if res.get("is_edible") else 0
     alias_of = res.get("alias_of")
+    # curated map wins; only ask the LLM to fill an icon we don't already have
+    emoji_val = row["emoji"] or emoji.lookup(row["canonical_name"])
+    if not emoji_val and emoji.is_emoji(res.get("emoji")):
+        emoji_val = res["emoji"].strip()
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
     async with write_lock:
@@ -187,9 +194,10 @@ async def enrich(conn, write_lock, catalog_id: int) -> bool:
                 aliases.append(en.strip().lower())
             conn.execute(
                 "UPDATE item_catalog SET category=?, is_edible=?, plants_json=?, "
-                "aliases_json=?, verified=?, llm_enriched_at=? WHERE id=?",
+                "aliases_json=?, verified=?, emoji=?, llm_enriched_at=? WHERE id=?",
                 (category, is_edible, json.dumps(item_plants),
-                 json.dumps(aliases, ensure_ascii=False), verified, now, row["id"]),
+                 json.dumps(aliases, ensure_ascii=False), verified, emoji_val, now,
+                 row["id"]),
             )
             if not verified:
                 log.info("typo-suspect (hidden from candidates): %r", row["display_name"])

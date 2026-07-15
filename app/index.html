@@ -633,8 +633,8 @@ function render() {
     li.innerHTML = `<div class="under"></div>
                     <div class="row"><span class="box"></span><span class="nm"></span>
                     <span class="qty"></span><span class="who"></span></div>`;
-    li.querySelector('.nm').textContent =
-      (it.category ? catEmoji(it.category) + ' ' : '') + disp(it);
+    const ico = it.emoji || (it.category ? catEmoji(it.category) : '');
+    li.querySelector('.nm').textContent = (ico ? ico + ' ' : '') + disp(it);
     li.querySelector('.qty').textContent = it.qty_note || '';
     li.querySelector('.who').textContent = it.added_by || '';
     attachGestures(li, it);
