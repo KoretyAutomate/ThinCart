@@ -18,7 +18,7 @@ import llm
 import plants
 from db import canonical
 
-log = logging.getLogger("plantcart.catalog")
+log = logging.getLogger("thincart.catalog")
 
 SEARX_URL = "http://127.0.0.1:8080/search"
 

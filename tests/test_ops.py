@@ -10,8 +10,8 @@ from pathlib import Path
 
 import pytest
 
-os.environ["PLANTCART_DB"] = str(
-    Path(os.environ.get("PYTEST_TMP", "/tmp")) / f"plantcart_test_{uuid.uuid4().hex}.db"
+os.environ["THINCART_DB"] = str(
+    Path(os.environ.get("PYTEST_TMP", "/tmp")) / f"thincart_test_{uuid.uuid4().hex}.db"
 )
 sys.path.insert(0, str(Path(__file__).parent.parent / "server"))
 

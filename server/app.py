@@ -1,5 +1,5 @@
 """
-app.py — PlantCart server: static PWA + REST ops + WebSocket broadcast.
+app.py — ThinCart server: static PWA + REST ops + WebSocket broadcast.
 
 Sync contract (PLAN.md §Architecture):
 - Mutations arrive ONLY via POST /api/op (retryable HTTP; store Wi-Fi drops WS
@@ -34,11 +34,11 @@ import llm
 import plants
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-log = logging.getLogger("plantcart")
+log = logging.getLogger("thincart")
 
 APP_DIR = Path(__file__).parent.parent / "app"
 
-app = FastAPI(title="PlantCart", version="0.1")
+app = FastAPI(title="ThinCart", version="0.1")
 
 conn = db.connect()
 write_lock = asyncio.Lock()  # serializes all mutations on the single connection

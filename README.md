@@ -1,4 +1,4 @@
-# PlantCart 🌱
+# ThinCart 🌱
 
 Self-hosted shared shopping list for two phones with real-time sync, plus:
 purchase-cycle recommendations ("you're due for milk") and plant-diversity
@@ -48,10 +48,10 @@ browser). Enter your name once.
 ## Ops
 
 ```bash
-systemctl --user status plantcart          # service (enable-linger is on)
-journalctl --user -u plantcart -f          # logs
-systemctl --user enable --now plantcart-backup.timer   # nightly DB backup 03:30, keep 14
+systemctl --user status thincart          # service (enable-linger is on)
+journalctl --user -u thincart -f          # logs
+systemctl --user enable --now thincart-backup.timer   # nightly DB backup 03:30, keep 14
 ~/Project/_ideas/shopping-list/test_results/           # saved test runs
 ```
 
-Tests: `python -m pytest tests/` (uses a throwaway DB via `PLANTCART_DB`).
+Tests: `python -m pytest tests/` (uses a throwaway DB via `THINCART_DB`).

@@ -1,5 +1,5 @@
 [Unit]
-Description=PlantCart nightly DB backup (03:30, keep 14)
+Description=ThinCart nightly DB backup (03:30, keep 14)
 
 [Timer]
 OnCalendar=*-*-* 03:30:00

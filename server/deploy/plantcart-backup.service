@@ -1,8 +1,0 @@
-# PlantCart nightly DB backup (systemd user unit — triggered by the .timer)
-# The purchase history IS the intelligence; losing it resets the app.
-[Unit]
-Description=PlantCart SQLite nightly backup
-
-[Service]
-Type=oneshot
-ExecStart=/bin/bash -c 'mkdir -p %h/backups/plantcart && sqlite3 %h/Project/plantcart/server/data/plantcart.db ".backup %h/backups/plantcart/plantcart-$(date +%%F).db" && ls -1t %h/backups/plantcart/plantcart-*.db | tail -n +15 | xargs -r rm'

@@ -1,14 +1,14 @@
-# PlantCart — shared shopping list server (systemd USER service, no sudo needed)
+# ThinCart — shared shopping list server (systemd USER service, no sudo needed)
 #
 # Install:
 #   mkdir -p ~/.config/systemd/user
-#   cp plantcart.service ~/.config/systemd/user/
+#   cp thincart.service ~/.config/systemd/user/
 #   systemctl --user daemon-reload
-#   systemctl --user enable --now plantcart
+#   systemctl --user enable --now thincart
 #   loginctl enable-linger korety        # survive logout / DGX reboot with no SSH login
 #
 # Verify:  curl http://100.112.171.54:8123/health   ->  {"ok":true,...}
-# Logs:    journalctl --user -u plantcart -f
+# Logs:    journalctl --user -u thincart -f
 #
 # HTTPS (required for PWA install + service worker — see PLAN.md §HTTPS):
 #   1. Tailscale admin console → DNS → enable HTTPS Certificates (one-time)
@@ -16,13 +16,13 @@
 #   3. Phones open https://spark-d28c.<tailnet>.ts.net
 
 [Unit]
-Description=PlantCart shopping-list server (FastAPI + SQLite)
+Description=ThinCart shopping-list server (FastAPI + SQLite)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/korety/Project/plantcart/server
+WorkingDirectory=/home/korety/Project/thincart/server
 # SECURITY: bind the Tailscale IP, not 0.0.0.0 — the LAN must never see this port.
 # If tailscale0 isn't up yet at boot, the bind fails and Restart retries until it is.
 ExecStart=/home/korety/miniconda3/bin/python3 -m uvicorn app:app --host 100.112.171.54 --port 8123 --no-access-log

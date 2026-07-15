@@ -1,5 +1,5 @@
 """
-db.py — PlantCart SQLite layer (WAL). One DB file, server is the source of truth.
+db.py — ThinCart SQLite layer (WAL). One DB file, server is the source of truth.
 
 Concurrency model: FastAPI is async but ops are tiny; a single connection guarded
 by an asyncio.Lock in app.py serializes all writes. SQLite WAL keeps readers cheap.
@@ -10,7 +10,7 @@ import sqlite3
 import unicodedata
 from pathlib import Path
 
-DB_PATH = Path(os.environ.get("PLANTCART_DB", Path(__file__).parent / "data" / "plantcart.db"))
+DB_PATH = Path(os.environ.get("THINCART_DB", Path(__file__).parent / "data" / "thincart.db"))
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS item_catalog(

@@ -1,6 +1,6 @@
 {
-  "name": "PlantCart",
-  "short_name": "PlantCart",
+  "name": "ThinCart",
+  "short_name": "ThinCart",
   "description": "Shared shopping list with purchase-cycle and plant-diversity intelligence",
   "start_url": "/",
   "display": "standalone",

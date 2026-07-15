@@ -1,4 +1,4 @@
-# PlantCart — shared shopping list with purchase-cycle & plant-diversity intelligence — PLAN
+# ThinCart — shared shopping list with purchase-cycle & plant-diversity intelligence — PLAN
 
 A self-hosted **PWA shopping list** shared between two phones (user + wife) with
 **real-time sync** (the must-keep feature), plus two intelligence layers no
@@ -302,7 +302,7 @@ spaghetti→パスタ alias) folded specific/branded items into the generic seed
   reflects checked-off items; no phantom-count path exists. Likeliest cause is a
   reflow mistap (checkoff removes a row, the list jumps, a follow-up tap lands on the
   shifted row). Added a 350 ms post-removal tap/swipe lockout to prevent it.
-- **Data repair (un-merge):** backup → `~/backups/shopping-list/plantcart-preunmerge-2026-07-12.db`;
+- **Data repair (un-merge):** backup → `~/backups/shopping-list/thincart-preunmerge-2026-07-12.db`;
   split "yellow squash", "white rice", "spaghetti", "fettuccine", "One Mighty Mill
   bagel" back into their own catalog rows; stripped the bad aliases off ズッキーニ/米/
   パスタ/ベーグル (kept the legit translation aliases). Past `purchase_events` stay on
