@@ -119,8 +119,8 @@ def enrich_prompt(display_name: str, existing_names: list[str],
 async def enrich(conn, write_lock, catalog_id: int) -> bool:
     """Enrich one catalog row via the LLM. Returns True if state-visible change."""
     row = conn.execute(
-        "SELECT id, canonical_name, display_name, category, aliases_json, emoji "
-        "FROM item_catalog WHERE id=?",
+        "SELECT id, canonical_name, display_name, category, aliases_json, emoji, "
+        "note, budget, preferred_store_id FROM item_catalog WHERE id=?",
         (catalog_id,),
     ).fetchone()
     if row is None:
@@ -179,6 +179,15 @@ async def enrich(conn, write_lock, catalog_id: int) -> bool:
                 aliases.append(row["canonical_name"])
             conn.execute("UPDATE item_catalog SET aliases_json=? WHERE id=?",
                          (json.dumps(aliases, ensure_ascii=False), target["id"]))
+            # criteria the user set on the doomed row before this async merge ran
+            # must survive it — carry note/budget/preferred store (target wins)
+            conn.execute(
+                "UPDATE item_catalog SET "
+                "note = CASE WHEN note='' THEN ? ELSE note END, "
+                "budget = COALESCE(budget, ?), "
+                "preferred_store_id = COALESCE(preferred_store_id, ?) WHERE id=?",
+                (row["note"], row["budget"], row["preferred_store_id"], target["id"]),
+            )
             conn.execute("DELETE FROM item_catalog WHERE id=?", (row["id"],))
             log.info("alias-merged %r into %r", row["canonical_name"], alias_of)
         else:

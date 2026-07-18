@@ -17,6 +17,7 @@ Run (tailnet-bound — bind the Tailscale IP, NOT 0.0.0.0):
 import asyncio
 import json
 import logging
+import unicodedata
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -52,13 +53,24 @@ def now_iso() -> str:
 class Op(BaseModel):
     op_id: str = Field(..., min_length=8, max_length=64)
     type: Literal["add", "checkoff", "remove", "skip", "undo_checkoff",
-                  "undo_purchase", "snooze", "edit"]
+                  "undo_purchase", "snooze", "edit", "store_upsert", "store_delete"]
     actor: str = Field("", max_length=40)
     # add / edit
     name: str | None = Field(None, max_length=120)
     qty_note: str | None = Field(None, max_length=120)
     # edit (category adjustment — one of catalog.CATEGORIES)
     category: str | None = Field(None, max_length=20)
+    # edit: persistent purchase criteria (catalog-level — survive checkoff→re-add)
+    note: str | None = Field(None, max_length=200)
+    # edit: typical price. STRING on the wire: "" clears; "３００円"/"¥1,200" parse
+    budget: str | None = Field(None, max_length=20)
+    # edit / checkoff: store display name ("" clears the preference on edit)
+    store: str | None = Field(None, max_length=60)
+    # store_upsert
+    store_name: str | None = Field(None, max_length=60)
+    store_notes: str | None = Field(None, max_length=300)
+    # store_delete
+    store_id: int | None = None
     # add (client-generated item uuid) / checkoff / remove
     item_id: str | None = Field(None, min_length=8, max_length=64)
     # undo_checkoff: the op_id of the checkoff being undone
@@ -66,7 +78,21 @@ class Op(BaseModel):
     # undo_purchase: the purchase_events.id being corrected from the History panel
     event_id: int | None = None
     # snooze (suggestion dismissal — server-side so it silences BOTH phones)
+    # edit fallback: lets criteria apply when the item row vanished mid-edit
     catalog_id: int | None = None
+
+
+def parse_budget(raw: str) -> float | None:
+    """Lenient price parse — JP keyboards produce full-width digits and ¥/円.
+    None = unparseable (field is IGNORED, the rest of the edit still applies);
+    a 422 here would silently drop the whole op client-side."""
+    t = unicodedata.normalize("NFKC", raw)
+    t = t.replace("¥", "").replace("円", "").replace(",", "").strip()
+    try:
+        v = float(t)
+        return v if v >= 0 else None
+    except ValueError:
+        return None
 
 
 async def broadcast_state() -> None:
@@ -110,9 +136,13 @@ def apply_checkoff(op: Op, ts: str) -> dict:
     if row is None:  # already checked off / removed by the other phone
         return {"noop": True}
     conn.execute("DELETE FROM items WHERE id=?", (op.item_id,))
+    # "I'm at: <store>" on the client stamps where this was bought — the ground
+    # truth behind the where-to-buy recommendation (db.recommended_stores)
+    store_id = db.get_or_create_store(conn, op.store) if op.store else None
     cur = conn.execute(
-        "INSERT INTO purchase_events(catalog_id, bought_at, bought_by) VALUES(?,?,?)",
-        (row["catalog_id"], ts, op.actor),
+        "INSERT INTO purchase_events(catalog_id, bought_at, bought_by, store_id) "
+        "VALUES(?,?,?,?)",
+        (row["catalog_id"], ts, op.actor, store_id),
     )
     db.bump_revision(conn)
     # snapshot everything undo needs to resurrect the item + kill the event
@@ -201,29 +231,53 @@ def apply_undo_purchase(op: Op, ts: str) -> dict:
 
 
 def apply_edit(op: Op, ts: str) -> dict:
-    """Long-press editor: adjust an item's quantity note and/or its category.
-    Quantity is per-item (items.qty_note); category is per-catalog-row and so
-    shared by every list entry of that item — the coarse aisle grouping."""
-    if op.item_id is None:
-        raise HTTPException(422, "edit requires item_id")
-    row = conn.execute(
-        "SELECT catalog_id FROM items WHERE id=?", (op.item_id,)
-    ).fetchone()
-    if row is None:  # removed / bought by the other phone → nothing to edit
+    """Long-press editor: quantity note (per-item), plus catalog-level fields —
+    category, note (purchase criteria), budget, preferred store. Catalog-level
+    edits resolve through op.catalog_id when the item row vanished mid-edit
+    (spouse checked it off while the sheet was open): criteria must not be
+    silently lost — persisting across checkoffs is their whole point."""
+    if op.item_id is None and op.catalog_id is None:
+        raise HTTPException(422, "edit requires item_id or catalog_id")
+    row = None
+    if op.item_id is not None:
+        row = conn.execute(
+            "SELECT catalog_id FROM items WHERE id=?", (op.item_id,)
+        ).fetchone()
+    catalog_id = row["catalog_id"] if row else op.catalog_id
+    if catalog_id is None:  # item gone and no catalog fallback → nothing to edit
         return {"noop": True}
     changed = False
-    if op.qty_note is not None:
+    if op.qty_note is not None and row is not None:  # per-item: needs the live row
         conn.execute("UPDATE items SET qty_note=? WHERE id=?", (op.qty_note, op.item_id))
         changed = True
     if op.category is not None:
         if op.category not in catalog.CATEGORIES:
             raise HTTPException(422, "invalid category")
         conn.execute("UPDATE item_catalog SET category=? WHERE id=?",
-                     (op.category, row["catalog_id"]))
+                     (op.category, catalog_id))
+        changed = True
+    if op.note is not None:
+        conn.execute("UPDATE item_catalog SET note=? WHERE id=?",
+                     (op.note.strip(), catalog_id))
+        changed = True
+    if op.budget is not None:
+        if not op.budget.strip():  # "" clears
+            conn.execute("UPDATE item_catalog SET budget=NULL WHERE id=?", (catalog_id,))
+            changed = True
+        else:
+            val = parse_budget(op.budget)
+            if val is not None:
+                conn.execute("UPDATE item_catalog SET budget=? WHERE id=?",
+                             (val, catalog_id))
+                changed = True
+    if op.store is not None:
+        sid = db.get_or_create_store(conn, op.store)  # None when "" → clears
+        conn.execute("UPDATE item_catalog SET preferred_store_id=? WHERE id=?",
+                     (sid, catalog_id))
         changed = True
     if changed:
         db.bump_revision(conn)
-    return {"edited": op.item_id, "changed": changed}
+    return {"edited": op.item_id or catalog_id, "changed": changed}
 
 
 def apply_snooze(op: Op, ts: str) -> dict:
@@ -244,6 +298,37 @@ def apply_snooze(op: Op, ts: str) -> dict:
     return {"snoozed_until": until}
 
 
+def apply_store_upsert(op: Op, ts: str) -> dict:
+    """Stores panel: create a store / update its notes. Notes feed nothing
+    automated yet — they are the household's shared knowledge of each store."""
+    if not op.store_name or not op.store_name.strip():
+        raise HTTPException(422, "store_upsert requires store_name")
+    sid = db.get_or_create_store(conn, op.store_name)
+    if op.store_notes is not None:
+        conn.execute("UPDATE stores SET notes=? WHERE id=?",
+                     (op.store_notes.strip(), sid))
+    db.bump_revision(conn)
+    return {"store_id": sid}
+
+
+def apply_store_delete(op: Op, ts: str) -> dict:
+    """Typo repair. Nulls references (preference + bought-at history) rather than
+    orphaning them. A lagging offline op naming this store re-creates it —
+    documented, acceptable (PLAN.md Phase 5 review delta 7)."""
+    if op.store_id is None:
+        raise HTTPException(422, "store_delete requires store_id")
+    row = conn.execute("SELECT id FROM stores WHERE id=?", (op.store_id,)).fetchone()
+    if row is None:  # already deleted (double-tap / other phone) → no-op
+        return {"noop": True}
+    conn.execute("UPDATE item_catalog SET preferred_store_id=NULL "
+                 "WHERE preferred_store_id=?", (op.store_id,))
+    conn.execute("UPDATE purchase_events SET store_id=NULL WHERE store_id=?",
+                 (op.store_id,))
+    conn.execute("DELETE FROM stores WHERE id=?", (op.store_id,))
+    db.bump_revision(conn)
+    return {"deleted_store": op.store_id}
+
+
 APPLY = {
     "add": apply_add,
     "checkoff": apply_checkoff,
@@ -253,6 +338,8 @@ APPLY = {
     "undo_purchase": apply_undo_purchase,
     "snooze": apply_snooze,
     "edit": apply_edit,
+    "store_upsert": apply_store_upsert,
+    "store_delete": apply_store_delete,
 }
 
 

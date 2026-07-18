@@ -86,6 +86,11 @@
   li.item .nm { flex:1; font-size:1.02rem; overflow-wrap:anywhere; }
   li.item .qty { color:var(--muted); font-size:.85rem; }
   li.item .who { color:var(--muted); font-size:.72rem; }
+  li.item .sub { color:var(--muted); font-size:.74rem; margin-top:2px;
+                 overflow-wrap:anywhere; }
+  .stchip { display:inline-block; background:#eef5f0; color:var(--green-dark);
+            border-radius:6px; padding:1px 6px; font-size:.72rem; }
+  .stchip.hist { background:#f2f0e9; color:#8a7a4e; }
   #empty { text-align:center; color:var(--muted); margin-top:48px; font-size:.95rem; }
   #toast {
     position:fixed; left:50%; bottom:24px; transform:translateX(-50%);
@@ -128,6 +133,57 @@
     display:flex; flex-direction:column; align-items:center; gap:3px; }
   #sheet .catopt.sel { border-color:var(--green); background:#e9f5ec; color:var(--green-dark); }
   #sheet .catopt .em { font-size:1.15rem; }
+  #sheet #sheet-note, #sheet #sheet-budget { flex:1; padding:12px;
+    border:1.5px solid #d4dcd4; border-radius:10px; font-size:1rem; outline:none;
+    min-width:0; }
+  #sheet #sheet-stores { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
+  #sheet .stopt { width:auto; padding:9px 14px; border:1.5px solid #d4dcd4;
+    border-radius:999px; background:var(--card); font-size:.86rem; font-weight:600;
+    margin:0; }
+  #sheet .stopt.sel { border-color:var(--green); background:#e9f5ec;
+    color:var(--green-dark); }
+  #sheet #sheet-newstore { padding:9px 12px; border:1.5px dashed #d4dcd4;
+    border-radius:999px; font-size:.86rem; outline:none; width:9em; }
+  #stores-panel { position:fixed; inset:0; background:var(--bg); z-index:35;
+    display:none; flex-direction:column; }
+  #stores-panel header { position:static; }
+  #stores-panel .body { flex:1; overflow-y:auto; padding:14px 16px 40px; }
+  #stores-panel h3 { font-size:.78rem; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--muted); margin:18px 2px 8px; }
+  #stores-panel .topbtn { background:#ffffff2b; border:none; color:#fff;
+    font-size:.8rem; font-weight:700; padding:5px 12px; border-radius:999px;
+    cursor:pointer; }
+  #at-chips .chip { border-style:solid; }
+  #at-chips .chip.sel { background:var(--green); color:#fff; border-color:var(--green); }
+  .plangroup { background:var(--card); border-radius:14px; padding:12px 15px;
+    margin-bottom:10px; box-shadow:0 1px 2px #0000000a; }
+  .plangroup .ghead { display:flex; align-items:baseline; gap:8px; }
+  .plangroup .ghead b { font-size:1rem; flex:1; }
+  .plangroup .ghead .gsum { color:var(--muted); font-size:.82rem; white-space:nowrap; }
+  .plangroup .pitem { display:flex; gap:8px; font-size:.92rem; padding:5px 0;
+    border-bottom:1px solid #f0f3ee; }
+  .plangroup .pitem:last-child { border-bottom:none; }
+  .plangroup .pitem .pnm { flex:1; overflow-wrap:anywhere; }
+  .plangroup .pitem .pmeta { color:var(--muted); font-size:.8rem; white-space:nowrap; }
+  .storerow { background:var(--card); border-radius:12px; padding:12px 14px;
+    margin-bottom:8px; box-shadow:0 1px 2px #0000000a; }
+  .storerow .srhead { display:flex; align-items:center; gap:8px; }
+  .storerow .srhead b { flex:1; font-size:.98rem; overflow-wrap:anywhere; }
+  .storerow .del { border:1.5px solid #e6c6bd; background:#fbe9e5; color:var(--red);
+    border-radius:999px; padding:6px 12px; font-size:.78rem; font-weight:700;
+    cursor:pointer; }
+  .storerow textarea { width:100%; margin-top:8px; padding:9px 10px; resize:vertical;
+    border:1.5px solid #d4dcd4; border-radius:10px; font-size:.9rem; outline:none;
+    font-family:inherit; min-height:40px; }
+  .storerow .savenotes { margin-top:6px; background:var(--green); color:#fff;
+    border:none; border-radius:9px; padding:8px 14px; font-size:.82rem;
+    font-weight:600; cursor:pointer; display:none; }
+  #newstore-row { display:flex; gap:8px; }
+  #newstore-row input { flex:1; padding:11px 12px; border:1.5px solid #d4dcd4;
+    border-radius:10px; font-size:.95rem; outline:none; min-width:0; }
+  #newstore-row button { background:var(--green); color:#fff; border:none;
+    border-radius:10px; padding:0 16px; font-size:1.1rem; cursor:pointer; }
+  .stores-note { color:var(--muted); font-size:.8rem; margin:20px 2px; }
   #namedlg {
     position:fixed; inset:0; background:var(--bg); z-index:40; display:none;
     flex-direction:column; align-items:center; justify-content:center; gap:14px; padding:24px;
@@ -150,7 +206,7 @@
     border:none; background:#d3e8d9; color:var(--green-dark); border-radius:999px;
     width:22px; height:22px; font-size:.8rem; line-height:1; cursor:pointer; padding:0;
   }
-  #plants, #lang, #hist {
+  #plants, #lang, #hist, #stores-btn {
     background:#ffffff2b; border:none; color:#fff; font-size:.8rem; font-weight:700;
     padding:5px 10px; border-radius:999px; cursor:pointer; white-space:nowrap;
   }
@@ -224,6 +280,7 @@
 <body>
 <header>
   <h1>ThinCart</h1>
+  <button id="stores-btn" aria-label="Stores">🏬</button>
   <button id="hist" aria-label="History">🕘</button>
   <button id="lang">🌐 EN</button>
   <button id="plants">🌱 –/30</button>
@@ -278,6 +335,12 @@
   <h2 id="sheet-title"></h2>
   <label class="sheet-field"><span id="sheet-qty-label"></span>
     <input id="sheet-qty" maxlength="120"></label>
+  <label class="sheet-field"><span id="sheet-note-label"></span>
+    <input id="sheet-note" maxlength="200"></label>
+  <label class="sheet-field"><span id="sheet-budget-label"></span>
+    <input id="sheet-budget" maxlength="20" inputmode="numeric"></label>
+  <div class="sheet-field-label" id="sheet-store-label"></div>
+  <div id="sheet-stores"></div>
   <div class="sheet-field-label" id="sheet-cat-label"></div>
   <div id="sheet-cats"></div>
   <button class="save" id="sheet-save"></button>
@@ -300,6 +363,26 @@
     <div id="recipes"><div class="status">…</div></div>
     <h3 id="try-h"></h3>
     <div id="diversity"></div>
+  </div>
+</div>
+
+<div id="stores-panel">
+  <header>
+    <h1 id="stores-h1"></h1>
+    <button class="topbtn" id="stores-close">✕</button>
+  </header>
+  <div class="body">
+    <h3 id="at-h"></h3>
+    <div id="at-chips"></div>
+    <h3 id="plan-h"></h3>
+    <div id="plan-groups"></div>
+    <h3 id="manage-h"></h3>
+    <div id="store-rows"></div>
+    <div id="newstore-row">
+      <input id="newstore-name" maxlength="60">
+      <button id="newstore-add" aria-label="Add store">＋</button>
+    </div>
+    <p class="stores-note" id="stores-note"></p>
   </div>
 </div>
 
@@ -342,6 +425,15 @@ const saveBase  = () => localStorage.setItem(LS.base, JSON.stringify(base));
 
 /* canonical() twin of server db.canonical — NFKC fold handles full-width JP */
 const canon = s => s.normalize('NFKC').toLowerCase().trim().replace(/\s+/g,' ');
+/* budget parse twin of server parse_budget: '' → null (clear), invalid →
+ * undefined (ignore), else float — ３００円 / ¥1,200 all work */
+const budgetNum = s => {
+  const t = String(s).normalize('NFKC').replace(/[¥円,\s]/g,'');
+  if (!t) return null;
+  const v = parseFloat(t);
+  return Number.isFinite(v) && v >= 0 ? v : undefined;
+};
+const fmtYen = v => '¥' + Math.round(v).toLocaleString();
 /* search fold: canon + katakana→hiragana, so ミルク matches typed みるく */
 const fold = s => canon(s).replace(/[ァ-ヶ]/g,
   ch => String.fromCharCode(ch.charCodeAt(0) - 0x60));
@@ -387,6 +479,17 @@ const STR = {
     hist_empty:'No purchases yet — checked-off items show up here.',
     hist_note:'Tap “Not bought” to fix a mis-swipe: it removes the purchase from your history (so it won’t skew the cycle suggestions) and puts the item back on your list. A mistyped item is best handled by swiping it away as skip.',
     hist_restored:n=>`↩ ${n} back on the list`,
+    sheet_note:'Note', sheet_budget:'Budget ¥', sheet_store:'Where to buy',
+    store_none:'no preference', new_store_inline:'new store…',
+    stores_title:'🏬 Stores & plan', at_h:'I’m at… (tags purchases for 6 h)',
+    plan_h:'Where to buy today', manage_h:'Stores', at_none:'— none —',
+    store_notes_ph:'Notes — e.g. cheap produce, good fish',
+    save_notes:'Save notes', store_del:'Delete',
+    new_store_ph:'Add store… (OK Store, …)',
+    unassigned:'🛒 Anywhere / not sure yet',
+    est:n=>`~¥${n}`, plus_unk:n=>`+${n}?`, src_hist:'(usual)',
+    del_confirm:n=>`Delete ${n}? Purchases stay in history but forget this store.`,
+    stores_note:'Long-press an item to pin its store, or pick “I’m at…” while shopping — check-offs then remember where things were bought and the plan fills itself in.',
     cycles:{'twice a week':'twice a week', weekly:'weekly', 'bi-weekly':'bi-weekly',
             monthly:'monthly', occasional:'occasional'},
   },
@@ -422,6 +525,17 @@ const STR = {
     hist_empty:'まだ購入はありません — チェックした品目がここに表示されます。',
     hist_note:'スワイプ誤操作の修正:「買ってない」をタップすると、その購入が履歴から削除され（サイクル提案が歪みません）、品目がリストに戻ります。入力ミスはスキップとしてスワイプして消すのが基本です。',
     hist_restored:n=>`↩ ${n} をリストに戻しました`,
+    sheet_note:'メモ', sheet_budget:'予算 ¥', sheet_store:'購入する店',
+    store_none:'指定なし', new_store_inline:'新しい店…',
+    stores_title:'🏬 店舗とプラン', at_h:'いまいる店（6時間有効）',
+    plan_h:'今日どこで買う？', manage_h:'店舗リスト', at_none:'— なし —',
+    store_notes_ph:'メモ — 例: 野菜が安い、魚が良い',
+    save_notes:'メモを保存', store_del:'削除',
+    new_store_ph:'店舗を追加… (OKストア など)',
+    unassigned:'🛒 どこでも / 未定',
+    est:n=>`約¥${n}`, plus_unk:n=>`+${n}?`, src_hist:'（いつもの）',
+    del_confirm:n=>`${n}を削除しますか？購入履歴は残りますが、この店の記録は消えます。`,
+    stores_note:'品目を長押しして店を指定するか、買い物中に「いまいる店」を選ぶと、チェックした品の購入場所を記憶してプランが自動で埋まります。',
     cycles:{'twice a week':'週2回', weekly:'毎週', 'bi-weekly':'隔週',
             monthly:'毎月', occasional:'たまに'},
   },
@@ -466,6 +580,15 @@ function applyLang() {
   $('cyc-note').textContent = T().cyc_note;
   $('hist-h1').textContent = T().hist_title;
   $('hist-note').textContent = T().hist_note;
+  $('sheet-note-label').textContent = T().sheet_note;
+  $('sheet-budget-label').textContent = T().sheet_budget;
+  $('sheet-store-label').textContent = T().sheet_store;
+  $('stores-h1').textContent = T().stores_title;
+  $('at-h').textContent = T().at_h;
+  $('plan-h').textContent = T().plan_h;
+  $('manage-h').textContent = T().manage_h;
+  $('stores-note').textContent = T().stores_note;
+  $('newstore-name').placeholder = T().new_store_ph;
 }
 
 let catalog = JSON.parse(localStorage.getItem('pc_catalog') || '[]');
@@ -494,6 +617,15 @@ function view() {
       if (it) {
         if (op.qty_note !== undefined) it.qty_note = op.qty_note;
         if (op.category !== undefined) it.category = op.category;
+        if (op.note !== undefined) it.note = op.note;
+        if (op.budget !== undefined) {          // mirror server: invalid → ignored
+          const v = budgetNum(op.budget);
+          if (v !== undefined) it.budget = v;
+        }
+        if (op.store !== undefined) {           // '' clears, like the server
+          it.store = op.store || null;
+          it.store_source = op.store ? 'preferred' : null;
+        }
       }
     }
   }
@@ -612,8 +744,103 @@ async function openHistory() {
   }
 }
 
+/* ============ stores panel: where-to-buy plan + store management ============ */
+$('stores-btn').onclick = () => { $('stores-panel').style.display = 'flex'; renderStores(); };
+$('stores-close').onclick = () => $('stores-panel').style.display = 'none';
+
+function renderStores() {
+  // "I'm at…" selector
+  const at = $('at-chips'); at.innerHTML = '';
+  const cur = currentStore();
+  const mkAt = (label, val) => {
+    const c = document.createElement('span');
+    c.className = 'chip' + ((cur || '') === val ? ' sel' : '');
+    c.textContent = label;
+    c.onclick = () => { setCurrentStore(val); renderStores(); };
+    at.appendChild(c);
+  };
+  mkAt(T().at_none, '');
+  (base.stores || []).forEach(s => mkAt('🏬 ' + s.name, s.name));
+
+  // the plan: current list grouped by recommended store — computed client-side
+  // over view() so it works offline and reflects pending ops (review delta 6)
+  const items = view();
+  const groups = new Map();
+  for (const it of items) {
+    const k = it.store || '';
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(it);
+  }
+  const pg = $('plan-groups'); pg.innerHTML = '';
+  if (!items.length) pg.innerHTML = `<div class="stores-note">${T().empty}</div>`;
+  const keys = [...groups.keys()].sort((a, b) =>
+    (a === '') - (b === '') || a.localeCompare(b));   // unassigned bucket last
+  for (const k of keys) {
+    const gi = groups.get(k);
+    let sum = 0, unk = 0;
+    gi.forEach(i => { if (i.budget != null) sum += i.budget; else unk++; });
+    const div = document.createElement('div');
+    div.className = 'plangroup';
+    div.innerHTML = `<div class="ghead"><b></b><span class="gsum"></span></div>`;
+    div.querySelector('b').textContent = k ? '🏬 ' + k : T().unassigned;
+    div.querySelector('.gsum').textContent = [
+      sum ? T().est(Math.round(sum).toLocaleString()) : '',
+      unk ? T().plus_unk(unk) : '',
+    ].filter(Boolean).join(' ');
+    for (const i of gi) {
+      const p = document.createElement('div');
+      p.className = 'pitem';
+      p.innerHTML = '<span class="pnm"></span><span class="pmeta"></span>';
+      const ico = i.emoji || (i.category ? catEmoji(i.category) : '');
+      p.querySelector('.pnm').textContent =
+        (ico ? ico + ' ' : '') + disp(i) + (i.note ? ' · ' + i.note : '');
+      p.querySelector('.pmeta').textContent = [
+        i.qty_note, i.budget != null ? fmtYen(i.budget) : '',
+        i.store_source === 'history' ? T().src_hist : '',
+      ].filter(Boolean).join(' ');
+      div.appendChild(p);
+    }
+    pg.appendChild(div);
+  }
+
+  // store management: notes (shared household knowledge) + delete
+  const sr = $('store-rows'); sr.innerHTML = '';
+  for (const s of (base.stores || [])) {
+    const div = document.createElement('div');
+    div.className = 'storerow';
+    div.innerHTML = `<div class="srhead"><b></b><button class="del"></button></div>
+      <textarea maxlength="300"></textarea><button class="savenotes"></button>`;
+    div.querySelector('b').textContent = '🏬 ' + s.name;
+    const ta = div.querySelector('textarea');
+    ta.value = s.notes || ''; ta.placeholder = T().store_notes_ph;
+    const sv = div.querySelector('.savenotes'); sv.textContent = T().save_notes;
+    ta.oninput = () => sv.style.display = 'inline-block';
+    sv.onclick = () => {
+      enqueue({ type:'store_upsert', store_name: s.name, store_notes: ta.value.trim() });
+      sv.style.display = 'none';
+    };
+    const del = div.querySelector('.del'); del.textContent = T().store_del;
+    del.onclick = () => {
+      if (!confirm(T().del_confirm(s.name))) return;
+      if (currentStore() === s.name) setCurrentStore('');
+      enqueue({ type:'store_delete', store_id: s.id });
+    };
+    sr.appendChild(div);
+  }
+  $('newstore-add').onclick = () => {
+    const v = $('newstore-name').value.trim();
+    if (!v) return;
+    enqueue({ type:'store_upsert', store_name: v });
+    $('newstore-name').value = '';
+  };
+}
+
 function render() {
   renderTray();
+  // live-refresh the open stores panel, but never yank a notes textarea
+  // out from under the user's fingers mid-typing
+  if ($('stores-panel').style.display === 'flex'
+      && !$('stores-panel').contains(document.activeElement)) renderStores();
   if (base.plants)
     $('plants').textContent = `🌱 ${base.plants.count}/${base.plants.target}`;
   const items = view(), list = $('list');
@@ -631,10 +858,24 @@ function render() {
     li.className = 'item' + (it.pending ? ' pending' : '');
     li.dataset.id = it.id;
     li.innerHTML = `<div class="under"></div>
-                    <div class="row"><span class="box"></span><span class="nm"></span>
+                    <div class="row"><span class="box"></span>
+                    <span class="nm"><span class="nm1"></span></span>
                     <span class="qty"></span><span class="who"></span></div>`;
     const ico = it.emoji || (it.category ? catEmoji(it.category) : '');
-    li.querySelector('.nm').textContent = (ico ? ico + ' ' : '') + disp(it);
+    li.querySelector('.nm1').textContent = (ico ? ico + ' ' : '') + disp(it);
+    if (it.store || it.note) {   // criteria sub-line: store chip + note
+      const sub = document.createElement('span');
+      sub.className = 'sub'; sub.style.display = 'block';
+      if (it.store) {
+        const sc = document.createElement('span');
+        sc.className = 'stchip' + (it.store_source === 'history' ? ' hist' : '');
+        sc.textContent = '🏬 ' + it.store;
+        sub.appendChild(sc);
+      }
+      if (it.note) sub.appendChild(document.createTextNode(
+        (it.store ? ' ' : '') + it.note));
+      li.querySelector('.nm').appendChild(sub);
+    }
     li.querySelector('.qty').textContent = it.qty_note || '';
     li.querySelector('.who').textContent = it.added_by || '';
     attachGestures(li, it);
@@ -725,11 +966,40 @@ function renderCatOpts() {
     box.appendChild(b);
   }
 }
+function renderStoreOpts() {
+  const box = $('sheet-stores'); box.innerHTML = '';
+  const names = (base.stores || []).map(s => s.name);
+  if (editState.store && !names.includes(editState.store)) names.push(editState.store);
+  const mk = (label, val) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'stopt' + ((editState.store || '') === val ? ' sel' : '');
+    b.textContent = label;
+    b.onclick = () => { editState.store = val; renderStoreOpts(); };
+    box.appendChild(b);
+  };
+  mk(T().store_none, '');
+  names.forEach(n => mk('🏬 ' + n, n));
+  const inp = document.createElement('input');
+  inp.id = 'sheet-newstore'; inp.placeholder = '＋ ' + T().new_store_inline;
+  inp.maxLength = 60; inp.autocomplete = 'off';
+  inp.onchange = () => {
+    const v = inp.value.trim();
+    if (v) { editState.store = v; renderStoreOpts(); }
+  };
+  box.appendChild(inp);
+}
 function closeSheet() { $('sheet').style.display = 'none'; editState = null; }
 function openSheet(it) {
-  editState = { it, category: it.category || 'other' };
+  editState = { it, category: it.category || 'other',
+                // only an EXPLICIT preference preselects — a history-derived
+                // recommendation must not silently become a pin on Save
+                store: it.store_source === 'preferred' ? it.store : '' };
   $('sheet-title').textContent = disp(it);
   $('sheet-qty').value = it.qty_note || '';
+  $('sheet-note').value = it.note || '';
+  $('sheet-budget').value = it.budget == null ? '' : String(it.budget);
+  renderStoreOpts();
   renderCatOpts();
   $('sheet').style.display = 'flex';
   $('sheet-skip').onclick   = () => { closeSheet(); enqueue({ type:'skip',   item_id:it.id }); };
@@ -738,10 +1008,19 @@ function openSheet(it) {
 function saveSheet() {
   if (!editState) return;
   const it = editState.it, qty = $('sheet-qty').value.trim();
+  const note = $('sheet-note').value.trim();
+  const budget = $('sheet-budget').value.trim();
+  // catalog_id lets criteria apply server-side even if the item was checked
+  // off while the sheet was open (criteria are catalog-level and must survive)
   const fields = { type:'edit', item_id: it.id };
+  if (it.catalog_id) fields.catalog_id = it.catalog_id;
   let changed = false;
   if (qty !== (it.qty_note || ''))                 { fields.qty_note = qty;              changed = true; }
   if (editState.category !== (it.category || 'other')) { fields.category = editState.category; changed = true; }
+  if (note !== (it.note || ''))                    { fields.note = note;                 changed = true; }
+  if (budget !== (it.budget == null ? '' : String(it.budget))) { fields.budget = budget; changed = true; }
+  const origStore = it.store_source === 'preferred' ? it.store : '';
+  if ((editState.store || '') !== origStore)       { fields.store = editState.store || ''; changed = true; }
   if (changed) enqueue(fields);
   closeSheet();
 }
@@ -756,9 +1035,25 @@ function enqueue(fields) {
   return op;
 }
 
+/* "I'm at: <store>" — while set, check-offs are stamped with the store, which
+ * silently builds the where-bought history behind the plan. Expires after 6 h:
+ * a stale selection would poison the history (review delta 8). */
+const AT_KEY = 'pc_at', AT_TTL = 6 * 3600 * 1000;
+function currentStore() {
+  try {
+    const v = JSON.parse(localStorage.getItem(AT_KEY) || 'null');
+    if (v && v.name && Date.now() - v.at < AT_TTL) return v.name;
+  } catch (e) {}
+  return null;
+}
+const setCurrentStore = name => name
+  ? localStorage.setItem(AT_KEY, JSON.stringify({ name, at: Date.now() }))
+  : localStorage.removeItem(AT_KEY);
+
 function checkoff(it) {
   lockUntil = Date.now() + 350;
-  const op = enqueue({ type:'checkoff', item_id: it.id });
+  const at = currentStore();
+  const op = enqueue({ type:'checkoff', item_id: it.id, ...(at ? { store: at } : {}) });
   showToast(`✓ ${disp(it)}`, () => {
     // undo: if the checkoff is still queued locally, just retract it;
     // otherwise ask the server to delete the purchase_event + restore.

@@ -45,6 +45,14 @@ CREATE TABLE IF NOT EXISTS purchase_events(
   source TEXT NOT NULL DEFAULT 'checkoff' CHECK(source IN ('checkoff'))
 );
 
+CREATE TABLE IF NOT EXISTS stores(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,  -- AUTOINCREMENT: rowid reuse + offline
+                                         -- cross-phone delete could hit the wrong store
+  name TEXT NOT NULL,                    -- display, as first typed
+  canonical_name TEXT UNIQUE NOT NULL,
+  notes TEXT NOT NULL DEFAULT ''         -- "cheap produce, good fish"
+);
+
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
 
 CREATE TABLE IF NOT EXISTS applied_ops(
@@ -83,6 +91,17 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
         conn.execute("ALTER TABLE item_catalog ADD COLUMN emoji TEXT")
     except sqlite3.OperationalError:
         pass
+    # migrations for DBs created before stores / notes / purchase criteria (Phase 5)
+    for ddl in (
+        "ALTER TABLE item_catalog ADD COLUMN note TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE item_catalog ADD COLUMN budget REAL",
+        "ALTER TABLE item_catalog ADD COLUMN preferred_store_id INTEGER REFERENCES stores(id)",
+        "ALTER TABLE purchase_events ADD COLUMN store_id INTEGER REFERENCES stores(id)",
+    ):
+        try:
+            conn.execute(ddl)
+        except sqlite3.OperationalError:
+            pass
     conn.execute("INSERT OR IGNORE INTO meta(key, value) VALUES('revision', '0')")
     conn.commit()
     return conn
@@ -120,6 +139,50 @@ def get_or_create_catalog(conn: sqlite3.Connection, name: str) -> int:
         (canon, name.strip(), emoji.lookup(canon)),
     )
     return cur.lastrowid
+
+
+def get_or_create_store(conn: sqlite3.Connection, name: str) -> int | None:
+    """Store id by canonical name — get-or-create, NEVER a bare INSERT: two
+    spellings that canonicalize identically ("OK Store" / "ok　store") must land
+    on one row, or the UNIQUE constraint 500s and wedges the client op queue."""
+    canon = canonical(name)
+    if not canon:
+        return None
+    row = conn.execute(
+        "SELECT id FROM stores WHERE canonical_name=?", (canon,)
+    ).fetchone()
+    if row:
+        return row["id"]
+    cur = conn.execute(
+        "INSERT INTO stores(name, canonical_name) VALUES(?, ?)", (name.strip(), canon)
+    )
+    return cur.lastrowid
+
+
+def stores_list(conn: sqlite3.Connection) -> list[dict]:
+    return [dict(r) for r in conn.execute(
+        "SELECT id, name, notes FROM stores ORDER BY name")]
+
+
+def recommended_stores(conn: sqlite3.Connection) -> dict[int, tuple[int, str]]:
+    """catalog_id -> (store_id, source). Explicit preference wins; else the
+    store the item was bought at most often (tie: most recently)."""
+    rec: dict[int, tuple[int, str]] = {}
+    hist: dict[int, int] = {}
+    for r in conn.execute(
+        """SELECT catalog_id, store_id, COUNT(*) AS n, MAX(bought_at) AS last
+           FROM purchase_events WHERE store_id IS NOT NULL
+           GROUP BY catalog_id, store_id ORDER BY n, last"""
+    ):  # ascending order + dict overwrite → the (max n, latest) row wins
+        hist[r["catalog_id"]] = r["store_id"]
+    for cid, sid in hist.items():
+        rec[cid] = (sid, "history")
+    for r in conn.execute(
+        "SELECT id, preferred_store_id FROM item_catalog "
+        "WHERE preferred_store_id IS NOT NULL"
+    ):
+        rec[r["id"]] = (r["preferred_store_id"], "preferred")
+    return rec
 
 
 def name_en(aliases_json: str, display: str) -> str | None:
@@ -200,15 +263,22 @@ def state(conn: sqlite3.Connection, now=None) -> dict:
     from datetime import datetime, timezone
 
     now = now or datetime.now(timezone.utc)
+    stores = stores_list(conn)
+    store_names = {s["id"]: s["name"] for s in stores}
+    rec = recommended_stores(conn)
     items = []
     for r in conn.execute(
-        """SELECT i.id, c.display_name AS name, c.aliases_json, c.category, c.emoji,
+        """SELECT i.id, i.catalog_id, c.display_name AS name, c.aliases_json,
+                  c.category, c.emoji, c.note, c.budget,
                   i.qty_note, i.added_by, i.added_at
            FROM items i JOIN item_catalog c ON c.id = i.catalog_id
            ORDER BY COALESCE(c.category, 'zzz'), i.added_at"""
     ):
         d = dict(r)
         d["name_en"] = name_en(d.pop("aliases_json"), d["name"])
+        sid, source = rec.get(d["catalog_id"], (None, None))
+        d["store"] = store_names.get(sid)
+        d["store_source"] = source if d["store"] else None
         items.append(d)
     import catalog
     import plants as plantvocab
@@ -217,6 +287,7 @@ def state(conn: sqlite3.Connection, now=None) -> dict:
     return {
         "revision": get_revision(conn),
         "items": items,
+        "stores": stores,
         "suggestions": suggestions(conn, now),
         # count is plant points per plants.COUNTING_MODE — currently "agp": a flat
         # count of distinct plant species (the study's own method, no fractions).

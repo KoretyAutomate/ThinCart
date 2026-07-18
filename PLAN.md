@@ -405,3 +405,100 @@ Brand images (product logos for branded items): DEFERRED. Legally fine for the
 private tailnet app (nominative fair use, no distribution) but NOT for any public
 build (trademark/copyright in commerce) — never bake brand assets into the SaaS
 build. Emoji is the legally-clean default everywhere.
+
+---
+
+## Phase 5 — stores, notes & purchase criteria + where-to-buy plan (2026-07-18)
+
+User request: (1) notes / store names on items, (2) purchase criteria (quantity,
+budget, …), (3) recommendations of WHERE to buy each item, driven by the stored
+store information.
+
+Delegation: considered, rejected — extends the live sync protocol (Op model,
+state shape, offline queue semantics) and needs UI/UX judgment throughout;
+the plan would be as long as the diff and nothing is cleanly machine-checkable
+in isolation.
+
+### Data model (additive migrations only — live DB stays valid)
+
+```sql
+CREATE TABLE stores(
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,                  -- display, as first typed
+  canonical_name TEXT UNIQUE NOT NULL, -- db.canonical() of name
+  notes TEXT NOT NULL DEFAULT ''       -- "cheap produce, good fish" — feeds LLM placement
+);
+ALTER TABLE item_catalog ADD COLUMN note TEXT NOT NULL DEFAULT '';   -- criteria: brand/size/budget text
+ALTER TABLE item_catalog ADD COLUMN budget REAL;                     -- typical price ¥/one purchase
+ALTER TABLE item_catalog ADD COLUMN preferred_store_id INTEGER REFERENCES stores(id);
+ALTER TABLE purchase_events ADD COLUMN store_id INTEGER REFERENCES stores(id);
+```
+
+Note/budget/preferred-store live on `item_catalog` (not `items`) deliberately:
+criteria persist across checkoff→re-add cycles — that is what makes them
+"purchase criteria" rather than one-trip remarks. Per-trip text stays `qty_note`.
+
+### Ops (Op model extensions, all idempotent like existing ops)
+
+- `edit` gains `note`, `budget`, `store` (store display name; `""` clears the
+  preferred store; unknown name auto-creates the store row).
+- `checkoff` gains optional `store` — stamps `purchase_events.store_id`
+  (auto-create by name). Fed by the client's "I'm at: <store>" selector.
+- new `store_upsert` (`store_name`, `store_notes`) — create store / update notes.
+- new `store_delete` (`store_id`) — nulls `preferred_store_id` and
+  `purchase_events.store_id` references, deletes the row (typo repair).
+
+### Recommendation rule (pure rules; LLM only as opt-in gap-filler)
+
+Per catalog item: explicit `preferred_store_id` → else most-frequent
+`store_id` over its purchase history (tie: most recent) → else unassigned.
+Source tag ("preferred"/"history") is carried so the UI can show why.
+
+- `state()` items gain `note`, `budget`, `store`, `store_source`.
+- new GET `/api/stores` — store list with notes (client cache for pickers).
+- new GET `/api/plan` — current list grouped by recommended store, with a
+  per-store budget subtotal (sum of known budgets) + unassigned bucket.
+  `?llm=1` additionally asks the DGX LLM to place unassigned items using the
+  store notes; LLM failure degrades to rule-only (never blocks, like /api/ideas).
+
+### PWA UI
+
+- Edit sheet (long-press): note field, budget field (numeric), store picker —
+  chips of known stores + free-text for a new one.
+- Item row: note shown muted next to qty; store chip (e.g. 「OKストア」).
+- New Stores panel (header 🏬): shopping plan grouped by store w/ subtotals
+  (the "where to buy" answer); "I'm at:" current-store selector (localStorage,
+  stamps subsequent checkoffs — builds history with zero extra effort); store
+  list with editable notes + delete.
+- `view()` applies the new edit fields optimistically; full EN/JA i18n.
+
+### Gates
+
+- Unit tests (~10 new): store upsert/delete, edit note/budget/store, checkoff
+  store stamping, precedence preferred>history, /api/plan grouping + subtotals,
+  migration idempotency on an existing DB.
+- Live verification: restart thincart.service, /health OK, exercise /api/plan
+  and a store-stamped checkoff against 100.112.171.54:8123.
+
+### Review deltas (agent review, 2026-07-18 — applied)
+
+1. Store auto-create is **get-or-create by canonical_name** (plain INSERT on the
+   UNIQUE column would 500 on spelling collisions and wedge the client op queue).
+2. `catalog.enrich` alias-merge **carries note/budget/preferred_store_id** onto
+   the merge target (target wins where already set) — otherwise async merges
+   silently discard criteria.
+3. `edit` also carries `catalog_id`: catalog-level fields (note/budget/store)
+   apply even when the item row vanished mid-edit (spouse checked it off);
+   only `qty_note` requires the live item. `state()` items expose `catalog_id`.
+4. `budget` travels as a **string**: `""` clears, else lenient parse (NFKC fold
+   full-width digits, strip ¥/円/commas); unparseable → field ignored, rest of
+   the edit still applies.
+5. `stores` is embedded in `state()` (no `/api/stores`, no client cache-staleness).
+6. **No `/api/plan` endpoint** — the Stores panel groups `view()` client-side
+   (works offline, reflects pending ops). LLM placement CUT from v1; the
+   "I'm at:" checkoff stamping earns ground truth within a couple of trips.
+7. `stores` uses `AUTOINCREMENT` (rowid reuse + cross-phone offline delete could
+   hit the wrong store). Deleting a store nulls references; a lagging offline op
+   naming it re-creates it (documented property, acceptable).
+8. "I'm at:" selection expires after 6 h (stale selection would silently poison
+   where-bought history).
