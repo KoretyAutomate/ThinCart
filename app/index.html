@@ -22,13 +22,19 @@
     padding:env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
   }
   header {
-    background:var(--green); color:#fff; padding:12px 16px;
-    display:flex; align-items:center; gap:10px; position:sticky; top:0; z-index:10;
+    background:var(--green); color:#fff; padding:12px 10px 12px 14px;
+    display:flex; align-items:center; gap:6px; position:sticky; top:0; z-index:10;
   }
-  header h1 { font-size:1.15rem; margin:0; flex:1; font-weight:700; }
+  /* the header must NEVER exceed the viewport: overflow here makes the whole
+   * page scroll sideways and clips every row's right edge ("note cut off").
+   * Title and pill are the shrinkable parts; buttons keep their size. */
+  header h1 { font-size:1.15rem; margin:0; flex:1; font-weight:700;
+              min-width:0; overflow:hidden; text-overflow:ellipsis;
+              white-space:nowrap; }
   #pill {
-    font-size:.72rem; font-weight:600; padding:4px 10px; border-radius:999px;
+    font-size:.72rem; font-weight:600; padding:4px 8px; border-radius:999px;
     background:#ffffff2b; color:#fff; white-space:nowrap;
+    min-width:0; overflow:hidden; text-overflow:ellipsis;
   }
   #pill.synced::before  { content:"● "; color:#8ee6a1; }
   #pill.syncing::before { content:"● "; color:#ffd479; }
@@ -136,6 +142,8 @@
   #sheet #sheet-note, #sheet #sheet-budget { flex:1; padding:12px;
     border:1.5px solid #d4dcd4; border-radius:10px; font-size:1rem; outline:none;
     min-width:0; }
+  /* a NOTE must be fully visible while editing — a single-line input clips it */
+  #sheet #sheet-note { font-family:inherit; resize:none; line-height:1.35; }
   #sheet #sheet-stores { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
   #sheet .stopt { width:auto; padding:9px 14px; border:1.5px solid #d4dcd4;
     border-radius:999px; background:var(--card); font-size:.86rem; font-weight:600;
@@ -208,7 +216,8 @@
   }
   #plants, #lang, #hist, #stores-btn {
     background:#ffffff2b; border:none; color:#fff; font-size:.8rem; font-weight:700;
-    padding:5px 10px; border-radius:999px; cursor:pointer; white-space:nowrap;
+    padding:5px 8px; border-radius:999px; cursor:pointer; white-space:nowrap;
+    flex-shrink:0;
   }
   .cand .alt { color:var(--muted); font-size:.8rem; }
   #ideas {
@@ -336,7 +345,7 @@
   <label class="sheet-field"><span id="sheet-qty-label"></span>
     <input id="sheet-qty" maxlength="120"></label>
   <label class="sheet-field"><span id="sheet-note-label"></span>
-    <input id="sheet-note" maxlength="200"></label>
+    <textarea id="sheet-note" maxlength="200" rows="2"></textarea></label>
   <label class="sheet-field"><span id="sheet-budget-label"></span>
     <input id="sheet-budget" maxlength="20" inputmode="numeric"></label>
   <div class="sheet-field-label" id="sheet-store-label"></div>
@@ -433,7 +442,7 @@ const budgetNum = s => {
   const v = parseFloat(t);
   return Number.isFinite(v) && v >= 0 ? v : undefined;
 };
-const fmtYen = v => '¥' + Math.round(v).toLocaleString();
+const fmtYen = v => '💰' + Math.round(v).toLocaleString();  // user pref: 💰, not ¥
 /* search fold: canon + katakana→hiragana, so ミルク matches typed みるく */
 const fold = s => canon(s).replace(/[ァ-ヶ]/g,
   ch => String.fromCharCode(ch.charCodeAt(0) - 0x60));
@@ -479,7 +488,7 @@ const STR = {
     hist_empty:'No purchases yet — checked-off items show up here.',
     hist_note:'Tap “Not bought” to fix a mis-swipe: it removes the purchase from your history (so it won’t skew the cycle suggestions) and puts the item back on your list. A mistyped item is best handled by swiping it away as skip.',
     hist_restored:n=>`↩ ${n} back on the list`,
-    sheet_note:'Note', sheet_budget:'Budget ¥', sheet_store:'Where to buy',
+    sheet_note:'Note', sheet_budget:'Budget 💰', sheet_store:'Where to buy',
     store_none:'no preference', new_store_inline:'new store…',
     stores_title:'🏬 Stores & plan', at_h:'I’m at… (tags purchases for 6 h)',
     plan_h:'Where to buy today', manage_h:'Stores', at_none:'— none —',
@@ -487,7 +496,7 @@ const STR = {
     save_notes:'Save notes', store_del:'Delete',
     new_store_ph:'Add store… (OK Store, …)',
     unassigned:'🛒 Anywhere / not sure yet',
-    est:n=>`~¥${n}`, plus_unk:n=>`+${n}?`, src_hist:'(usual)',
+    est:n=>`~💰${n}`, plus_unk:n=>`+${n}?`, src_hist:'(usual)',
     del_confirm:n=>`Delete ${n}? Purchases stay in history but forget this store.`,
     stores_note:'Long-press an item to pin its store, or pick “I’m at…” while shopping — check-offs then remember where things were bought and the plan fills itself in.',
     cycles:{'twice a week':'twice a week', weekly:'weekly', 'bi-weekly':'bi-weekly',
@@ -525,7 +534,7 @@ const STR = {
     hist_empty:'まだ購入はありません — チェックした品目がここに表示されます。',
     hist_note:'スワイプ誤操作の修正:「買ってない」をタップすると、その購入が履歴から削除され（サイクル提案が歪みません）、品目がリストに戻ります。入力ミスはスキップとしてスワイプして消すのが基本です。',
     hist_restored:n=>`↩ ${n} をリストに戻しました`,
-    sheet_note:'メモ', sheet_budget:'予算 ¥', sheet_store:'購入する店',
+    sheet_note:'メモ', sheet_budget:'予算 💰', sheet_store:'購入する店',
     store_none:'指定なし', new_store_inline:'新しい店…',
     stores_title:'🏬 店舗とプラン', at_h:'いまいる店（6時間有効）',
     plan_h:'今日どこで買う？', manage_h:'店舗リスト', at_none:'— なし —',
@@ -533,7 +542,7 @@ const STR = {
     save_notes:'メモを保存', store_del:'削除',
     new_store_ph:'店舗を追加… (OKストア など)',
     unassigned:'🛒 どこでも / 未定',
-    est:n=>`約¥${n}`, plus_unk:n=>`+${n}?`, src_hist:'（いつもの）',
+    est:n=>`約💰${n}`, plus_unk:n=>`+${n}?`, src_hist:'（いつもの）',
     del_confirm:n=>`${n}を削除しますか？購入履歴は残りますが、この店の記録は消えます。`,
     stores_note:'品目を長押しして店を指定するか、買い物中に「いまいる店」を選ぶと、チェックした品の購入場所を記憶してプランが自動で埋まります。',
     cycles:{'twice a week':'週2回', weekly:'毎週', 'bi-weekly':'隔週',
@@ -1002,6 +1011,11 @@ function openSheet(it) {
   renderStoreOpts();
   renderCatOpts();
   $('sheet').style.display = 'flex';
+  // size the note box to its content (scrollHeight is 0 while hidden — do it
+  // after display:flex); grows as the user types, capped at ~5 lines
+  const ta = $('sheet-note');
+  const fit = () => { ta.style.height = ''; ta.style.height = Math.min(ta.scrollHeight + 3, 140) + 'px'; };
+  ta.oninput = fit; fit();
   $('sheet-skip').onclick   = () => { closeSheet(); enqueue({ type:'skip',   item_id:it.id }); };
   $('sheet-remove').onclick = () => { closeSheet(); enqueue({ type:'remove', item_id:it.id }); };
 }
