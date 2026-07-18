@@ -139,11 +139,11 @@
     display:flex; flex-direction:column; align-items:center; gap:3px; }
   #sheet .catopt.sel { border-color:var(--green); background:#e9f5ec; color:var(--green-dark); }
   #sheet .catopt .em { font-size:1.15rem; }
-  #sheet #sheet-note, #sheet #sheet-budget { flex:1; padding:12px;
+  #sheet #sheet-note-input, #sheet #sheet-budget { flex:1; padding:12px;
     border:1.5px solid #d4dcd4; border-radius:10px; font-size:1rem; outline:none;
     min-width:0; }
   /* a NOTE must be fully visible while editing — a single-line input clips it */
-  #sheet #sheet-note { font-family:inherit; resize:none; line-height:1.35; }
+  #sheet #sheet-note-input { font-family:inherit; resize:none; line-height:1.35; }
   #sheet #sheet-stores { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
   #sheet .stopt { width:auto; padding:9px 14px; border:1.5px solid #d4dcd4;
     border-radius:999px; background:var(--card); font-size:.86rem; font-weight:600;
@@ -344,8 +344,10 @@
   <h2 id="sheet-title"></h2>
   <label class="sheet-field"><span id="sheet-qty-label"></span>
     <input id="sheet-qty" maxlength="120"></label>
+  <!-- id must NOT be "sheet-note": that's the <p> below Save — a duplicate id
+       styles the p like an input (ghost blank field) and hijacks applyLang -->
   <label class="sheet-field"><span id="sheet-note-label"></span>
-    <textarea id="sheet-note" maxlength="200" rows="2"></textarea></label>
+    <textarea id="sheet-note-input" maxlength="200" rows="2"></textarea></label>
   <label class="sheet-field"><span id="sheet-budget-label"></span>
     <input id="sheet-budget" maxlength="20" inputmode="numeric"></label>
   <div class="sheet-field-label" id="sheet-store-label"></div>
@@ -488,7 +490,7 @@ const STR = {
     hist_empty:'No purchases yet — checked-off items show up here.',
     hist_note:'Tap “Not bought” to fix a mis-swipe: it removes the purchase from your history (so it won’t skew the cycle suggestions) and puts the item back on your list. A mistyped item is best handled by swiping it away as skip.',
     hist_restored:n=>`↩ ${n} back on the list`,
-    sheet_note:'Note', sheet_budget:'Budget 💰', sheet_store:'Where to buy',
+    note_label:'Note', sheet_budget:'Budget 💰', sheet_store:'Where to buy',
     store_none:'no preference', new_store_inline:'new store…',
     stores_title:'🏬 Stores & plan', at_h:'I’m at… (tags purchases for 6 h)',
     plan_h:'Where to buy today', manage_h:'Stores', at_none:'— none —',
@@ -534,7 +536,7 @@ const STR = {
     hist_empty:'まだ購入はありません — チェックした品目がここに表示されます。',
     hist_note:'スワイプ誤操作の修正:「買ってない」をタップすると、その購入が履歴から削除され（サイクル提案が歪みません）、品目がリストに戻ります。入力ミスはスキップとしてスワイプして消すのが基本です。',
     hist_restored:n=>`↩ ${n} をリストに戻しました`,
-    sheet_note:'メモ', sheet_budget:'予算 💰', sheet_store:'購入する店',
+    note_label:'メモ', sheet_budget:'予算 💰', sheet_store:'購入する店',
     store_none:'指定なし', new_store_inline:'新しい店…',
     stores_title:'🏬 店舗とプラン', at_h:'いまいる店（6時間有効）',
     plan_h:'今日どこで買う？', manage_h:'店舗リスト', at_none:'— なし —',
@@ -589,7 +591,7 @@ function applyLang() {
   $('cyc-note').textContent = T().cyc_note;
   $('hist-h1').textContent = T().hist_title;
   $('hist-note').textContent = T().hist_note;
-  $('sheet-note-label').textContent = T().sheet_note;
+  $('sheet-note-label').textContent = T().note_label;
   $('sheet-budget-label').textContent = T().sheet_budget;
   $('sheet-store-label').textContent = T().sheet_store;
   $('stores-h1').textContent = T().stores_title;
@@ -1006,14 +1008,14 @@ function openSheet(it) {
                 store: it.store_source === 'preferred' ? it.store : '' };
   $('sheet-title').textContent = disp(it);
   $('sheet-qty').value = it.qty_note || '';
-  $('sheet-note').value = it.note || '';
+  $('sheet-note-input').value = it.note || '';
   $('sheet-budget').value = it.budget == null ? '' : String(it.budget);
   renderStoreOpts();
   renderCatOpts();
   $('sheet').style.display = 'flex';
   // size the note box to its content (scrollHeight is 0 while hidden — do it
   // after display:flex); grows as the user types, capped at ~5 lines
-  const ta = $('sheet-note');
+  const ta = $('sheet-note-input');
   const fit = () => { ta.style.height = ''; ta.style.height = Math.min(ta.scrollHeight + 3, 140) + 'px'; };
   ta.oninput = fit; fit();
   $('sheet-skip').onclick   = () => { closeSheet(); enqueue({ type:'skip',   item_id:it.id }); };
@@ -1022,7 +1024,7 @@ function openSheet(it) {
 function saveSheet() {
   if (!editState) return;
   const it = editState.it, qty = $('sheet-qty').value.trim();
-  const note = $('sheet-note').value.trim();
+  const note = $('sheet-note-input').value.trim();
   const budget = $('sheet-budget').value.trim();
   // catalog_id lets criteria apply server-side even if the item was checked
   // off while the sheet was open (criteria are catalog-level and must survive)
