@@ -154,6 +154,66 @@ def test_undo_purchase_replay_is_idempotent():
     assert len(events("okra")) == 0
 
 
+def test_edit_rename_repoints_catalog_keeps_item():
+    """Rename re-points items.catalog_id at the new name's catalog row; the
+    item id, qty and the OLD catalog row's name all survive untouched."""
+    iid = str(uuid.uuid4())
+    op(type="add", name="rename-src", item_id=iid, qty_note="2 packs")
+    _, res = op(type="edit", item_id=iid, name="rename-dst")
+    assert res.status_code == 200 and res.json()["result"]["changed"] is True
+    lst = items()
+    assert "rename-src" not in lst and "rename-dst" in lst
+    assert lst["rename-dst"]["id"] == iid          # same item, not delete+re-add
+    assert lst["rename-dst"]["qty_note"] == "2 packs"
+    old = appmod.conn.execute(
+        "SELECT display_name FROM item_catalog WHERE canonical_name=?",
+        (db.canonical("rename-src"),)).fetchone()
+    assert old["display_name"] == "rename-src"     # old concept row untouched
+
+
+def test_edit_rename_and_qty_in_one_op():
+    """The sheet saves name+qty together; both must land on the same item."""
+    iid = str(uuid.uuid4())
+    op(type="add", name="combo-src", item_id=iid)
+    op(type="edit", item_id=iid, name="combo-dst", qty_note="500 g")
+    lst = items()
+    assert lst["combo-dst"]["id"] == iid and lst["combo-dst"]["qty_note"] == "500 g"
+
+
+def test_edit_rename_onto_existing_item_merges():
+    """Renaming to a name already on the list converges to ONE row (the
+    survivor keeps its id; the edited row is dropped; qty follows the save)."""
+    keep, gone = str(uuid.uuid4()), str(uuid.uuid4())
+    op(type="add", name="merge-keep", item_id=keep)
+    op(type="add", name="merge-gone", item_id=gone)
+    _, res = op(type="edit", item_id=gone, name="merge-keep", qty_note="x3")
+    assert res.json()["result"]["merged_into"] == keep
+    lst = items()
+    assert "merge-gone" not in lst
+    assert lst["merge-keep"]["id"] == keep and lst["merge-keep"]["qty_note"] == "x3"
+    rows = appmod.conn.execute(
+        "SELECT COUNT(*) AS n FROM items i JOIN item_catalog c ON c.id=i.catalog_id "
+        "WHERE c.canonical_name=?", (db.canonical("merge-keep"),)).fetchone()
+    assert rows["n"] == 1
+
+
+def test_edit_rename_criteria_follow_new_concept():
+    """Rename + criteria in one save: note/category land on the NEW catalog
+    row, not the old concept the item is leaving."""
+    iid = str(uuid.uuid4())
+    op(type="add", name="crit-src", item_id=iid)
+    op(type="edit", item_id=iid, name="crit-dst", note="the organic one",
+       category="pantry")
+    dst = appmod.conn.execute(
+        "SELECT note, category FROM item_catalog WHERE canonical_name=?",
+        (db.canonical("crit-dst"),)).fetchone()
+    assert dst["note"] == "the organic one" and dst["category"] == "pantry"
+    src = appmod.conn.execute(
+        "SELECT note FROM item_catalog WHERE canonical_name=?",
+        (db.canonical("crit-src"),)).fetchone()
+    assert not src["note"]  # old concept untouched
+
+
 def test_revision_monotonic_and_replay_does_not_bump():
     r0 = client.get("/api/state").json()["revision"]
     iid = str(uuid.uuid4())

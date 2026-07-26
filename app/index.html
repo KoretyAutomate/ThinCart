@@ -128,7 +128,7 @@
   #sheet .save { background:var(--green); color:#fff; }
   #sheet .sheet-field { display:flex; align-items:center; gap:10px; margin:0 0 14px; }
   #sheet .sheet-field span { font-size:.9rem; color:var(--muted); min-width:62px; }
-  #sheet #sheet-qty { flex:1; padding:12px; border:1.5px solid #d4dcd4;
+  #sheet #sheet-name, #sheet #sheet-qty { flex:1; padding:12px; border:1.5px solid #d4dcd4;
     border-radius:10px; font-size:1rem; outline:none; }
   #sheet .sheet-field-label { font-size:.72rem; font-weight:700; letter-spacing:.06em;
     text-transform:uppercase; color:var(--muted); margin:0 2px 8px; }
@@ -342,6 +342,8 @@
 
 <div id="sheet"><div class="card">
   <h2 id="sheet-title"></h2>
+  <label class="sheet-field"><span id="sheet-name-label"></span>
+    <input id="sheet-name" maxlength="120"></label>
   <label class="sheet-field"><span id="sheet-qty-label"></span>
     <input id="sheet-qty" maxlength="120"></label>
   <!-- id must NOT be "sheet-note": that's the <p> below Save — a duplicate id
@@ -461,7 +463,7 @@ const STR = {
   en: {
     add_ph:'Add item… (milk, eggs, apples …)', qty_ph:'qty', tray:'Suggested — probably due',
     empty:'List is empty — nice work 🎉', uncat:'📦 Uncategorized',
-    sheet_qty:'Quantity', sheet_cat:'Category', sheet_save:'Save changes',
+    sheet_name:'Name', sheet_qty:'Quantity', sheet_cat:'Category', sheet_save:'Save changes',
     sheet_note:'Neither counts as a purchase. Skipped items get suggested again tomorrow.',
     sheet_skip:'🚫 Out of stock — skip', sheet_remove:'Remove (added by mistake)', cancel:'Cancel',
     swipe_bought:'Bought', swipe_skip:'Skip',
@@ -507,7 +509,7 @@ const STR = {
   ja: {
     add_ph:'追加… (牛乳, 卵, りんご など)', qty_ph:'数量', tray:'提案 — そろそろ買い時',
     empty:'リストは空です 🎉', uncat:'📦 未分類',
-    sheet_qty:'数量', sheet_cat:'カテゴリー', sheet_save:'変更を保存',
+    sheet_name:'名前', sheet_qty:'数量', sheet_cat:'カテゴリー', sheet_save:'変更を保存',
     sheet_note:'どちらも購入としては記録されません。スキップは明日また提案されます。',
     sheet_skip:'🚫 在庫なし — スキップ', sheet_remove:'削除（間違えて追加）', cancel:'キャンセル',
     swipe_bought:'購入', swipe_skip:'スキップ',
@@ -571,6 +573,7 @@ function applyLang() {
   $('name').placeholder = T().add_ph;   $('qty').placeholder = T().qty_ph;
   $('tray-label').textContent = T().tray;
   $('empty').textContent = T().empty;
+  $('sheet-name-label').textContent = T().sheet_name;
   $('sheet-qty-label').textContent = T().sheet_qty;
   $('sheet-cat-label').textContent = T().sheet_cat;
   $('sheet-save').textContent = T().sheet_save;
@@ -626,6 +629,7 @@ function view() {
     } else if (op.type === 'edit') {
       const it = items.find(i => i.id === op.item_id);
       if (it) {
+        if (op.name !== undefined) { it.name = op.name; it.name_en = null; }
         if (op.qty_note !== undefined) it.qty_note = op.qty_note;
         if (op.category !== undefined) it.category = op.category;
         if (op.note !== undefined) it.note = op.note;
@@ -1007,6 +1011,7 @@ function openSheet(it) {
                 // recommendation must not silently become a pin on Save
                 store: it.store_source === 'preferred' ? it.store : '' };
   $('sheet-title').textContent = disp(it);
+  $('sheet-name').value = it.name || '';
   $('sheet-qty').value = it.qty_note || '';
   $('sheet-note-input').value = it.note || '';
   $('sheet-budget').value = it.budget == null ? '' : String(it.budget);
@@ -1024,6 +1029,7 @@ function openSheet(it) {
 function saveSheet() {
   if (!editState) return;
   const it = editState.it, qty = $('sheet-qty').value.trim();
+  const name = $('sheet-name').value.trim();
   const note = $('sheet-note-input').value.trim();
   const budget = $('sheet-budget').value.trim();
   // catalog_id lets criteria apply server-side even if the item was checked
@@ -1031,6 +1037,7 @@ function saveSheet() {
   const fields = { type:'edit', item_id: it.id };
   if (it.catalog_id) fields.catalog_id = it.catalog_id;
   let changed = false;
+  if (name && name !== it.name)                    { fields.name = name;                 changed = true; }
   if (qty !== (it.qty_note || ''))                 { fields.qty_note = qty;              changed = true; }
   if (editState.category !== (it.category || 'other')) { fields.category = editState.category; changed = true; }
   if (note !== (it.note || ''))                    { fields.note = note;                 changed = true; }

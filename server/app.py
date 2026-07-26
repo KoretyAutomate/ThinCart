@@ -231,11 +231,15 @@ def apply_undo_purchase(op: Op, ts: str) -> dict:
 
 
 def apply_edit(op: Op, ts: str) -> dict:
-    """Long-press editor: quantity note (per-item), plus catalog-level fields —
-    category, note (purchase criteria), budget, preferred store. Catalog-level
-    edits resolve through op.catalog_id when the item row vanished mid-edit
-    (spouse checked it off while the sheet was open): criteria must not be
-    silently lost — persisting across checkoffs is their whole point."""
+    """Long-press editor: rename + quantity note (per-item), plus catalog-level
+    fields — category, note (purchase criteria), budget, preferred store.
+    A rename re-points items.catalog_id at get_or_create_catalog(new name) —
+    never rewrites the old catalog row, whose name/criteria stay with the old
+    concept. Renaming onto a name already on the list merges the two rows (the
+    survivor keeps its id; qty/criteria from the same save follow). Catalog-
+    level edits resolve through op.catalog_id when the item row vanished
+    mid-edit (spouse checked it off while the sheet was open): criteria must
+    not be silently lost — persisting across checkoffs is their whole point."""
     if op.item_id is None and op.catalog_id is None:
         raise HTTPException(422, "edit requires item_id or catalog_id")
     row = None
@@ -247,8 +251,27 @@ def apply_edit(op: Op, ts: str) -> dict:
     if catalog_id is None:  # item gone and no catalog fallback → nothing to edit
         return {"noop": True}
     changed = False
+    item_id = op.item_id
+    result: dict = {}
+    if op.name is not None and op.name.strip() and row is not None:
+        new_cid = db.get_or_create_catalog(conn, op.name)
+        if new_cid != catalog_id:
+            dup = conn.execute(
+                "SELECT id FROM items WHERE catalog_id=? AND id != ?",
+                (new_cid, op.item_id),
+            ).fetchone()
+            if dup:  # renamed onto an existing list entry → converge
+                conn.execute("DELETE FROM items WHERE id=?", (op.item_id,))
+                item_id = dup["id"]
+                result["merged_into"] = item_id
+            else:
+                conn.execute("UPDATE items SET catalog_id=? WHERE id=?",
+                             (new_cid, item_id))
+            catalog_id = new_cid  # same-save criteria land on the NEW concept
+            result["catalog_id"] = new_cid
+            changed = True
     if op.qty_note is not None and row is not None:  # per-item: needs the live row
-        conn.execute("UPDATE items SET qty_note=? WHERE id=?", (op.qty_note, op.item_id))
+        conn.execute("UPDATE items SET qty_note=? WHERE id=?", (op.qty_note, item_id))
         changed = True
     if op.category is not None:
         if op.category not in catalog.CATEGORIES:
@@ -277,7 +300,7 @@ def apply_edit(op: Op, ts: str) -> dict:
         changed = True
     if changed:
         db.bump_revision(conn)
-    return {"edited": op.item_id or catalog_id, "changed": changed}
+    return {"edited": op.item_id or catalog_id, "changed": changed, **result}
 
 
 def apply_snooze(op: Op, ts: str) -> dict:
@@ -383,7 +406,7 @@ async def post_op(op: Op):
         )
         conn.commit()
     await broadcast_state()
-    if op.type == "add" and "catalog_id" in result:
+    if op.type in ("add", "edit") and "catalog_id" in result:
         row = conn.execute(
             "SELECT llm_enriched_at FROM item_catalog WHERE id=?",
             (result["catalog_id"],),
