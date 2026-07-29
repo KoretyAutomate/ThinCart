@@ -7,7 +7,7 @@ PLAN.md §Intelligence layer 1:
 - suggest when 0.85 ≤ days_since_last / median ≤ 3.0 (upper cap retires
   lapsed/seasonal items instead of nagging forever)
 """
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from statistics import median
 
 MIN_EVENTS = 3
@@ -26,7 +26,7 @@ BINS = [  # (max_median_days, label)
 
 def _parse(ts: str) -> datetime:
     dt = datetime.fromisoformat(ts)
-    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
 def coalesce(timestamps: list[str]) -> list[datetime]:
@@ -43,7 +43,8 @@ def median_interval_days(timestamps: list[str]) -> float | None:
     if len(events) < MIN_EVENTS:
         return None
     gaps = [
-        (b - a).total_seconds() / 86400 for a, b in zip(events, events[1:])
+        # strict=False: events[1:] is deliberately one shorter — pairwise gaps.
+        (b - a).total_seconds() / 86400 for a, b in zip(events, events[1:], strict=False)
     ]
     return median(gaps)
 

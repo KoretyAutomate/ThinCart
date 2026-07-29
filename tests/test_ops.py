@@ -8,7 +8,6 @@ import sys
 import uuid
 from pathlib import Path
 
-import pytest
 
 os.environ["THINCART_DB"] = str(
     Path(os.environ.get("PYTEST_TMP", "/tmp")) / f"thincart_test_{uuid.uuid4().hex}.db"
@@ -19,6 +18,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 import app as appmod  # noqa: E402
 import db  # noqa: E402
+from datetime import UTC
 
 client = TestClient(appmod.app)
 
@@ -243,10 +243,10 @@ def test_rejects_garbage():
 
 def test_suggestions_and_snooze_flow():
     """Seed a weekly history via SQL, expect a suggestion; snooze hides it for both."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     cid = db.get_or_create_catalog(appmod.conn, "bananas")
-    t0 = datetime.now(timezone.utc) - timedelta(days=27)
+    t0 = datetime.now(UTC) - timedelta(days=27)
     for d in (0, 7, 14, 21):  # last buy 6 days ago → due score ~0.86
         appmod.conn.execute(
             "INSERT INTO purchase_events(catalog_id, bought_at) VALUES(?,?)",
@@ -276,9 +276,9 @@ def test_suggestions_and_snooze_flow():
 
 def test_cycles_endpoint_full_list():
     """/api/cycles: every learned cycle, most-due first, due/on_list flags."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
-    t0 = datetime.now(timezone.utc)
+    t0 = datetime.now(UTC)
     fixtures = {"cyc_overdue": (7, 9), "cyc_fresh": (7, 1), "cyc_lapsed": (7, 100)}
     for name, (interval, since) in fixtures.items():
         cid = db.get_or_create_catalog(appmod.conn, name)

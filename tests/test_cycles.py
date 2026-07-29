@@ -1,13 +1,13 @@
 """Interval-estimator tests with synthetic histories (PLAN.md Phase 1 gate)."""
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "server"))
 
 import cycles  # noqa: E402
 
-T0 = datetime(2026, 1, 1, 10, 0, tzinfo=timezone.utc)
+T0 = datetime(2026, 1, 1, 10, 0, tzinfo=UTC)
 
 
 def series(*day_offsets):

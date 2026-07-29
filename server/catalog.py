@@ -7,10 +7,10 @@ and alias detection (たまねぎ ≡ 玉ねぎ → merge onto one catalog row).
 Plants are canonical lowercase English tokens — 小麦/Wheat/komugi must not
 triple-count (PLAN.md §Intelligence layer 2).
 """
+import contextlib
 import json
 import logging
-import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 
 import httpx
 
@@ -59,10 +59,8 @@ def item_context(row) -> str:
     """The item's own text — what disambiguates a bare LLM token ("pepper" on
     `bell pepper bag` is a capsicum; on `Amys frozen pizza` it is the spice)."""
     parts = [row["canonical_name"], row["display_name"]]
-    try:
+    with contextlib.suppress(KeyError, IndexError, TypeError, ValueError):
         parts += json.loads(row["aliases_json"] or "[]")
-    except (KeyError, IndexError, TypeError, ValueError):
-        pass
     return " ".join(str(p) for p in parts if p)
 
 
@@ -153,7 +151,7 @@ async def enrich(conn, write_lock, catalog_id: int) -> bool:
     emoji_val = row["emoji"] or emoji.lookup(row["canonical_name"])
     if not emoji_val and emoji.is_emoji(res.get("emoji")):
         emoji_val = res["emoji"].strip()
-    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    now = datetime.now(UTC).isoformat(timespec="seconds")
 
     async with write_lock:
         target = None
@@ -237,7 +235,7 @@ def weekly_plants(conn, now=None, window_days: int = 7) -> list[str]:
     and the count has to be right even when the DGX is down and no re-enrichment
     is possible. Zero-weight tokens (sugarcane) are not plants you ate.
     """
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     cutoff = (now - timedelta(days=window_days)).isoformat(timespec="seconds")
     found: set[str] = set()
     for r in conn.execute(
@@ -258,7 +256,7 @@ def weekly_score(conn, now=None, window_days: int = 7) -> float:
 
 
 def recent_purchases(conn, days: int = 10) -> list[dict]:
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(
+    cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat(
         timespec="seconds"
     )
     return [

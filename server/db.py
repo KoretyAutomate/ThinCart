@@ -4,6 +4,7 @@ db.py — ThinCart SQLite layer (WAL). One DB file, server is the source of trut
 Concurrency model: FastAPI is async but ops are tiny; a single connection guarded
 by an asyncio.Lock in app.py serializes all writes. SQLite WAL keeps readers cheap.
 """
+import contextlib
 import json
 import os
 import sqlite3
@@ -11,6 +12,7 @@ import unicodedata
 from pathlib import Path
 
 import emoji
+from datetime import UTC
 
 DB_PATH = Path(os.environ.get("THINCART_DB", Path(__file__).parent / "data" / "thincart.db"))
 
@@ -83,14 +85,12 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.executescript(SCHEMA)
-    try:  # migration for DBs created before the typo-verification column
+    # migration for DBs created before the typo-verification column
+    with contextlib.suppress(sqlite3.OperationalError):
         conn.execute("ALTER TABLE item_catalog ADD COLUMN verified INTEGER NOT NULL DEFAULT 1")
-    except sqlite3.OperationalError:
-        pass
-    try:  # migration for DBs created before per-item emoji icons
+    # migration for DBs created before per-item emoji icons
+    with contextlib.suppress(sqlite3.OperationalError):
         conn.execute("ALTER TABLE item_catalog ADD COLUMN emoji TEXT")
-    except sqlite3.OperationalError:
-        pass
     # migrations for DBs created before stores / notes / purchase criteria (Phase 5)
     for ddl in (
         "ALTER TABLE item_catalog ADD COLUMN note TEXT NOT NULL DEFAULT ''",
@@ -98,10 +98,8 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
         "ALTER TABLE item_catalog ADD COLUMN preferred_store_id INTEGER REFERENCES stores(id)",
         "ALTER TABLE purchase_events ADD COLUMN store_id INTEGER REFERENCES stores(id)",
     ):
-        try:
+        with contextlib.suppress(sqlite3.OperationalError):
             conn.execute(ddl)
-        except sqlite3.OperationalError:
-            pass
     conn.execute("INSERT OR IGNORE INTO meta(key, value) VALUES('revision', '0')")
     conn.commit()
     return conn
@@ -260,9 +258,9 @@ def suggestions(conn: sqlite3.Connection, now) -> list[dict]:
 
 def state(conn: sqlite3.Connection, now=None) -> dict:
     """Full list state — small enough (tens of items) to always send whole."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     stores = stores_list(conn)
     store_names = {s["id"]: s["name"] for s in stores}
     rec = recommended_stores(conn)

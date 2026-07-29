@@ -1,5 +1,4 @@
 """Typing-candidates backend: seed idempotency, alias matching, /api/catalog."""
-import json
 import os
 import sys
 import uuid

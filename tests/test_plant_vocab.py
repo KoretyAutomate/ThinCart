@@ -11,7 +11,7 @@ import json
 import os
 import sys
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from pathlib import Path
 
 import pytest
@@ -175,7 +175,7 @@ def seed(name, days_ago, plants_json):
         "UPDATE item_catalog SET plants_json=?, is_edible=1, llm_enriched_at='x' WHERE id=?",
         (json.dumps(plants_json, ensure_ascii=False), cid),
     )
-    ts = (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat(timespec="seconds")
+    ts = (datetime.now(UTC) - timedelta(days=days_ago)).isoformat(timespec="seconds")
     appmod.conn.execute(
         "INSERT INTO purchase_events(catalog_id, bought_at) VALUES(?,?)", (cid, ts)
     )

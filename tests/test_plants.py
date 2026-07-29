@@ -8,7 +8,7 @@ import json
 import os
 import sys
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from pathlib import Path
 
 import pytest
@@ -49,7 +49,7 @@ def seed_purchase(name, days_ago, plants=None, edible=1):
         "UPDATE item_catalog SET plants_json=?, is_edible=?, llm_enriched_at='x' WHERE id=?",
         (json.dumps(plants or []), edible, cid),
     )
-    ts = (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat(timespec="seconds")
+    ts = (datetime.now(UTC) - timedelta(days=days_ago)).isoformat(timespec="seconds")
     appmod.conn.execute(
         "INSERT INTO purchase_events(catalog_id, bought_at) VALUES(?,?)", (cid, ts)
     )
@@ -152,7 +152,7 @@ def test_ideas_filters_already_eaten_plants(monkeypatch):
 def test_curated_rows_are_never_alias_merged(monkeypatch):
     """Regression (live 2026-07-03): sweep merged seeded ミニトマト into トマト.
     Rows with curated category/aliases must survive an LLM alias_of verdict."""
-    tomato = db.get_or_create_catalog(appmod.conn, "トマト")
+    db.get_or_create_catalog(appmod.conn, "トマト")  # precondition row; id unused
     mini = db.get_or_create_catalog(appmod.conn, "ミニトマト")
     appmod.conn.execute(
         "UPDATE item_catalog SET category='produce', aliases_json=? WHERE id=?",

@@ -1,13 +1,11 @@
 """Skip-op semantics + typo verification (user feedback 2026-07-03)."""
 import asyncio
-import json
 import os
 import sys
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from pathlib import Path
 
-import pytest
 
 os.environ.setdefault(
     "THINCART_DB",
@@ -53,7 +51,7 @@ def test_skip_removes_without_event_and_short_snoozes():
     until = appmod.conn.execute(
         "SELECT snoozed_until FROM item_catalog WHERE canonical_name=?",
         (db.canonical("バター"),)).fetchone()[0]
-    delta = datetime.fromisoformat(until) - datetime.now(timezone.utc)
+    delta = datetime.fromisoformat(until) - datetime.now(UTC)
     assert timedelta(hours=20) < delta <= timedelta(hours=25)
 
 

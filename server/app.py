@@ -19,7 +19,7 @@ import json
 import logging
 import unicodedata
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from pathlib import Path
 from typing import Literal
 
@@ -47,7 +47,7 @@ sockets: set[WebSocket] = set()
 
 
 def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 class Op(BaseModel):
@@ -402,7 +402,7 @@ async def post_op(op: Op):
         result = APPLY[op.type](op, ts)
         db.record_op(conn, op.op_id, ts, result)
         db.prune_applied_ops(
-            conn, (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+            conn, (datetime.now(UTC) - timedelta(days=7)).isoformat()
         )
         conn.commit()
     await broadcast_state()
@@ -443,7 +443,7 @@ async def get_catalog():
 async def get_cycles():
     """Every item with a learned cycle (≥3 coalesced purchases): the full
     suggestion list + what the engine knows, most-due first."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     on_list = {r["catalog_id"] for r in conn.execute("SELECT catalog_id FROM items")}
     out = []
     for cid, ts in db.purchase_history(conn).items():
@@ -516,7 +516,7 @@ async def get_ideas(refresh: int = 0):
     if (
         not refresh
         and ideas_cache["data"]
-        and (datetime.now(timezone.utc) - ideas_cache["at"]).total_seconds()
+        and (datetime.now(UTC) - ideas_cache["at"]).total_seconds()
         < IDEAS_TTL_H * 3600
     ):
         return ideas_cache["data"]
@@ -551,7 +551,7 @@ async def get_ideas(refresh: int = 0):
         "diversity": diversity or [],
         "generated_at": now_iso(),
     }
-    ideas_cache["data"], ideas_cache["at"] = data, datetime.now(timezone.utc)
+    ideas_cache["data"], ideas_cache["at"] = data, datetime.now(UTC)
     return data
 
 

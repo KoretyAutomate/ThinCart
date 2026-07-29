@@ -2,3 +2,6 @@ __pycache__/
 .pytest_cache/
 server/data/
 *.pyc
+
+# machine-local prepush-gate config (python path etc.)
+.prepush.env
