@@ -21,6 +21,7 @@ with the DGX down):
 
 2. WEIGH.  Plant points are not all 1.0 — see WEIGHTS.
 """
+
 import re
 
 # ---------------------------------------------------------------------------
@@ -46,13 +47,43 @@ import re
 # token and reintroduce exactly the drift this module exists to prevent. The
 # study counts refined grains anyway.
 HERBS_SPICES = {
-    "basil", "oregano", "thyme", "rosemary", "sage", "parsley", "cilantro",
-    "mint", "dill", "bay leaf", "chive", "tarragon", "marjoram",
-    "shiso", "mitsuba", "myoga", "sansho",
-    "turmeric", "cumin", "coriander", "cinnamon", "clove", "nutmeg",
-    "cardamom", "star anise", "fennel", "fenugreek", "saffron", "paprika",
-    "vanilla", "mustard", "wasabi", "horseradish", "juniper",
-    "black pepper", "chili pepper", "ginger",
+    "basil",
+    "oregano",
+    "thyme",
+    "rosemary",
+    "sage",
+    "parsley",
+    "cilantro",
+    "mint",
+    "dill",
+    "bay leaf",
+    "chive",
+    "tarragon",
+    "marjoram",
+    "shiso",
+    "mitsuba",
+    "myoga",
+    "sansho",
+    "turmeric",
+    "cumin",
+    "coriander",
+    "cinnamon",
+    "clove",
+    "nutmeg",
+    "cardamom",
+    "star anise",
+    "fennel",
+    "fenugreek",
+    "saffron",
+    "paprika",
+    "vanilla",
+    "mustard",
+    "wasabi",
+    "horseradish",
+    "juniper",
+    "black pepper",
+    "chili pepper",
+    "ginger",
 }
 
 # Rossi's other quarter-pointers: garlic, extra-virgin olive oil, tea, coffee.
@@ -92,11 +123,38 @@ COUNTING_MODE = "agp"
 # these when it does not know the answer ("jam" → "fruit"); they can neither be
 # counted nor deduplicated, so they are dropped.
 DROP = {
-    "fruit", "fruits", "vegetable", "vegetables", "veggies", "plant", "plants",
-    "grain", "grains", "cereal", "herb", "herbs", "spice", "spices",
-    "nut", "nuts", "seed", "seeds", "bean", "beans", "legume", "legumes",
-    "berry", "berries", "citrus fruit", "leafy greens", "greens", "produce",
-    "flour", "oil", "starch", "gluten",
+    "fruit",
+    "fruits",
+    "vegetable",
+    "vegetables",
+    "veggies",
+    "plant",
+    "plants",
+    "grain",
+    "grains",
+    "cereal",
+    "herb",
+    "herbs",
+    "spice",
+    "spices",
+    "nut",
+    "nuts",
+    "seed",
+    "seeds",
+    "bean",
+    "beans",
+    "legume",
+    "legumes",
+    "berry",
+    "berries",
+    "citrus fruit",
+    "leafy greens",
+    "greens",
+    "produce",
+    "flour",
+    "oil",
+    "starch",
+    "gluten",
 }
 
 # ---------------------------------------------------------------------------

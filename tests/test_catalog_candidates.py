@@ -1,4 +1,5 @@
 """Typing-candidates backend: seed idempotency, alias matching, /api/catalog."""
+
 import os
 import sys
 import uuid
@@ -64,8 +65,7 @@ def test_api_catalog_shape_and_frequency_order():
     # buy 食パン twice → it must outrank never-bought seeds
     cid = db.get_or_create_catalog(appmod.conn, "食パン")
     for ts in ("2026-07-01T00:00:00+00:00", "2026-07-02T00:00:00+00:00"):
-        appmod.conn.execute(
-            "INSERT INTO purchase_events(catalog_id, bought_at) VALUES(?,?)", (cid, ts))
+        appmod.conn.execute("INSERT INTO purchase_events(catalog_id, bought_at) VALUES(?,?)", (cid, ts))
     appmod.conn.commit()
     cat = client.get("/api/catalog").json()["catalog"]
     assert len(cat) >= len(seed_catalog.SEED)
@@ -76,7 +76,8 @@ def test_api_catalog_shape_and_frequency_order():
 def test_seeded_rows_have_categories_in_state():
     seed_catalog.seed(appmod.conn)
     iid = str(uuid.uuid4())
-    client.post("/api/op", json={"op_id": str(uuid.uuid4()), "actor": "t",
-                                 "type": "add", "name": "とうふ", "item_id": iid})
+    client.post(
+        "/api/op", json={"op_id": str(uuid.uuid4()), "actor": "t", "type": "add", "name": "とうふ", "item_id": iid}
+    )
     items = {i["name"]: i for i in client.get("/api/state").json()["items"]}
     assert items["豆腐"]["category"] == "pantry"  # alias→seed row, category immediate

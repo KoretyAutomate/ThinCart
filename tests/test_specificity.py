@@ -5,6 +5,7 @@
 - the alias merge still collapses TRUE script-variant aliases
 - the long-press editor's `edit` op adjusts quantity + category
 """
+
 import asyncio
 import json
 import os
@@ -44,8 +45,8 @@ def test_name_en_keeps_english_display_over_generic_alias():
 
 
 def test_name_en_uses_alias_only_for_japanese_display():
-    assert db.name_en('["onion"]', "玉ねぎ") == "onion"   # JP item → English alias
-    assert db.name_en('[]', "玉ねぎ") is None              # no alias → client shows JA
+    assert db.name_en('["onion"]', "玉ねぎ") == "onion"  # JP item → English alias
+    assert db.name_en("[]", "玉ねぎ") is None  # no alias → client shows JA
 
 
 # ── _is_variety: deterministic backstop against variety/brand merges ────────
@@ -56,9 +57,9 @@ def test_is_variety_blocks_qualifier_supersets():
 
 
 def test_is_variety_allows_true_aliases_and_distinct_words():
-    assert catalog._is_variety("spaghetti", ["pasta"]) is False       # distinct word
+    assert catalog._is_variety("spaghetti", ["pasta"]) is False  # distinct word
     assert catalog._is_variety("yellow squash", ["zucchini"]) is False
-    assert catalog._is_variety("rice", ["rice"]) is False             # identical, not superset
+    assert catalog._is_variety("rice", ["rice"]) is False  # identical, not superset
     assert catalog._is_variety("玉ねぎ", ["たまねぎ"]) is False
 
 
@@ -72,13 +73,19 @@ async def _enrich_with_fake_llm(monkeypatch_val, source, target_canon, alias_of)
         return None
 
     async def fake_chat(prompt, **kw):
-        return {"is_real_item": True, "category": "pantry", "is_edible": 1,
-                "plants": ["wheat"], "english_name": source, "alias_of": alias_of}
+        return {
+            "is_real_item": True,
+            "category": "pantry",
+            "is_edible": 1,
+            "plants": ["wheat"],
+            "english_name": source,
+            "alias_of": alias_of,
+        }
 
     catalog.web_evidence = fake_web
     catalog.llm.chat_json = fake_chat
     lock = asyncio.Lock()
-    sid = db.get_or_create_catalog(appmod.conn, source)   # fresh, mergeable
+    sid = db.get_or_create_catalog(appmod.conn, source)  # fresh, mergeable
     await catalog.enrich(appmod.conn, lock, sid)
     return sid
 
@@ -88,14 +95,12 @@ def test_enrich_blocks_variety_merge(monkeypatch):
     try:
         tgt = db.get_or_create_catalog(appmod.conn, "rice-generic-xyz")
         appmod.conn.execute(
-            "UPDATE item_catalog SET category='pantry', llm_enriched_at='2026-01-01' WHERE id=?",
-            (tgt,))
+            "UPDATE item_catalog SET category='pantry', llm_enriched_at='2026-01-01' WHERE id=?", (tgt,)
+        )
         appmod.conn.commit()
-        sid = _run(_enrich_with_fake_llm(None, "white rice-generic-xyz",
-                                         "rice-generic-xyz", "rice-generic-xyz"))
+        sid = _run(_enrich_with_fake_llm(None, "white rice-generic-xyz", "rice-generic-xyz", "rice-generic-xyz"))
         # guard should have refused the merge → the source row still exists
-        assert appmod.conn.execute(
-            "SELECT COUNT(*) FROM item_catalog WHERE id=?", (sid,)).fetchone()[0] == 1
+        assert appmod.conn.execute("SELECT COUNT(*) FROM item_catalog WHERE id=?", (sid,)).fetchone()[0] == 1
     finally:
         catalog.web_evidence, catalog.llm.chat_json = orig_web, orig_chat
 
@@ -105,15 +110,15 @@ def test_enrich_still_merges_true_script_alias(monkeypatch):
     try:
         tgt = db.get_or_create_catalog(appmod.conn, "玉ねぎテスト")
         appmod.conn.execute(
-            "UPDATE item_catalog SET category='produce', llm_enriched_at='2026-01-01' WHERE id=?",
-            (tgt,))
+            "UPDATE item_catalog SET category='produce', llm_enriched_at='2026-01-01' WHERE id=?", (tgt,)
+        )
         appmod.conn.commit()
         sid = _run(_enrich_with_fake_llm(None, "たまねぎテスト", "玉ねぎテスト", "玉ねぎテスト"))
         # true script variant → merged away (source row deleted, folded into target)
-        assert appmod.conn.execute(
-            "SELECT COUNT(*) FROM item_catalog WHERE id=?", (sid,)).fetchone()[0] == 0
-        aliases = json.loads(appmod.conn.execute(
-            "SELECT aliases_json FROM item_catalog WHERE id=?", (tgt,)).fetchone()[0])
+        assert appmod.conn.execute("SELECT COUNT(*) FROM item_catalog WHERE id=?", (sid,)).fetchone()[0] == 0
+        aliases = json.loads(
+            appmod.conn.execute("SELECT aliases_json FROM item_catalog WHERE id=?", (tgt,)).fetchone()[0]
+        )
         assert "たまねぎテスト" in aliases
     finally:
         catalog.web_evidence, catalog.llm.chat_json = orig_web, orig_chat

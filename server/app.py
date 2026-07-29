@@ -14,6 +14,7 @@ Sync contract (PLAN.md §Architecture):
 Run (tailnet-bound — bind the Tailscale IP, NOT 0.0.0.0):
     uvicorn app:app --host 100.112.171.54 --port 8123 --no-access-log
 """
+
 import asyncio
 import json
 import logging
@@ -52,8 +53,18 @@ def now_iso() -> str:
 
 class Op(BaseModel):
     op_id: str = Field(..., min_length=8, max_length=64)
-    type: Literal["add", "checkoff", "remove", "skip", "undo_checkoff",
-                  "undo_purchase", "snooze", "edit", "store_upsert", "store_delete"]
+    type: Literal[
+        "add",
+        "checkoff",
+        "remove",
+        "skip",
+        "undo_checkoff",
+        "undo_purchase",
+        "snooze",
+        "edit",
+        "store_upsert",
+        "store_delete",
+    ]
     actor: str = Field("", max_length=40)
     # add / edit
     name: str | None = Field(None, max_length=120)
@@ -111,16 +122,13 @@ def apply_add(op: Op, ts: str) -> dict:
     if not op.name or not op.name.strip():
         raise HTTPException(422, "add requires a non-empty name")
     catalog_id = db.get_or_create_catalog(conn, op.name)
-    existing = conn.execute(
-        "SELECT id FROM items WHERE catalog_id=?", (catalog_id,)
-    ).fetchone()
+    existing = conn.execute("SELECT id FROM items WHERE catalog_id=?", (catalog_id,)).fetchone()
     if existing:  # duplicate-add convergence: already on the list → no-op
         return {"item_id": existing["id"], "deduped": True}
     item_id = op.item_id or str(uuid.uuid4())
     rev = db.bump_revision(conn)
     conn.execute(
-        "INSERT INTO items(id, catalog_id, qty_note, added_by, added_at, revision) "
-        "VALUES(?,?,?,?,?,?)",
+        "INSERT INTO items(id, catalog_id, qty_note, added_by, added_at, revision) VALUES(?,?,?,?,?,?)",
         (item_id, catalog_id, op.qty_note or "", op.actor, ts, rev),
     )
     return {"item_id": item_id, "catalog_id": catalog_id}
@@ -140,8 +148,7 @@ def apply_checkoff(op: Op, ts: str) -> dict:
     # truth behind the where-to-buy recommendation (db.recommended_stores)
     store_id = db.get_or_create_store(conn, op.store) if op.store else None
     cur = conn.execute(
-        "INSERT INTO purchase_events(catalog_id, bought_at, bought_by, store_id) "
-        "VALUES(?,?,?,?)",
+        "INSERT INTO purchase_events(catalog_id, bought_at, bought_by, store_id) VALUES(?,?,?,?)",
         (row["catalog_id"], ts, op.actor, store_id),
     )
     db.bump_revision(conn)
@@ -167,16 +174,12 @@ def apply_skip(op: Op, ts: str) -> dict:
     and only a 1-day suggestion snooze so the tray re-suggests it next trip."""
     if op.item_id is None:
         raise HTTPException(422, "skip requires item_id")
-    row = conn.execute(
-        "SELECT catalog_id FROM items WHERE id=?", (op.item_id,)
-    ).fetchone()
+    row = conn.execute("SELECT catalog_id FROM items WHERE id=?", (op.item_id,)).fetchone()
     if row is None:
         return {"noop": True}
     conn.execute("DELETE FROM items WHERE id=?", (op.item_id,))
     until = (datetime.fromisoformat(ts) + timedelta(days=1)).isoformat(timespec="seconds")
-    conn.execute(
-        "UPDATE item_catalog SET snoozed_until=? WHERE id=?", (until, row["catalog_id"])
-    )
+    conn.execute("UPDATE item_catalog SET snoozed_until=? WHERE id=?", (until, row["catalog_id"]))
     db.bump_revision(conn)
     return {"skipped": op.item_id, "resuggest_after": until}
 
@@ -193,10 +196,8 @@ def apply_undo_checkoff(op: Op, ts: str) -> dict:
     rev = db.bump_revision(conn)
     item_id = str(uuid.uuid4())
     conn.execute(
-        "INSERT INTO items(id, catalog_id, qty_note, added_by, added_at, revision) "
-        "VALUES(?,?,?,?,?,?)",
-        (item_id, snap["catalog_id"], snap["qty_note"], snap["added_by"],
-         snap["added_at"], rev),
+        "INSERT INTO items(id, catalog_id, qty_note, added_by, added_at, revision) VALUES(?,?,?,?,?,?)",
+        (item_id, snap["catalog_id"], snap["qty_note"], snap["added_by"], snap["added_at"], rev),
     )
     return {"item_id": item_id, "undone_event": target["event_id"]}
 
@@ -208,23 +209,18 @@ def apply_undo_purchase(op: Op, ts: str) -> dict:
     on the list so it isn't silently lost."""
     if op.event_id is None:
         raise HTTPException(422, "undo_purchase requires event_id")
-    row = conn.execute(
-        "SELECT catalog_id FROM purchase_events WHERE id=?", (op.event_id,)
-    ).fetchone()
+    row = conn.execute("SELECT catalog_id FROM purchase_events WHERE id=?", (op.event_id,)).fetchone()
     if row is None:  # already undone (double-tap / the other phone) → nothing to do
         return {"noop": True}
     conn.execute("DELETE FROM purchase_events WHERE id=?", (op.event_id,))
     catalog_id = row["catalog_id"]
     rev = db.bump_revision(conn)
-    existing = conn.execute(
-        "SELECT id FROM items WHERE catalog_id=?", (catalog_id,)
-    ).fetchone()
+    existing = conn.execute("SELECT id FROM items WHERE catalog_id=?", (catalog_id,)).fetchone()
     if existing:  # already back on the list → the event deletion alone stands
         return {"undone_event": op.event_id, "item_id": existing["id"], "deduped": True}
     item_id = str(uuid.uuid4())
     conn.execute(
-        "INSERT INTO items(id, catalog_id, qty_note, added_by, added_at, revision) "
-        "VALUES(?,?,?,?,?,?)",
+        "INSERT INTO items(id, catalog_id, qty_note, added_by, added_at, revision) VALUES(?,?,?,?,?,?)",
         (item_id, catalog_id, "", op.actor, ts, rev),
     )
     return {"undone_event": op.event_id, "item_id": item_id}
@@ -244,9 +240,7 @@ def apply_edit(op: Op, ts: str) -> dict:
         raise HTTPException(422, "edit requires item_id or catalog_id")
     row = None
     if op.item_id is not None:
-        row = conn.execute(
-            "SELECT catalog_id FROM items WHERE id=?", (op.item_id,)
-        ).fetchone()
+        row = conn.execute("SELECT catalog_id FROM items WHERE id=?", (op.item_id,)).fetchone()
     catalog_id = row["catalog_id"] if row else op.catalog_id
     if catalog_id is None:  # item gone and no catalog fallback → nothing to edit
         return {"noop": True}
@@ -265,8 +259,7 @@ def apply_edit(op: Op, ts: str) -> dict:
                 item_id = dup["id"]
                 result["merged_into"] = item_id
             else:
-                conn.execute("UPDATE items SET catalog_id=? WHERE id=?",
-                             (new_cid, item_id))
+                conn.execute("UPDATE items SET catalog_id=? WHERE id=?", (new_cid, item_id))
             catalog_id = new_cid  # same-save criteria land on the NEW concept
             result["catalog_id"] = new_cid
             changed = True
@@ -287,8 +280,7 @@ def apply_edit(op: Op, ts: str) -> dict:
                 # canonical_name is unchanged, so every sharer is by definition
                 # the same concept and wants the corrected spelling too.
                 if cur["display_name"] != op.name.strip():
-                    conn.execute("UPDATE item_catalog SET display_name=? WHERE id=?",
-                                 (op.name.strip(), catalog_id))
+                    conn.execute("UPDATE item_catalog SET display_name=? WHERE id=?", (op.name.strip(), catalog_id))
                     changed = True
                 result["name"] = op.name.strip()
             else:
@@ -307,12 +299,10 @@ def apply_edit(op: Op, ts: str) -> dict:
     if op.category is not None:
         if op.category not in catalog.CATEGORIES:
             raise HTTPException(422, "invalid category")
-        conn.execute("UPDATE item_catalog SET category=? WHERE id=?",
-                     (op.category, catalog_id))
+        conn.execute("UPDATE item_catalog SET category=? WHERE id=?", (op.category, catalog_id))
         changed = True
     if op.note is not None:
-        conn.execute("UPDATE item_catalog SET note=? WHERE id=?",
-                     (op.note.strip(), catalog_id))
+        conn.execute("UPDATE item_catalog SET note=? WHERE id=?", (op.note.strip(), catalog_id))
         changed = True
     if op.budget is not None:
         if not op.budget.strip():  # "" clears
@@ -321,13 +311,11 @@ def apply_edit(op: Op, ts: str) -> dict:
         else:
             val = parse_budget(op.budget)
             if val is not None:
-                conn.execute("UPDATE item_catalog SET budget=? WHERE id=?",
-                             (val, catalog_id))
+                conn.execute("UPDATE item_catalog SET budget=? WHERE id=?", (val, catalog_id))
                 changed = True
     if op.store is not None:
         sid = db.get_or_create_store(conn, op.store)  # None when "" → clears
-        conn.execute("UPDATE item_catalog SET preferred_store_id=? WHERE id=?",
-                     (sid, catalog_id))
+        conn.execute("UPDATE item_catalog SET preferred_store_id=? WHERE id=?", (sid, catalog_id))
         changed = True
     if changed:
         db.bump_revision(conn)
@@ -340,12 +328,8 @@ def apply_snooze(op: Op, ts: str) -> dict:
         raise HTTPException(422, "snooze requires catalog_id")
     hist = db.purchase_history(conn).get(op.catalog_id, [])
     half = (cycles.median_interval_days(hist) or 7.0) / 2
-    until = (datetime.fromisoformat(ts) + timedelta(days=max(half, 2.0))).isoformat(
-        timespec="seconds"
-    )
-    cur = conn.execute(
-        "UPDATE item_catalog SET snoozed_until=? WHERE id=?", (until, op.catalog_id)
-    )
+    until = (datetime.fromisoformat(ts) + timedelta(days=max(half, 2.0))).isoformat(timespec="seconds")
+    cur = conn.execute("UPDATE item_catalog SET snoozed_until=? WHERE id=?", (until, op.catalog_id))
     if cur.rowcount == 0:
         return {"noop": True}
     db.bump_revision(conn)
@@ -359,8 +343,7 @@ def apply_store_upsert(op: Op, ts: str) -> dict:
         raise HTTPException(422, "store_upsert requires store_name")
     sid = db.get_or_create_store(conn, op.store_name)
     if op.store_notes is not None:
-        conn.execute("UPDATE stores SET notes=? WHERE id=?",
-                     (op.store_notes.strip(), sid))
+        conn.execute("UPDATE stores SET notes=? WHERE id=?", (op.store_notes.strip(), sid))
     db.bump_revision(conn)
     return {"store_id": sid}
 
@@ -374,10 +357,8 @@ def apply_store_delete(op: Op, ts: str) -> dict:
     row = conn.execute("SELECT id FROM stores WHERE id=?", (op.store_id,)).fetchone()
     if row is None:  # already deleted (double-tap / other phone) → no-op
         return {"noop": True}
-    conn.execute("UPDATE item_catalog SET preferred_store_id=NULL "
-                 "WHERE preferred_store_id=?", (op.store_id,))
-    conn.execute("UPDATE purchase_events SET store_id=NULL WHERE store_id=?",
-                 (op.store_id,))
+    conn.execute("UPDATE item_catalog SET preferred_store_id=NULL WHERE preferred_store_id=?", (op.store_id,))
+    conn.execute("UPDATE purchase_events SET store_id=NULL WHERE store_id=?", (op.store_id,))
     conn.execute("DELETE FROM stores WHERE id=?", (op.store_id,))
     db.bump_revision(conn)
     return {"deleted_store": op.store_id}
@@ -427,14 +408,11 @@ async def post_op(op: Op):
     async with write_lock:
         prior = db.get_applied(conn, op.op_id)
         if prior is not None:  # replay after a lost ACK → re-ACK, mutate nothing
-            return {"ok": True, "replayed": True, "result": prior,
-                    "revision": db.get_revision(conn)}
+            return {"ok": True, "replayed": True, "result": prior, "revision": db.get_revision(conn)}
         ts = now_iso()
         result = APPLY[op.type](op, ts)
         db.record_op(conn, op.op_id, ts, result)
-        db.prune_applied_ops(
-            conn, (datetime.now(UTC) - timedelta(days=7)).isoformat()
-        )
+        db.prune_applied_ops(conn, (datetime.now(UTC) - timedelta(days=7)).isoformat())
         conn.commit()
     await broadcast_state()
     if op.type in ("add", "edit") and "catalog_id" in result:
@@ -462,12 +440,17 @@ async def get_catalog():
            FROM item_catalog c WHERE c.verified = 1
            ORDER BY buys DESC, c.display_name"""
     ).fetchall()
-    return {"catalog": [
-        {"name": r["name"], "category": r["category"],
-         "name_en": db.name_en(r["aliases_json"], r["name"]),
-         "aliases": json.loads(r["aliases_json"])}
-        for r in rows
-    ]}
+    return {
+        "catalog": [
+            {
+                "name": r["name"],
+                "category": r["category"],
+                "name_en": db.name_en(r["aliases_json"], r["name"]),
+                "aliases": json.loads(r["aliases_json"]),
+            }
+            for r in rows
+        ]
+    }
 
 
 @app.get("/api/cycles")
@@ -487,20 +470,21 @@ async def get_cycles():
             (cid,),
         ).fetchone()
         score = since / m
-        out.append({
-            "catalog_id": cid,
-            "name": row["display_name"],
-            "name_en": db.name_en(row["aliases_json"], row["display_name"]),
-            "label": cycles.cycle_label(m),
-            "median_days": round(m, 1),
-            "days_since": round(since, 1),
-            "score": round(score, 2),
-            "due": cycles.DUE_MIN <= score <= cycles.DUE_MAX
-                   and cid not in on_list
-                   and not (row["snoozed_until"]
-                            and row["snoozed_until"] > now.isoformat(timespec="seconds")),
-            "on_list": cid in on_list,
-        })
+        out.append(
+            {
+                "catalog_id": cid,
+                "name": row["display_name"],
+                "name_en": db.name_en(row["aliases_json"], row["display_name"]),
+                "label": cycles.cycle_label(m),
+                "median_days": round(m, 1),
+                "days_since": round(since, 1),
+                "score": round(score, 2),
+                "due": cycles.DUE_MIN <= score <= cycles.DUE_MAX
+                and cid not in on_list
+                and not (row["snoozed_until"] and row["snoozed_until"] > now.isoformat(timespec="seconds")),
+                "on_list": cid in on_list,
+            }
+        )
     out.sort(key=lambda x: -x["score"])
     return {"cycles": out}
 
@@ -526,7 +510,7 @@ def _recipes_prompt(available, on_list, plants) -> str:
         '"title": str (English, may add Japanese in parens), '
         '"uses": [ingredients they already have], '
         '"missing": [1-3 grocery items to buy, in the language the ingredient is usually '
-        'listed on their list], '
+        "listed on their list], "
         '"new_plants": [lowercase English plant tokens this adds beyond their week]}]}'
     )
 
@@ -547,8 +531,7 @@ async def get_ideas(refresh: int = 0):
     if (
         not refresh
         and ideas_cache["data"]
-        and (datetime.now(UTC) - ideas_cache["at"]).total_seconds()
-        < IDEAS_TTL_H * 3600
+        and (datetime.now(UTC) - ideas_cache["at"]).total_seconds() < IDEAS_TTL_H * 3600
     ):
         return ideas_cache["data"]
 
@@ -570,9 +553,9 @@ async def get_ideas(refresh: int = 0):
         # walks straight through the filter.
         eaten = set(month)
         diversity = [
-            s for s in diversity
-            if isinstance(s, dict) and s.get("buy")
-            and not set(plants.normalize([str(s.get("plant", ""))])) & eaten
+            s
+            for s in diversity
+            if isinstance(s, dict) and s.get("buy") and not set(plants.normalize([str(s.get("plant", ""))])) & eaten
         ]
     if recipes is None and diversity is None:
         raise HTTPException(503, "LLM unavailable — list and sync are unaffected")

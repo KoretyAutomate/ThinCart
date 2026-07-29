@@ -4,6 +4,7 @@ db.py — ThinCart SQLite layer (WAL). One DB file, server is the source of trut
 Concurrency model: FastAPI is async but ops are tiny; a single connection guarded
 by an asyncio.Lock in app.py serializes all writes. SQLite WAL keeps readers cheap.
 """
+
 import contextlib
 import json
 import os
@@ -107,8 +108,7 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
 
 def bump_revision(conn: sqlite3.Connection) -> int:
     cur = conn.execute(
-        "UPDATE meta SET value = CAST(value AS INTEGER) + 1 WHERE key='revision' "
-        "RETURNING CAST(value AS INTEGER)"
+        "UPDATE meta SET value = CAST(value AS INTEGER) + 1 WHERE key='revision' RETURNING CAST(value AS INTEGER)"
     )
     return cur.fetchone()[0]
 
@@ -119,15 +119,11 @@ def get_revision(conn: sqlite3.Connection) -> int:
 
 def get_or_create_catalog(conn: sqlite3.Connection, name: str) -> int:
     canon = canonical(name)
-    row = conn.execute(
-        "SELECT id FROM item_catalog WHERE canonical_name=?", (canon,)
-    ).fetchone()
+    row = conn.execute("SELECT id FROM item_catalog WHERE canonical_name=?", (canon,)).fetchone()
     if row:
         return row["id"]
     # alias match: typed "milk" / "たまご" must land on the 牛乳 / 卵 row
-    for r in conn.execute(
-        "SELECT id, aliases_json FROM item_catalog WHERE aliases_json != '[]'"
-    ):
+    for r in conn.execute("SELECT id, aliases_json FROM item_catalog WHERE aliases_json != '[]'"):
         if any(canonical(a) == canon for a in json.loads(r["aliases_json"])):
             return r["id"]
     # curated emoji is instant/offline for common items; the LLM enrichment
@@ -146,20 +142,15 @@ def get_or_create_store(conn: sqlite3.Connection, name: str) -> int | None:
     canon = canonical(name)
     if not canon:
         return None
-    row = conn.execute(
-        "SELECT id FROM stores WHERE canonical_name=?", (canon,)
-    ).fetchone()
+    row = conn.execute("SELECT id FROM stores WHERE canonical_name=?", (canon,)).fetchone()
     if row:
         return row["id"]
-    cur = conn.execute(
-        "INSERT INTO stores(name, canonical_name) VALUES(?, ?)", (name.strip(), canon)
-    )
+    cur = conn.execute("INSERT INTO stores(name, canonical_name) VALUES(?, ?)", (name.strip(), canon))
     return cur.lastrowid
 
 
 def stores_list(conn: sqlite3.Connection) -> list[dict]:
-    return [dict(r) for r in conn.execute(
-        "SELECT id, name, notes FROM stores ORDER BY name")]
+    return [dict(r) for r in conn.execute("SELECT id, name, notes FROM stores ORDER BY name")]
 
 
 def recommended_stores(conn: sqlite3.Connection) -> dict[int, tuple[int, str]]:
@@ -175,10 +166,7 @@ def recommended_stores(conn: sqlite3.Connection) -> dict[int, tuple[int, str]]:
         hist[r["catalog_id"]] = r["store_id"]
     for cid, sid in hist.items():
         rec[cid] = (sid, "history")
-    for r in conn.execute(
-        "SELECT id, preferred_store_id FROM item_catalog "
-        "WHERE preferred_store_id IS NOT NULL"
-    ):
+    for r in conn.execute("SELECT id, preferred_store_id FROM item_catalog WHERE preferred_store_id IS NOT NULL"):
         rec[r["id"]] = (r["preferred_store_id"], "preferred")
     return rec
 
@@ -201,9 +189,7 @@ def name_en(aliases_json: str, display: str) -> str | None:
 def purchase_history(conn: sqlite3.Connection) -> dict[int, list[str]]:
     """catalog_id -> ordered purchase timestamps (the cycle-estimator substrate)."""
     hist: dict[int, list[str]] = {}
-    for r in conn.execute(
-        "SELECT catalog_id, bought_at FROM purchase_events ORDER BY bought_at"
-    ):
+    for r in conn.execute("SELECT catalog_id, bought_at FROM purchase_events ORDER BY bought_at"):
         hist.setdefault(r["catalog_id"], []).append(r["bought_at"])
     return hist
 
@@ -224,14 +210,16 @@ def recent_history(conn: sqlite3.Connection, limit: int = 100) -> list[dict]:
            LIMIT ?""",
         (limit,),
     ):
-        out.append({
-            "event_id": r["event_id"],
-            "catalog_id": r["catalog_id"],
-            "name": r["name"],
-            "name_en": name_en(r["aliases_json"], r["name"]),
-            "bought_at": r["bought_at"],
-            "bought_by": r["bought_by"],
-        })
+        out.append(
+            {
+                "event_id": r["event_id"],
+                "catalog_id": r["catalog_id"],
+                "name": r["name"],
+                "name_en": name_en(r["aliases_json"], r["name"]),
+                "bought_at": r["bought_at"],
+                "bought_by": r["bought_by"],
+            }
+        )
     return out
 
 
@@ -251,8 +239,7 @@ def suggestions(conn: sqlite3.Connection, now) -> list[dict]:
         ).fetchone()
         if row["snoozed_until"] and row["snoozed_until"] > now_iso:
             continue
-        out.append({**s, "name": row["display_name"],
-                    "name_en": name_en(row["aliases_json"], row["display_name"])})
+        out.append({**s, "name": row["display_name"], "name_en": name_en(row["aliases_json"], row["display_name"])})
     return out
 
 
@@ -295,8 +282,7 @@ def state(conn: sqlite3.Connection, now=None) -> dict:
             "count": plantvocab.score(week),
             "target": 30,
             "week": week,
-            "weights": {t: plantvocab.weight(t) for t in week
-                        if plantvocab.weight(t) != 1.0},
+            "weights": {t: plantvocab.weight(t) for t in week if plantvocab.weight(t) != 1.0},
         },
     }
 
@@ -313,7 +299,5 @@ def record_op(conn: sqlite3.Connection, op_id: str, applied_at: str, result: dic
 
 
 def get_applied(conn: sqlite3.Connection, op_id: str) -> dict | None:
-    row = conn.execute(
-        "SELECT result_json FROM applied_ops WHERE op_id=?", (op_id,)
-    ).fetchone()
+    row = conn.execute("SELECT result_json FROM applied_ops WHERE op_id=?", (op_id,)).fetchone()
     return json.loads(row["result_json"]) if row else None

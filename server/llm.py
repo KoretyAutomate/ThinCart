@@ -10,6 +10,7 @@ curry-roux enrichment returned clean parseable JSON in 2.0 s.
 Every caller must tolerate None (LLM down/slow/garbage) — the list and sync
 never depend on this module.
 """
+
 import json
 import logging
 

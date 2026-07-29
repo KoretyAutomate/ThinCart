@@ -3,6 +3,7 @@
 Every test hits POST /api/op through TestClient; nothing is mocked below the HTTP
 layer, so these prove the real dedupe/idempotency/undo behavior end to end.
 """
+
 import json
 import os
 import sys
@@ -10,9 +11,7 @@ import uuid
 from pathlib import Path
 
 
-os.environ["THINCART_DB"] = str(
-    Path(os.environ.get("PYTEST_TMP", "/tmp")) / f"thincart_test_{uuid.uuid4().hex}.db"
-)
+os.environ["THINCART_DB"] = str(Path(os.environ.get("PYTEST_TMP", "/tmp")) / f"thincart_test_{uuid.uuid4().hex}.db")
 sys.path.insert(0, str(Path(__file__).parent.parent / "server"))
 
 from fastapi.testclient import TestClient  # noqa: E402
@@ -129,8 +128,8 @@ def test_history_lists_recent_and_undo_purchase_repairs_mis_swipe():
 
     _, res = op(type="undo_purchase", event_id=event_id)
     assert res.status_code == 200
-    assert len(events("edamame")) == 0        # spurious purchase gone from the intervals
-    assert "edamame" in items()               # and back on the list to re-buy
+    assert len(events("edamame")) == 0  # spurious purchase gone from the intervals
+    assert "edamame" in items()  # and back on the list to re-buy
 
 
 def test_undo_purchase_unknown_event_is_noop():
@@ -143,8 +142,7 @@ def test_undo_purchase_replay_is_idempotent():
     iid = str(uuid.uuid4())
     op(type="add", name="okra", item_id=iid)
     op(type="checkoff", item_id=iid)
-    event_id = [h for h in client.get("/api/history").json()["history"]
-                if h["name"] == "okra"][0]["event_id"]
+    event_id = [h for h in client.get("/api/history").json()["history"] if h["name"] == "okra"][0]["event_id"]
     body, _ = op(type="undo_purchase", event_id=event_id)
     # replay the SAME op_id → re-ACKed from the ledger, no double effect
     replay = client.post("/api/op", json=body)
@@ -164,12 +162,12 @@ def test_edit_rename_repoints_catalog_keeps_item():
     assert res.status_code == 200 and res.json()["result"]["changed"] is True
     lst = items()
     assert "rename-src" not in lst and "rename-dst" in lst
-    assert lst["rename-dst"]["id"] == iid          # same item, not delete+re-add
+    assert lst["rename-dst"]["id"] == iid  # same item, not delete+re-add
     assert lst["rename-dst"]["qty_note"] == "2 packs"
     old = appmod.conn.execute(
-        "SELECT display_name FROM item_catalog WHERE canonical_name=?",
-        (db.canonical("rename-src"),)).fetchone()
-    assert old["display_name"] == "rename-src"     # old concept row untouched
+        "SELECT display_name FROM item_catalog WHERE canonical_name=?", (db.canonical("rename-src"),)
+    ).fetchone()
+    assert old["display_name"] == "rename-src"  # old concept row untouched
 
 
 def test_edit_rename_and_qty_in_one_op():
@@ -193,8 +191,9 @@ def test_edit_rename_onto_existing_item_merges():
     assert "merge-gone" not in lst
     assert lst["merge-keep"]["id"] == keep and lst["merge-keep"]["qty_note"] == "x3"
     rows = appmod.conn.execute(
-        "SELECT COUNT(*) AS n FROM items i JOIN item_catalog c ON c.id=i.catalog_id "
-        "WHERE c.canonical_name=?", (db.canonical("merge-keep"),)).fetchone()
+        "SELECT COUNT(*) AS n FROM items i JOIN item_catalog c ON c.id=i.catalog_id WHERE c.canonical_name=?",
+        (db.canonical("merge-keep"),),
+    ).fetchone()
     assert rows["n"] == 1
 
 
@@ -203,21 +202,19 @@ def test_edit_rename_criteria_follow_new_concept():
     row, not the old concept the item is leaving."""
     iid = str(uuid.uuid4())
     op(type="add", name="crit-src", item_id=iid)
-    op(type="edit", item_id=iid, name="crit-dst", note="the organic one",
-       category="pantry")
+    op(type="edit", item_id=iid, name="crit-dst", note="the organic one", category="pantry")
     dst = appmod.conn.execute(
-        "SELECT note, category FROM item_catalog WHERE canonical_name=?",
-        (db.canonical("crit-dst"),)).fetchone()
+        "SELECT note, category FROM item_catalog WHERE canonical_name=?", (db.canonical("crit-dst"),)
+    ).fetchone()
     assert dst["note"] == "the organic one" and dst["category"] == "pantry"
     src = appmod.conn.execute(
-        "SELECT note FROM item_catalog WHERE canonical_name=?",
-        (db.canonical("crit-src"),)).fetchone()
+        "SELECT note FROM item_catalog WHERE canonical_name=?", (db.canonical("crit-src"),)
+    ).fetchone()
     assert not src["note"]  # old concept untouched
 
 
 def catalog_id_of(item_id):
-    return appmod.conn.execute(
-        "SELECT catalog_id FROM items WHERE id=?", (item_id,)).fetchone()["catalog_id"]
+    return appmod.conn.execute("SELECT catalog_id FROM items WHERE id=?", (item_id,)).fetchone()["catalog_id"]
 
 
 def test_edit_rename_case_only_persists():
@@ -230,7 +227,7 @@ def test_edit_rename_case_only_persists():
     assert res.json()["result"]["changed"] is True
     lst = items()
     assert "Case-Fix Soup" in lst and "case-fix soup" not in lst
-    assert lst["Case-Fix Soup"]["id"] == iid   # same item, same catalog row
+    assert lst["Case-Fix Soup"]["id"] == iid  # same item, same catalog row
 
 
 def test_edit_rename_width_variant_persists():
@@ -242,10 +239,13 @@ def test_edit_rename_width_variant_persists():
     _, res = op(type="edit", item_id=iid, name="バター-width")
     assert res.json()["result"]["changed"] is True
     assert "バター-width" in items()
-    assert catalog_id_of(iid) == cid           # respelling, not a new concept
-    assert appmod.conn.execute(
-        "SELECT COUNT(*) AS n FROM item_catalog WHERE canonical_name=?",
-        (db.canonical("バター-width"),)).fetchone()["n"] == 1
+    assert catalog_id_of(iid) == cid  # respelling, not a new concept
+    assert (
+        appmod.conn.execute(
+            "SELECT COUNT(*) AS n FROM item_catalog WHERE canonical_name=?", (db.canonical("バター-width"),)
+        ).fetchone()["n"]
+        == 1
+    )
 
 
 def test_edit_rename_identical_name_reports_no_change():
@@ -275,21 +275,18 @@ def test_edit_rename_onto_own_alias_is_refused_and_reported():
     iid, other = str(uuid.uuid4()), str(uuid.uuid4())
     op(type="add", name="alias-concept", item_id=iid)
     cid = catalog_id_of(iid)
-    appmod.conn.execute("UPDATE item_catalog SET aliases_json=? WHERE id=?",
-                        (json.dumps(["alias-nickname"]), cid))
+    appmod.conn.execute("UPDATE item_catalog SET aliases_json=? WHERE id=?", (json.dumps(["alias-nickname"]), cid))
     _, shared = op(type="add", name="alias-nickname", item_id=other)
-    assert shared.json()["result"]["deduped"] is True   # the alias reaches this row
+    assert shared.json()["result"]["deduped"] is True  # the alias reaches this row
     _, res = op(type="edit", item_id=iid, name="alias-nickname")
     result = res.json()["result"]
     assert result["rename_skipped"] == "alias"
-    assert result["name"] == "alias-concept"   # what the client must show instead
+    assert result["name"] == "alias-concept"  # what the client must show instead
     assert result["changed"] is False
-    row = appmod.conn.execute(
-        "SELECT display_name, canonical_name FROM item_catalog WHERE id=?",
-        (cid,)).fetchone()
-    assert row["display_name"] == "alias-concept"   # shared row uncorrupted
+    row = appmod.conn.execute("SELECT display_name, canonical_name FROM item_catalog WHERE id=?", (cid,)).fetchone()
+    assert row["display_name"] == "alias-concept"  # shared row uncorrupted
     assert row["canonical_name"] == db.canonical("alias-concept")
-    assert catalog_id_of(iid) == cid                # item stayed put
+    assert catalog_id_of(iid) == cid  # item stayed put
 
 
 def test_edit_rename_to_variant_of_a_different_row_still_repoints():
@@ -299,18 +296,17 @@ def test_edit_rename_to_variant_of_a_different_row_still_repoints():
     op(type="add", name="variant-src", item_id=src)
     op(type="add", name="Variant-Dst", item_id=dst)
     dst_cid = catalog_id_of(dst)
-    op(type="remove", item_id=dst)                  # off the list, row survives
+    op(type="remove", item_id=dst)  # off the list, row survives
     _, res = op(type="edit", item_id=src, name="variant-dst")
     assert res.json()["result"]["catalog_id"] == dst_cid
     assert catalog_id_of(src) == dst_cid
-    assert "Variant-Dst" in items()                 # target row's spelling kept
+    assert "Variant-Dst" in items()  # target row's spelling kept
 
 
 def test_revision_monotonic_and_replay_does_not_bump():
     r0 = client.get("/api/state").json()["revision"]
     iid = str(uuid.uuid4())
-    body = {"op_id": str(uuid.uuid4()), "actor": "t", "type": "add",
-            "name": f"unique-{iid[:8]}", "item_id": iid}
+    body = {"op_id": str(uuid.uuid4()), "actor": "t", "type": "add", "name": f"unique-{iid[:8]}", "item_id": iid}
     client.post("/api/op", json=body)
     r1 = client.get("/api/state").json()["revision"]
     client.post("/api/op", json=body)  # replay
@@ -353,17 +349,14 @@ def test_suggestions_and_snooze_flow():
     # adding it to the list removes the suggestion
     iid = str(uuid.uuid4())
     op(type="add", name="bananas", item_id=iid)
-    assert not [s for s in client.get("/api/state").json()["suggestions"]
-                if s["catalog_id"] == cid]
+    assert not [s for s in client.get("/api/state").json()["suggestions"] if s["catalog_id"] == cid]
     op(type="remove", item_id=iid)  # back off the list → suggestion returns
-    assert [s for s in client.get("/api/state").json()["suggestions"]
-            if s["catalog_id"] == cid]
+    assert [s for s in client.get("/api/state").json()["suggestions"] if s["catalog_id"] == cid]
 
     # snooze silences it (server-side → both phones)
     _, res = op(type="snooze", catalog_id=cid)
     assert "snoozed_until" in res.json()["result"]
-    assert not [s for s in client.get("/api/state").json()["suggestions"]
-                if s["catalog_id"] == cid]
+    assert not [s for s in client.get("/api/state").json()["suggestions"] if s["catalog_id"] == cid]
 
 
 def test_cycles_endpoint_full_list():
@@ -377,13 +370,14 @@ def test_cycles_endpoint_full_list():
         for k in range(4):
             appmod.conn.execute(
                 "INSERT INTO purchase_events(catalog_id, bought_at) VALUES(?,?)",
-                (cid, (t0 - timedelta(days=since + interval * (3 - k))).isoformat(timespec="seconds")))
+                (cid, (t0 - timedelta(days=since + interval * (3 - k))).isoformat(timespec="seconds")),
+            )
     appmod.conn.commit()
 
     rows = {c["name"]: c for c in client.get("/api/cycles").json()["cycles"]}
     assert rows["cyc_overdue"]["due"] and rows["cyc_overdue"]["label"] == "weekly"
-    assert not rows["cyc_fresh"]["due"]      # bought yesterday
-    assert not rows["cyc_lapsed"]["due"]     # retired, but still visible in the list
+    assert not rows["cyc_fresh"]["due"]  # bought yesterday
+    assert not rows["cyc_lapsed"]["due"]  # retired, but still visible in the list
     scores = [c["score"] for c in client.get("/api/cycles").json()["cycles"]]
     assert scores == sorted(scores, reverse=True)
     # an item currently on the list is flagged and not due

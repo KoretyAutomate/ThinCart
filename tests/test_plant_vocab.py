@@ -6,6 +6,7 @@ Regressions from live data (2026-07-12): `bell pepper bag` → ["pepper"] but
 under one token; `レモン`+`Lime` → ["citrus"] (genus lump), `オレンジジュース` →
 ["orange"] (species) — inconsistent granularity.
 """
+
 import contextlib
 import json
 import os
@@ -31,28 +32,31 @@ import plants  # noqa: E402
 # --------------------------------------------------------------------------
 # normalization: synonyms fold onto one canonical token
 # --------------------------------------------------------------------------
-@pytest.mark.parametrize("raw,canon", [
-    ("capsicum", "bell pepper"),
-    ("green bell pepper", "bell pepper"),
-    ("sweet pepper", "bell pepper"),
-    ("Capsicum", "bell pepper"),          # case-insensitive
-    ("peppercorn", "black pepper"),
-    ("cayenne", "chili pepper"),
-    ("white onion", "onion"),             # colour never splits a species
-    ("red onion", "onion"),
-    ("white rice", "rice"),               # nor does refinement
-    ("brown rice", "rice"),
-    ("purple rice", "rice"),
-    ("zucchini", "summer squash"),
-    ("yellow squash", "summer squash"),   # both Cucurbita pepo
-    ("butternut", "butternut squash"),
-    ("oats", "oat"),
-    ("maize", "corn"),
-    ("allium fistulosum", "scallion"),
-    ("mandarin orange", "mandarin"),
-    ("edamame", "soybean"),
-    ("olive oil", "olive"),
-])
+@pytest.mark.parametrize(
+    "raw,canon",
+    [
+        ("capsicum", "bell pepper"),
+        ("green bell pepper", "bell pepper"),
+        ("sweet pepper", "bell pepper"),
+        ("Capsicum", "bell pepper"),  # case-insensitive
+        ("peppercorn", "black pepper"),
+        ("cayenne", "chili pepper"),
+        ("white onion", "onion"),  # colour never splits a species
+        ("red onion", "onion"),
+        ("white rice", "rice"),  # nor does refinement
+        ("brown rice", "rice"),
+        ("purple rice", "rice"),
+        ("zucchini", "summer squash"),
+        ("yellow squash", "summer squash"),  # both Cucurbita pepo
+        ("butternut", "butternut squash"),
+        ("oats", "oat"),
+        ("maize", "corn"),
+        ("allium fistulosum", "scallion"),
+        ("mandarin orange", "mandarin"),
+        ("edamame", "soybean"),
+        ("olive oil", "olive"),
+    ],
+)
 def test_alias_map_folds_synonyms(raw, canon):
     assert plants.normalize([raw]) == [canon]
 
@@ -64,8 +68,7 @@ def test_generic_category_tokens_are_dropped():
 
 def test_normalize_dedupes_after_folding():
     """The whole point: two spellings of one species collapse to ONE token."""
-    assert plants.normalize(["capsicum", "bell pepper", "pepper"],
-                            "green bell pepper") == ["bell pepper"]
+    assert plants.normalize(["capsicum", "bell pepper", "pepper"], "green bell pepper") == ["bell pepper"]
 
 
 def test_normalize_drops_non_ascii_and_junk():
@@ -78,8 +81,8 @@ def test_normalize_drops_non_ascii_and_junk():
 def test_pepper_collision_resolved_by_item_context():
     veg = plants.normalize(["pepper"], "bell pepper bag")
     spice = plants.normalize(["wheat", "tomato", "basil", "pepper"], "amys frozen pizza")
-    assert veg == ["bell pepper"]                       # Capsicum annuum, 1 point
-    assert spice[-1] == "black pepper"                  # Piper nigrum, ¼ point
+    assert veg == ["bell pepper"]  # Capsicum annuum, 1 point
+    assert spice[-1] == "black pepper"  # Piper nigrum, ¼ point
     # and they no longer collide: the union of a pizza week and a pepper week
     # contains BOTH plants, not one
     assert set(veg) & set(spice) == set()
@@ -128,8 +131,7 @@ def test_agp_weights_are_a_flat_count():
     """Default mode: the study's own method — every plant species scores 1.0,
     no fractions (a can of soup with carrot+potato+onion counts as 3)."""
     assert plants.COUNTING_MODE == "agp"
-    for token in ("kale", "walnut", "rice", "basil", "black pepper",
-                  "garlic", "olive", "tea", "coffee", "tart cherry"):
+    for token in ("kale", "walnut", "rice", "basil", "black pepper", "garlic", "olive", "tea", "coffee", "tart cherry"):
         assert plants.weight(token) == 1.0, token
     # carries no plant material at all — excluded under BOTH systems
     assert plants.weight("sugarcane") == 0.0
@@ -138,13 +140,13 @@ def test_agp_weights_are_a_flat_count():
 def test_rossi_weights_follow_the_plant_point_rules():
     """The fractional system stays available behind COUNTING_MODE="rossi"."""
     with counting_mode("rossi"):
-        assert plants.weight("kale") == 1.0            # vegetable
-        assert plants.weight("walnut") == 1.0          # nuts & seeds are a full point
-        assert plants.weight("rice") == 1.0            # we do not exclude refined grains
-        assert plants.weight("basil") == 0.25          # herb
-        assert plants.weight("black pepper") == 0.25   # spice
+        assert plants.weight("kale") == 1.0  # vegetable
+        assert plants.weight("walnut") == 1.0  # nuts & seeds are a full point
+        assert plants.weight("rice") == 1.0  # we do not exclude refined grains
+        assert plants.weight("basil") == 0.25  # herb
+        assert plants.weight("black pepper") == 0.25  # spice
         assert plants.weight("garlic") == 0.25
-        assert plants.weight("olive") == 0.25          # extra-virgin olive oil
+        assert plants.weight("olive") == 0.25  # extra-virgin olive oil
         assert plants.weight("tea") == 0.25
         assert plants.weight("coffee") == 0.25
         assert plants.weight("sugarcane") == 0.0
@@ -176,17 +178,15 @@ def seed(name, days_ago, plants_json):
         (json.dumps(plants_json, ensure_ascii=False), cid),
     )
     ts = (datetime.now(UTC) - timedelta(days=days_ago)).isoformat(timespec="seconds")
-    appmod.conn.execute(
-        "INSERT INTO purchase_events(catalog_id, bought_at) VALUES(?,?)", (cid, ts)
-    )
+    appmod.conn.execute("INSERT INTO purchase_events(catalog_id, bought_at) VALUES(?,?)", (cid, ts))
     appmod.conn.commit()
     return cid
 
 
 def test_weekly_count_is_deduped_across_drifted_rows():
     """The live bug, end to end: two rows, two tokens, one species → ONE point."""
-    seed("bell pepper bag", 1, ["pepper"])          # drifted token, vegetable
-    seed("green bell pepper", 2, ["capsicum"])      # drifted token, same species
+    seed("bell pepper bag", 1, ["pepper"])  # drifted token, vegetable
+    seed("green bell pepper", 2, ["capsicum"])  # drifted token, same species
     seed("herby thing", 1, ["basil", "oregano"])
 
     week = catalog.weekly_plants(appmod.conn)
@@ -198,8 +198,7 @@ def test_weekly_count_is_deduped_across_drifted_rows():
     assert catalog.weekly_score(appmod.conn) == plants.score(week)
     # the drifted pair collapses to ONE point, not two (normalize is what dedupes;
     # score() takes tokens that are already canonical)
-    assert plants.score(plants.normalize(["pepper", "capsicum"],
-                                         "green bell pepper")) == 1
+    assert plants.score(plants.normalize(["pepper", "capsicum"], "green bell pepper")) == 1
 
 
 def test_state_reports_count_and_weights():

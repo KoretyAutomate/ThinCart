@@ -8,6 +8,7 @@ canonical names are skipped, so user-created rows are never touched.
 
 Run:  python3 seed_catalog.py
 """
+
 import json
 
 import db
@@ -211,8 +212,7 @@ def seed(conn) -> int:
             # row predates seeding (user-created): backfill curated aliases +
             # category so EN display / search work for it too
             merged = json.loads(row["aliases_json"])
-            merged += [a for a in aliases
-                       if not any(db.canonical(a) == db.canonical(m) for m in merged)]
+            merged += [a for a in aliases if not any(db.canonical(a) == db.canonical(m) for m in merged)]
             conn.execute(
                 "UPDATE item_catalog SET aliases_json=?, "
                 "category=COALESCE(category, ?), is_edible=COALESCE(is_edible, ?) "

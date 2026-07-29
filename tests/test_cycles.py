@@ -1,4 +1,5 @@
 """Interval-estimator tests with synthetic histories (PLAN.md Phase 1 gate)."""
+
 import sys
 from datetime import datetime, timedelta, UTC
 from pathlib import Path
@@ -45,7 +46,7 @@ def test_too_few_events_gives_none():
 def test_due_scoring_window():
     hist = series(0, 7, 14, 21)
     on_time = cycles.due_score(hist, T0 + timedelta(days=27))  # 6/7 ≈ 0.86 → due
-    early = cycles.due_score(hist, T0 + timedelta(days=23))    # 2/7 ≈ 0.29 → not yet
+    early = cycles.due_score(hist, T0 + timedelta(days=23))  # 2/7 ≈ 0.29 → not yet
     assert on_time >= cycles.DUE_MIN
     assert early < cycles.DUE_MIN
 
@@ -53,10 +54,10 @@ def test_due_scoring_window():
 def test_suggest_orders_and_filters():
     now = T0 + timedelta(days=30)
     history = {
-        1: series(0, 7, 14, 21),      # weekly, 9d since last → score ~1.3 → due
-        2: series(0, 14, 28),          # biweekly, 2d since → 0.14 → not due
-        3: series(0, 7),               # too few events → never suggested
-        4: series(0, 2, 4, 6),         # lapsed: 24d since a 2d-cycle → score 12 → retired
+        1: series(0, 7, 14, 21),  # weekly, 9d since last → score ~1.3 → due
+        2: series(0, 14, 28),  # biweekly, 2d since → 0.14 → not due
+        3: series(0, 7),  # too few events → never suggested
+        4: series(0, 2, 4, 6),  # lapsed: 24d since a 2d-cycle → score 12 → retired
     }
     out = cycles.suggest(history, now)
     assert [s["catalog_id"] for s in out] == [1]

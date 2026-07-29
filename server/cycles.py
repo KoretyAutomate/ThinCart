@@ -7,6 +7,7 @@ PLAN.md §Intelligence layer 1:
 - suggest when 0.85 ≤ days_since_last / median ≤ 3.0 (upper cap retires
   lapsed/seasonal items instead of nagging forever)
 """
+
 from datetime import datetime, UTC
 from statistics import median
 
@@ -44,7 +45,8 @@ def median_interval_days(timestamps: list[str]) -> float | None:
         return None
     gaps = [
         # strict=False: events[1:] is deliberately one shorter — pairwise gaps.
-        (b - a).total_seconds() / 86400 for a, b in zip(events, events[1:], strict=False)
+        (b - a).total_seconds() / 86400
+        for a, b in zip(events, events[1:], strict=False)
     ]
     return median(gaps)
 

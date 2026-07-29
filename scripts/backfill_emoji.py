@@ -8,6 +8,7 @@ just gives the common items their icon immediately instead of waiting for a re-e
     python3 scripts/backfill_emoji.py            # live DB (server/data/thincart.db)
     THINCART_DB=/path/to.db python3 scripts/backfill_emoji.py
 """
+
 import sys
 from pathlib import Path
 
@@ -20,8 +21,7 @@ from db import connect  # noqa: E402
 def main() -> int:
     conn = connect()
     rows = conn.execute(
-        "SELECT id, canonical_name, display_name FROM item_catalog "
-        "WHERE emoji IS NULL OR emoji = ''"
+        "SELECT id, canonical_name, display_name FROM item_catalog WHERE emoji IS NULL OR emoji = ''"
     ).fetchall()
     filled = 0
     for r in rows:

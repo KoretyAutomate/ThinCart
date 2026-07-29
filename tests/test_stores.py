@@ -4,6 +4,7 @@ Same style as test_ops.py — everything through POST /api/op + /api/state, so
 these prove the real op contract (idempotency, criteria persistence, the
 preferred>history precedence) end to end.
 """
+
 import os
 import sys
 import uuid
@@ -58,12 +59,11 @@ def test_store_get_or_create_collides_on_canonical():
 
 def test_edit_sets_note_budget_store():
     iid = add("洗剤")
-    _, res = op(type="edit", item_id=iid, note="無香料のやつ", budget="３００円",
-                store="OKストア")
+    _, res = op(type="edit", item_id=iid, note="無香料のやつ", budget="３００円", store="OKストア")
     assert res.status_code == 200
     it = items()["洗剤"]
     assert it["note"] == "無香料のやつ"
-    assert it["budget"] == 300.0          # full-width digits + 円 parsed
+    assert it["budget"] == 300.0  # full-width digits + 円 parsed
     assert it["store"] == "OKストア"
     assert it["store_source"] == "preferred"
     assert "OKストア" in stores_by_name()  # auto-created
@@ -73,9 +73,9 @@ def test_budget_clear_and_invalid():
     iid = add("budget-item")
     op(type="edit", item_id=iid, budget="¥1,200")
     assert items()["budget-item"]["budget"] == 1200.0
-    op(type="edit", item_id=iid, budget="abc")   # invalid → ignored, not 422
+    op(type="edit", item_id=iid, budget="abc")  # invalid → ignored, not 422
     assert items()["budget-item"]["budget"] == 1200.0
-    op(type="edit", item_id=iid, budget="")      # "" clears
+    op(type="edit", item_id=iid, budget="")  # "" clears
     assert items()["budget-item"]["budget"] is None
 
 
@@ -129,13 +129,12 @@ def test_edit_survives_vanished_item_via_catalog_id():
     iid = add("vanish-item")
     cid = items()["vanish-item"]["catalog_id"]
     op(type="checkoff", item_id=iid)  # item row gone
-    _, res = op(type="edit", item_id=iid, catalog_id=cid,
-                note="always the big pack", qty_note="2")
+    _, res = op(type="edit", item_id=iid, catalog_id=cid, note="always the big pack", qty_note="2")
     assert res.status_code == 200
     add("vanish-item")
     it = items()["vanish-item"]
     assert it["note"] == "always the big pack"
-    assert it["qty_note"] == ""   # per-item field needed the live row → dropped
+    assert it["qty_note"] == ""  # per-item field needed the live row → dropped
 
 
 def test_note_and_budget_persist_across_checkoff_readd():
@@ -169,9 +168,7 @@ def test_store_delete_nulls_references():
     assert "Doomed Mart" not in stores_by_name()
     it = items()["del-store-item"]
     assert it["store"] is None and it["store_source"] is None
-    orphans = appmod.conn.execute(
-        "SELECT COUNT(*) FROM purchase_events WHERE store_id=?", (sid,)
-    ).fetchone()[0]
+    orphans = appmod.conn.execute("SELECT COUNT(*) FROM purchase_events WHERE store_id=?", (sid,)).fetchone()[0]
     assert orphans == 0
     # double-delete (other phone) → no-op ACK, not an error
     _, res2 = op(type="store_delete", store_id=sid)
@@ -180,8 +177,7 @@ def test_store_delete_nulls_references():
 
 def test_checkoff_with_store_replay_logs_one_event():
     iid = add("replay-store")
-    body = {"op_id": str(uuid.uuid4()), "actor": "test", "type": "checkoff",
-            "item_id": iid, "store": "Replay Mart"}
+    body = {"op_id": str(uuid.uuid4()), "actor": "test", "type": "checkoff", "item_id": iid, "store": "Replay Mart"}
     r1 = client.post("/api/op", json=body)
     r2 = client.post("/api/op", json=body)
     assert r1.status_code == r2.status_code == 200

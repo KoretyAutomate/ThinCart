@@ -7,6 +7,7 @@ and alias detection (たまねぎ ≡ 玉ねぎ → merge onto one catalog row).
 Plants are canonical lowercase English tokens — 小麦/Wheat/komugi must not
 triple-count (PLAN.md §Intelligence layer 2).
 """
+
 import contextlib
 import json
 import logging
@@ -35,9 +36,17 @@ async def web_evidence(name: str) -> list[str] | None:
     except Exception:
         return None
 
+
 CATEGORIES = [
-    "produce", "dairy", "meat_fish", "pantry", "bakery",
-    "frozen", "drinks", "household", "other",
+    "produce",
+    "dairy",
+    "meat_fish",
+    "pantry",
+    "bakery",
+    "frozen",
+    "drinks",
+    "household",
+    "other",
 ]
 
 
@@ -50,7 +59,7 @@ def _is_variety(source_canon: str, target_names: list[str]) -> bool:
     src = set(source_canon.split())
     for name in target_names:
         tw = set(canonical(name).split())
-        if tw and tw < src:            # all target words present + extra qualifier
+        if tw and tw < src:  # all target words present + extra qualifier
             return True
     return False
 
@@ -73,44 +82,42 @@ def _clean_plants(raw, context: str = "") -> list[str] | None:
     return plants.normalize(raw, context)
 
 
-def enrich_prompt(display_name: str, existing_names: list[str],
-                  evidence: list[str] | None = None) -> str:
+def enrich_prompt(display_name: str, existing_names: list[str], evidence: list[str] | None = None) -> str:
     listed = ", ".join(f'"{n}"' for n in existing_names[:200])
     ev = ""
     if evidence is not None:
-        ev = ("Web search result titles for this exact text: "
-              + json.dumps(evidence, ensure_ascii=False) + "\n")
+        ev = "Web search result titles for this exact text: " + json.dumps(evidence, ensure_ascii=False) + "\n"
     return (
         f'Grocery item (Japanese or English): "{display_name}".\n'
-        f'Existing catalog items: [{listed}]\n'
-        f'{ev}'
-        f'{plants.VOCAB_RULES}\n'
-        'Reply ONLY JSON: {'
+        f"Existing catalog items: [{listed}]\n"
+        f"{ev}"
+        f"{plants.VOCAB_RULES}\n"
+        "Reply ONLY JSON: {"
         '"is_real_item": bool — false ONLY if the text looks like a typo or gibberish '
-        'rather than a real product (use the web evidence if given; when unsure, true), '
+        "rather than a real product (use the web evidence if given; when unsure, true), "
         f'"category": one of {json.dumps(CATEGORIES)}, '
         '"emoji": a single emoji that best pictures THIS specific item '
-        '(🥑 avocado, 🍌 banana, 🥯 bagel, 🍝 pasta, 🐟 salmon); null if none fits, '
+        "(🥑 avocado, 🍌 banana, 🥯 bagel, 🍝 pasta, 🐟 salmon); null if none fits, "
         '"is_edible": bool, '
         '"plants": [the DISTINCT edible plant species a typical serving contains, '
-        'as canonical tokens per the PLANT TOKEN RULES above. Examples: '
+        "as canonical tokens per the PLANT TOKEN RULES above. Examples: "
         'curry roux -> ["wheat","turmeric","cumin","coriander"]; '
         'green bell pepper -> ["bell pepper"]; frozen pizza -> '
         '["wheat","tomato","onion","garlic","basil","oregano","black pepper"]; '
         'lemon -> ["lemon"]; yellow squash -> ["summer squash"]; milk -> []], '
         '"english_name": the common English name for THIS specific item — PRESERVE '
-        'brand names and the specific type/variety, never generalize. '
+        "brand names and the specific type/variety, never generalize. "
         '"One Mighty Mill bagel" -> "one mighty mill bagel" (NOT "bagel"); '
         '"white rice" -> "white rice" (NOT "rice"); "fettuccine" -> "fettuccine" '
         '(NOT "pasta"); "yellow squash" -> "yellow squash" (NOT "zucchini"), '
         '"alias_of": ONLY if this item is the IDENTICAL product as one existing catalog '
-        'item written in a different script/spelling or an exact translation '
-        '(たまねぎ vs 玉ねぎ; ﾐﾙｸ vs ミルク; coriander vs cilantro; aubergine vs eggplant). '
-        'A different TYPE, VARIETY, BRAND, or SUB-TYPE is NOT an alias — keep it separate: '
-        'white rice is NOT rice/米; brown rice is NOT rice; spaghetti and fettuccine are '
-        'NOT pasta/パスタ (they are types of pasta); yellow squash is NOT zucchini/ズッキーニ '
+        "item written in a different script/spelling or an exact translation "
+        "(たまねぎ vs 玉ねぎ; ﾐﾙｸ vs ミルク; coriander vs cilantro; aubergine vs eggplant). "
+        "A different TYPE, VARIETY, BRAND, or SUB-TYPE is NOT an alias — keep it separate: "
+        "white rice is NOT rice/米; brown rice is NOT rice; spaghetti and fettuccine are "
+        "NOT pasta/パスタ (they are types of pasta); yellow squash is NOT zucchini/ズッキーニ "
         '(different vegetable); "One Mighty Mill bagel" is NOT bagel/ベーグル (it is a brand); '
-        'ミニトマト is NOT トマト; 冷凍ブロッコリー is NOT ブロッコリー. When unsure: null}'
+        "ミニトマト is NOT トマト; 冷凍ブロッコリー is NOT ブロッコリー. When unsure: null}"
     )
 
 
@@ -136,9 +143,7 @@ async def enrich(conn, write_lock, catalog_id: int) -> bool:
     # user-typed rows (no curated data) get a quick web search to judge typo-ness;
     # seeded rows are pre-verified — skip the search
     evidence = await web_evidence(row["display_name"]) if mergeable else None
-    res = await llm.chat_json(
-        enrich_prompt(row["display_name"], existing, evidence), max_tokens=220
-    )
+    res = await llm.chat_json(enrich_prompt(row["display_name"], existing, evidence), max_tokens=220)
     if not isinstance(res, dict):
         return False
     verified = 0 if res.get("is_real_item") is False else 1
@@ -160,23 +165,20 @@ async def enrich(conn, write_lock, catalog_id: int) -> bool:
                 "SELECT id, aliases_json FROM item_catalog WHERE canonical_name=?",
                 (alias_of,),
             ).fetchone()
-        if target and _is_variety(
-            row["canonical_name"], [alias_of] + json.loads(target["aliases_json"])
-        ):
-            log.info("merge blocked (variety/brand): %r kept distinct from %r",
-                     row["canonical_name"], alias_of)
+        if target and _is_variety(row["canonical_name"], [alias_of] + json.loads(target["aliases_json"])):
+            log.info("merge blocked (variety/brand): %r kept distinct from %r", row["canonical_name"], alias_of)
             target = None
         if target:
             # merge: repoint history + live items, record alias, drop this row
-            conn.execute("UPDATE items SET catalog_id=? WHERE catalog_id=?",
-                         (target["id"], row["id"]))
-            conn.execute("UPDATE purchase_events SET catalog_id=? WHERE catalog_id=?",
-                         (target["id"], row["id"]))
+            conn.execute("UPDATE items SET catalog_id=? WHERE catalog_id=?", (target["id"], row["id"]))
+            conn.execute("UPDATE purchase_events SET catalog_id=? WHERE catalog_id=?", (target["id"], row["id"]))
             aliases = json.loads(target["aliases_json"])
             if row["canonical_name"] not in aliases:
                 aliases.append(row["canonical_name"])
-            conn.execute("UPDATE item_catalog SET aliases_json=? WHERE id=?",
-                         (json.dumps(aliases, ensure_ascii=False), target["id"]))
+            conn.execute(
+                "UPDATE item_catalog SET aliases_json=? WHERE id=?",
+                (json.dumps(aliases, ensure_ascii=False), target["id"]),
+            )
             # criteria the user set on the doomed row before this async merge ran
             # must survive it — carry note/budget/preferred store (target wins)
             conn.execute(
@@ -195,16 +197,27 @@ async def enrich(conn, write_lock, catalog_id: int) -> bool:
             # would both shadow the user's specific name and mis-route future adds.
             aliases = json.loads(row["aliases_json"])
             en = res.get("english_name")
-            if (not row["display_name"].isascii()
-                    and isinstance(en, str) and en.strip() and en.isascii()
-                    and not any(a.casefold() == en.strip().casefold() for a in aliases)):
+            if (
+                not row["display_name"].isascii()
+                and isinstance(en, str)
+                and en.strip()
+                and en.isascii()
+                and not any(a.casefold() == en.strip().casefold() for a in aliases)
+            ):
                 aliases.append(en.strip().lower())
             conn.execute(
                 "UPDATE item_catalog SET category=?, is_edible=?, plants_json=?, "
                 "aliases_json=?, verified=?, emoji=?, llm_enriched_at=? WHERE id=?",
-                (category, is_edible, json.dumps(item_plants),
-                 json.dumps(aliases, ensure_ascii=False), verified, emoji_val, now,
-                 row["id"]),
+                (
+                    category,
+                    is_edible,
+                    json.dumps(item_plants),
+                    json.dumps(aliases, ensure_ascii=False),
+                    verified,
+                    emoji_val,
+                    now,
+                    row["id"],
+                ),
             )
             if not verified:
                 log.info("typo-suspect (hidden from candidates): %r", row["display_name"])
@@ -214,10 +227,7 @@ async def enrich(conn, write_lock, catalog_id: int) -> bool:
 
 async def sweep(conn, write_lock) -> int:
     """Enrich every catalog row the add-time task missed (LLM was down, etc.)."""
-    pending = [
-        r["id"]
-        for r in conn.execute("SELECT id FROM item_catalog WHERE llm_enriched_at IS NULL")
-    ]
+    pending = [r["id"] for r in conn.execute("SELECT id FROM item_catalog WHERE llm_enriched_at IS NULL")]
     done = 0
     for cid in pending:
         if await enrich(conn, write_lock, cid):
@@ -244,9 +254,7 @@ def weekly_plants(conn, now=None, window_days: int = 7) -> list[str]:
            WHERE e.bought_at >= ? AND c.plants_json IS NOT NULL""",
         (cutoff,),
     ):
-        found.update(
-            plants.normalize(json.loads(r["plants_json"]), item_context(r))
-        )
+        found.update(plants.normalize(json.loads(r["plants_json"]), item_context(r)))
     return sorted(plants.countable(found))
 
 
@@ -256,9 +264,7 @@ def weekly_score(conn, now=None, window_days: int = 7) -> float:
 
 
 def recent_purchases(conn, days: int = 10) -> list[dict]:
-    cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat(
-        timespec="seconds"
-    )
+    cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat(timespec="seconds")
     return [
         dict(r)
         for r in conn.execute(
