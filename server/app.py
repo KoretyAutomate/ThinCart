@@ -270,6 +270,37 @@ def apply_edit(op: Op, ts: str) -> dict:
             catalog_id = new_cid  # same-save criteria land on the NEW concept
             result["catalog_id"] = new_cid
             changed = True
+        else:
+            # get_or_create_catalog resolved back to the item's OWN row, for one
+            # of two very different reasons — they must not be treated alike.
+            cur = conn.execute(
+                "SELECT canonical_name, display_name FROM item_catalog WHERE id=?",
+                (catalog_id,),
+            ).fetchone()
+            if cur["canonical_name"] == db.canonical(op.name):
+                # (1) Canonical variant: only case / full-width / whitespace
+                # differ, so this is the SAME concept respelled — the user
+                # fixing how it reads. display_name is the only place that
+                # spelling lives (it is written at INSERT and nowhere else), so
+                # without this the correction is silently discarded on the next
+                # fetch. Applied even when other items share this catalog row:
+                # canonical_name is unchanged, so every sharer is by definition
+                # the same concept and wants the corrected spelling too.
+                if cur["display_name"] != op.name.strip():
+                    conn.execute("UPDATE item_catalog SET display_name=? WHERE id=?",
+                                 (op.name.strip(), catalog_id))
+                    changed = True
+                result["name"] = op.name.strip()
+            else:
+                # (2) Alias match ("milk" → the 牛乳 row). Renaming the shared
+                # row here would rename the concept for every item and every
+                # phone that reaches it through any other spelling, from an edit
+                # the user thinks is local. Splitting off a new row instead
+                # would defeat the alias feature itself. So the rename is
+                # refused — but reported, never silently swallowed, so the
+                # client can roll its optimistic text back to `name`.
+                result["rename_skipped"] = "alias"
+                result["name"] = cur["display_name"]
     if op.qty_note is not None and row is not None:  # per-item: needs the live row
         conn.execute("UPDATE items SET qty_note=? WHERE id=?", (op.qty_note, item_id))
         changed = True

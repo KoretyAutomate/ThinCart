@@ -3,6 +3,7 @@
 Every test hits POST /api/op through TestClient; nothing is mocked below the HTTP
 layer, so these prove the real dedupe/idempotency/undo behavior end to end.
 """
+import json
 import os
 import sys
 import uuid
@@ -212,6 +213,97 @@ def test_edit_rename_criteria_follow_new_concept():
         "SELECT note FROM item_catalog WHERE canonical_name=?",
         (db.canonical("crit-src"),)).fetchone()
     assert not src["note"]  # old concept untouched
+
+
+def catalog_id_of(item_id):
+    return appmod.conn.execute(
+        "SELECT catalog_id FROM items WHERE id=?", (item_id,)).fetchone()["catalog_id"]
+
+
+def test_edit_rename_case_only_persists():
+    """Capitalization fix canonicalizes onto the item's OWN row, so the rename
+    branch never fires — display_name must still be corrected, or the next
+    fetch silently restores the old spelling."""
+    iid = str(uuid.uuid4())
+    op(type="add", name="case-fix soup", item_id=iid)
+    _, res = op(type="edit", item_id=iid, name="Case-Fix Soup")
+    assert res.json()["result"]["changed"] is True
+    lst = items()
+    assert "Case-Fix Soup" in lst and "case-fix soup" not in lst
+    assert lst["Case-Fix Soup"]["id"] == iid   # same item, same catalog row
+
+
+def test_edit_rename_width_variant_persists():
+    """Same for a half-width→full-width respelling (ﾊﾞﾀｰ → バター): NFKC folds
+    them together, so this too lands on the item's existing row."""
+    iid = str(uuid.uuid4())
+    op(type="add", name="ﾊﾞﾀｰ-width", item_id=iid)
+    cid = catalog_id_of(iid)
+    _, res = op(type="edit", item_id=iid, name="バター-width")
+    assert res.json()["result"]["changed"] is True
+    assert "バター-width" in items()
+    assert catalog_id_of(iid) == cid           # respelling, not a new concept
+    assert appmod.conn.execute(
+        "SELECT COUNT(*) AS n FROM item_catalog WHERE canonical_name=?",
+        (db.canonical("バター-width"),)).fetchone()["n"] == 1
+
+
+def test_edit_rename_identical_name_reports_no_change():
+    """Saving the name unchanged really is a no-op — `changed` must not lie
+    in the other direction either."""
+    iid = str(uuid.uuid4())
+    op(type="add", name="idem-name", item_id=iid)
+    _, res = op(type="edit", item_id=iid, name="idem-name")
+    assert res.json()["result"]["changed"] is False
+
+
+def test_edit_rename_case_only_with_qty_in_one_save():
+    """The sheet saves name+qty together; the respelling must not swallow the
+    qty edit (or vice versa)."""
+    iid = str(uuid.uuid4())
+    op(type="add", name="combo-case", item_id=iid)
+    op(type="edit", item_id=iid, name="Combo-Case", qty_note="1 jar")
+    lst = items()
+    assert lst["Combo-Case"]["id"] == iid and lst["Combo-Case"]["qty_note"] == "1 jar"
+
+
+def test_edit_rename_onto_own_alias_is_refused_and_reported():
+    """Typing an ALIAS of the item's own catalog row also resolves to that row,
+    but it is not a respelling: renaming display_name there would rename the
+    shared concept for every item reaching it by any other spelling. Refused —
+    and said so in the result, so the client can undo its optimistic text."""
+    iid, other = str(uuid.uuid4()), str(uuid.uuid4())
+    op(type="add", name="alias-concept", item_id=iid)
+    cid = catalog_id_of(iid)
+    appmod.conn.execute("UPDATE item_catalog SET aliases_json=? WHERE id=?",
+                        (json.dumps(["alias-nickname"]), cid))
+    _, shared = op(type="add", name="alias-nickname", item_id=other)
+    assert shared.json()["result"]["deduped"] is True   # the alias reaches this row
+    _, res = op(type="edit", item_id=iid, name="alias-nickname")
+    result = res.json()["result"]
+    assert result["rename_skipped"] == "alias"
+    assert result["name"] == "alias-concept"   # what the client must show instead
+    assert result["changed"] is False
+    row = appmod.conn.execute(
+        "SELECT display_name, canonical_name FROM item_catalog WHERE id=?",
+        (cid,)).fetchone()
+    assert row["display_name"] == "alias-concept"   # shared row uncorrupted
+    assert row["canonical_name"] == db.canonical("alias-concept")
+    assert catalog_id_of(iid) == cid                # item stayed put
+
+
+def test_edit_rename_to_variant_of_a_different_row_still_repoints():
+    """A canonical variant of some OTHER catalog row is a genuine rename, not a
+    respelling: it must still take the re-point path."""
+    src, dst = str(uuid.uuid4()), str(uuid.uuid4())
+    op(type="add", name="variant-src", item_id=src)
+    op(type="add", name="Variant-Dst", item_id=dst)
+    dst_cid = catalog_id_of(dst)
+    op(type="remove", item_id=dst)                  # off the list, row survives
+    _, res = op(type="edit", item_id=src, name="variant-dst")
+    assert res.json()["result"]["catalog_id"] == dst_cid
+    assert catalog_id_of(src) == dst_cid
+    assert "Variant-Dst" in items()                 # target row's spelling kept
 
 
 def test_revision_monotonic_and_replay_does_not_bump():
