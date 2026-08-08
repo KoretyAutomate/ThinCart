@@ -23,10 +23,10 @@ os.environ.setdefault(
 )
 sys.path.insert(0, str(Path(__file__).parent.parent / "server"))
 
-import app as appmod  # noqa: E402
-import catalog  # noqa: E402
-import db  # noqa: E402
-import plants  # noqa: E402
+import app as appmod
+import catalog
+import db
+import plants
 
 
 # --------------------------------------------------------------------------

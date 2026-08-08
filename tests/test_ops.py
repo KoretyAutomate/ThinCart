@@ -14,10 +14,10 @@ from pathlib import Path
 os.environ["THINCART_DB"] = str(Path(os.environ.get("PYTEST_TMP", "/tmp")) / f"thincart_test_{uuid.uuid4().hex}.db")
 sys.path.insert(0, str(Path(__file__).parent.parent / "server"))
 
-from fastapi.testclient import TestClient  # noqa: E402
+from fastapi.testclient import TestClient
 
-import app as appmod  # noqa: E402
-import db  # noqa: E402
+import app as appmod
+import db
 from datetime import UTC
 
 client = TestClient(appmod.app)

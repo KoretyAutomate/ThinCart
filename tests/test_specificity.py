@@ -19,11 +19,11 @@ os.environ.setdefault(
 )
 sys.path.insert(0, str(Path(__file__).parent.parent / "server"))
 
-from fastapi.testclient import TestClient  # noqa: E402
+from fastapi.testclient import TestClient
 
-import app as appmod  # noqa: E402
-import catalog  # noqa: E402
-import db  # noqa: E402
+import app as appmod
+import catalog
+import db
 
 client = TestClient(appmod.app)
 

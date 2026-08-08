@@ -132,6 +132,11 @@ def get_or_create_catalog(conn: sqlite3.Connection, name: str) -> int:
         "INSERT INTO item_catalog(canonical_name, display_name, emoji) VALUES(?, ?, ?)",
         (canon, name.strip(), emoji.lookup(canon)),
     )
+    if cur.lastrowid is None:  # pragma: no cover - sqlite always sets it on INSERT
+        # Returning None from a function typed `-> int` would hand a null
+        # catalog_id to every caller, which lands in the list rows as a
+        # dangling foreign key rather than as an error anyone can see.
+        raise RuntimeError(f"INSERT into item_catalog gave no rowid for {canon!r}")
     return cur.lastrowid
 
 

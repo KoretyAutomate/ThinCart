@@ -58,13 +58,26 @@ def cycle_label(median_days: float) -> str:
     raise AssertionError("unreachable")
 
 
-def due_score(timestamps: list[str], now: datetime) -> float | None:
-    """days_since_last / median_interval, or None if not enough history."""
+def _score_and_median(timestamps: list[str], now: datetime) -> tuple[float, float] | None:
+    """(days_since_last / median_interval, median_interval), or None.
+
+    Both numbers come from one median computation. `suggest` needs the median
+    as well as the score, and calling median_interval_days() a second time to
+    get it both repeated the work and threw away the proof that it is not None
+    — the second call's result was `float | None` again, with nothing left to
+    show it had already been checked.
+    """
     m = median_interval_days(timestamps)
     if not m or m <= 0:
         return None
     last = coalesce(timestamps)[-1]
-    return (now - last).total_seconds() / 86400 / m
+    return (now - last).total_seconds() / 86400 / m, m
+
+
+def due_score(timestamps: list[str], now: datetime) -> float | None:
+    """days_since_last / median_interval, or None if not enough history."""
+    got = _score_and_median(timestamps, now)
+    return None if got is None else got[0]
 
 
 def suggest(history: dict[int, list[str]], now: datetime) -> list[dict]:
@@ -75,10 +88,12 @@ def suggest(history: dict[int, list[str]], now: datetime) -> list[dict]:
     """
     out = []
     for catalog_id, timestamps in history.items():
-        score = due_score(timestamps, now)
-        if score is None or not (DUE_MIN <= score <= DUE_MAX):
+        got = _score_and_median(timestamps, now)
+        if got is None:
             continue
-        m = median_interval_days(timestamps)
+        score, m = got
+        if not (DUE_MIN <= score <= DUE_MAX):
+            continue
         out.append(
             {
                 "catalog_id": catalog_id,

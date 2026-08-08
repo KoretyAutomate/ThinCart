@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "server"))
 
-import cycles  # noqa: E402
+import cycles
 
 T0 = datetime(2026, 1, 1, 10, 0, tzinfo=UTC)
 

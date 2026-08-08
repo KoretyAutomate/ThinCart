@@ -14,8 +14,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "server"))
 
-import emoji  # noqa: E402
-from db import connect  # noqa: E402
+import emoji
+from db import connect
 
 
 def main() -> int:
