@@ -54,6 +54,10 @@
   }
   .cand:last-child { border-bottom:none; }
   .cand:active { background:#eef5f0; }
+  /* already on the list: shown rather than hidden, so retyping an item is a way
+     back into it (tap = edit sheet), not a dead-end empty dropdown */
+  .cand.on { background:#f4faf6; }
+  .cand.on .alt { color:var(--green-dark); font-weight:600; }
   .cand .cat-tag { margin-left:auto; color:var(--muted); font-size:.74rem; white-space:nowrap; }
   #name {
     flex:1; font-size:1rem; padding:10px 12px; border:1.5px solid #d4dcd4;
@@ -115,6 +119,12 @@
   #sheet .card {
     background:var(--card); width:100%; border-radius:18px 18px 0 0; padding:20px 18px
       calc(20px + env(safe-area-inset-bottom));
+    /* the card is taller than a phone (name/qty/note/budget/stores/9 categories/
+     * 4 buttons). #sheet is position:fixed with align-items:flex-end, so any
+     * overflow goes off the TOP of the screen where nothing can scroll to it —
+     * that put Quantity, the 2nd field, out of reach entirely. Cap and scroll. */
+    max-height:92vh; max-height:92dvh;
+    overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain;
   }
   #sheet h2 { margin:0 0 4px; font-size:1.05rem; }
   #sheet p { margin:0 0 16px; color:var(--muted); font-size:.88rem; }
@@ -492,6 +502,7 @@ const STR = {
     hist_empty:'No purchases yet — checked-off items show up here.',
     hist_note:'Tap “Not bought” to fix a mis-swipe: it removes the purchase from your history (so it won’t skew the cycle suggestions) and puts the item back on your list. A mistyped item is best handled by swiping it away as skip.',
     hist_restored:n=>`↩ ${n} back on the list`,
+    cand_on:'✓ on list', cand_edit:'tap to edit',
     note_label:'Note', sheet_budget:'Budget 💰', sheet_store:'Where to buy',
     store_none:'no preference', new_store_inline:'new store…',
     stores_title:'🏬 Stores & plan', at_h:'I’m at… (tags purchases for 6 h)',
@@ -538,6 +549,7 @@ const STR = {
     hist_empty:'まだ購入はありません — チェックした品目がここに表示されます。',
     hist_note:'スワイプ誤操作の修正:「買ってない」をタップすると、その購入が履歴から削除され（サイクル提案が歪みません）、品目がリストに戻ります。入力ミスはスキップとしてスワイプして消すのが基本です。',
     hist_restored:n=>`↩ ${n} をリストに戻しました`,
+    cand_on:'✓ リストにあり', cand_edit:'タップで編集',
     note_label:'メモ', sheet_budget:'予算 💰', sheet_store:'購入する店',
     store_none:'指定なし', new_store_inline:'新しい店…',
     stores_title:'🏬 店舗とプラン', at_h:'いまいる店（6時間有効）',
@@ -1104,37 +1116,69 @@ document.addEventListener('pointerdown', e => {
   if (!$('add').contains(e.target)) hideCands();
 });
 
+/* rank a name set against the query: 0 = prefix hit, 1 = substring, null = miss */
+function candRank(keys, q) {
+  let rank = null;
+  for (const k of keys.filter(Boolean).map(fold)) {
+    if (k.startsWith(q)) return 0;
+    if (k.includes(q)) rank = 1;
+  }
+  return rank;
+}
+
 function renderCands() {
   const q = fold($('name').value);
   const box = $('cands');
   if (!q) { hideCands(); return; }
-  const listed = new Set(view().map(i => canon(i.name)));
-  const hits = [];
+  const items = view();
+  const listed = new Map(items.map(i => [canon(i.name), i]));
+  const hits = [], seen = new Set();
+  /* Items ALREADY on the list are shown, not skipped. Retyping an item is how
+   * you find it again to change its quantity — hiding it made the dropdown come
+   * up empty with no way in. Matched off the LIST first (not just the catalog),
+   * so a just-added item with no catalog row yet still surfaces. Sort key is
+   * rank*2 (+1 when already listed) → within a rank, things you can still add
+   * come before things you already have. */
+  for (const it of items) {
+    const rank = candRank([it.name, it.name_en], q);
+    if (rank === null) continue;
+    seen.add(canon(it.name));
+    hits.push([rank * 2 + 1, it, it]);
+  }
   for (const c of catalog) {                    // catalog arrives most-bought-first
-    if (listed.has(canon(c.name))) continue;
-    let rank = null;
-    for (const k of [c.name, ...(c.aliases || [])].map(fold)) {
-      if (k.startsWith(q)) { rank = 0; break; }
-      if (k.includes(q)) rank = 1;
-    }
-    if (rank !== null) hits.push([rank, c]);
+    if (seen.has(canon(c.name))) continue;
+    const rank = candRank([c.name, ...(c.aliases || [])], q);
+    if (rank === null) continue;
+    // an alias can match a listed item the loop above missed (typed "milk",
+    // listed as 牛乳 with no name_en) — still an edit, never a duplicate add
+    const on = listed.get(canon(c.name)) || null;
+    hits.push([rank * 2 + (on ? 1 : 0), c, on]);
   }
   hits.sort((a, b) => a[0] - b[0]);             // stable → buys order kept within rank
   box.innerHTML = '';
-  for (const [, c] of hits.slice(0, 8)) {
+  for (const [, c, on] of hits.slice(0, 8)) {
     const div = document.createElement('div');
-    div.className = 'cand';
+    div.className = 'cand' + (on ? ' on' : '');
     div.innerHTML = '<span></span><span></span><span class="alt"></span><span class="cat-tag"></span>';
-    div.children[0].textContent = catEmoji(c.category);
+    div.children[0].textContent = (on && on.emoji) || catEmoji(c.category);
     div.children[1].textContent = disp(c);
-    div.children[2].textContent = dispAlt(c);
-    div.children[3].textContent = c.category ? (CATS[c.category] || CATS.other)[lang==='ja'?1:2] : '';
+    div.children[2].textContent = on
+      ? T().cand_on + (on.qty_note ? ' · ' + on.qty_note : '')
+      : dispAlt(c);
+    div.children[3].textContent = on ? T().cand_edit
+      : (c.category ? (CATS[c.category] || CATS.other)[lang==='ja'?1:2] : '');
     div.addEventListener('pointerdown', e => {
       e.preventDefault();                        // fires before blur → keyboard stays
-      enqueue({ type:'add', name:c.name, qty_note:$('qty').value.trim(),
-                item_id:uuid(), cat:c.category });
+      const qty = $('qty').value.trim();
       $('name').value = ''; $('qty').value = '';
       hideCands();
+      if (on) {          // already on the list → open the editor instead of re-adding
+        $('name').blur();                        // keyboard would cover the sheet
+        openSheet(on);
+        if (qty) $('sheet-qty').value = qty;     // a qty typed in the add row carries in
+        return;
+      }
+      enqueue({ type:'add', name:c.name, qty_note:qty, item_id:uuid(), cat:c.category });
       $('name').focus();
     });
     box.appendChild(div);
