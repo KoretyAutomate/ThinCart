@@ -1016,8 +1016,14 @@ function renderStoreOpts() {
   };
   box.appendChild(inp);
 }
-function closeSheet() { $('sheet').style.display = 'none'; editState = null; }
+/* set when the sheet was opened from a candidate in the add row: that text is
+ * the user's unsaved input and is only discarded once the edit actually saves */
+let clearAddRowOnSave = false;
+function closeSheet() {
+  $('sheet').style.display = 'none'; editState = null; clearAddRowOnSave = false;
+}
 function openSheet(it) {
+  clearAddRowOnSave = false;
   editState = { it, category: it.category || 'other',
                 // only an EXPLICIT preference preselects — a history-derived
                 // recommendation must not silently become a pin on Save
@@ -1030,6 +1036,10 @@ function openSheet(it) {
   renderStoreOpts();
   renderCatOpts();
   $('sheet').style.display = 'flex';
+  // the card is a scroll container and is REUSED across opens — without this it
+  // reopens wherever the last edit left it (e.g. down at Remove/Cancel), which
+  // puts Name and Quantity back off-screen, the very thing the cap fixed
+  $('sheet').querySelector('.card').scrollTop = 0;
   // size the note box to its content (scrollHeight is 0 while hidden — do it
   // after display:flex); grows as the user types, capped at ~5 lines
   const ta = $('sheet-note-input');
@@ -1057,6 +1067,7 @@ function saveSheet() {
   const origStore = it.store_source === 'preferred' ? it.store : '';
   if ((editState.store || '') !== origStore)       { fields.store = editState.store || ''; changed = true; }
   if (changed) enqueue(fields);
+  if (clearAddRowOnSave) { $('name').value = ''; $('qty').value = ''; }
   closeSheet();
 }
 $('sheet-save').onclick = saveSheet;
@@ -1132,7 +1143,19 @@ function renderCands() {
   if (!q) { hideCands(); return; }
   const items = view();
   const listed = new Map(items.map(i => [canon(i.name), i]));
-  const hits = [], seen = new Set();
+  /* Which listed item does this catalog row mean? Identity is by ALIAS on the
+   * server (get_or_create_catalog resolves "milk" onto the 牛乳 row), so the
+   * display name alone is not enough: an offline-added "milk" would otherwise
+   * not match the 牛乳 row, the row would render as a fresh add, and the add
+   * would dedupe server-side — throwing away the qty the user just typed. */
+  const listedFor = c => {
+    for (const k of [c.name, c.name_en, ...(c.aliases || [])]) {
+      const m = k && listed.get(canon(k));
+      if (m) return m;
+    }
+    return null;
+  };
+  const hits = [], seen = new Set(), shown = new Set();
   /* Items ALREADY on the list are shown, not skipped. Retyping an item is how
    * you find it again to change its quantity — hiding it made the dropdown come
    * up empty with no way in. Matched off the LIST first (not just the catalog),
@@ -1143,15 +1166,16 @@ function renderCands() {
     const rank = candRank([it.name, it.name_en], q);
     if (rank === null) continue;
     seen.add(canon(it.name));
+    shown.add(it.id);
     hits.push([rank * 2 + 1, it, it]);
   }
   for (const c of catalog) {                    // catalog arrives most-bought-first
     if (seen.has(canon(c.name))) continue;
     const rank = candRank([c.name, ...(c.aliases || [])], q);
     if (rank === null) continue;
-    // an alias can match a listed item the loop above missed (typed "milk",
-    // listed as 牛乳 with no name_en) — still an edit, never a duplicate add
-    const on = listed.get(canon(c.name)) || null;
+    const on = listedFor(c);
+    if (on && shown.has(on.id)) continue;       // same item, already offered above
+    if (on) shown.add(on.id);
     hits.push([rank * 2 + (on ? 1 : 0), c, on]);
   }
   hits.sort((a, b) => a[0] - b[0]);             // stable → buys order kept within rank
@@ -1170,14 +1194,17 @@ function renderCands() {
     div.addEventListener('pointerdown', e => {
       e.preventDefault();                        // fires before blur → keyboard stays
       const qty = $('qty').value.trim();
-      $('name').value = ''; $('qty').value = '';
       hideCands();
       if (on) {          // already on the list → open the editor instead of re-adding
         $('name').blur();                        // keyboard would cover the sheet
         openSheet(on);
         if (qty) $('sheet-qty').value = qty;     // a qty typed in the add row carries in
+        // the add row is NOT cleared here: cancelling the sheet must give the
+        // user their typed text back, so it is cleared only once a save lands
+        clearAddRowOnSave = true;
         return;
       }
+      $('name').value = ''; $('qty').value = '';
       enqueue({ type:'add', name:c.name, qty_note:qty, item_id:uuid(), cat:c.category });
       $('name').focus();
     });
