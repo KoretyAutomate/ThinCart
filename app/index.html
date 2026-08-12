@@ -224,11 +224,13 @@
     border:none; background:#d3e8d9; color:var(--green-dark); border-radius:999px;
     width:22px; height:22px; font-size:.8rem; line-height:1; cursor:pointer; padding:0;
   }
-  #plants, #lang, #hist, #stores-btn {
+  #plants, #lang, #hist, #stores-btn, #trips {
     background:#ffffff2b; border:none; color:#fff; font-size:.8rem; font-weight:700;
     padding:5px 8px; border-radius:999px; cursor:pointer; white-space:nowrap;
     flex-shrink:0;
   }
+  /* unreviewed trips are the only reason to open the panel — say how many */
+  #trips.pending { background:var(--amber); color:#fff; }
   .cand .alt { color:var(--muted); font-size:.8rem; }
   #ideas {
     position:fixed; inset:0; background:var(--bg); z-index:35; display:none;
@@ -259,7 +261,7 @@
          flex-direction:column; }
   #cyc header { position:static; }
   #cyc .body { flex:1; overflow-y:auto; padding:14px 16px 40px; }
-  #cyc h3 { font-size:.78rem; letter-spacing:.08em; text-transform:uppercase;
+  #cyc h3, #trip-panel h3 { font-size:.78rem; letter-spacing:.08em; text-transform:uppercase;
             color:var(--muted); margin:18px 2px 8px; }
   #cyc .topbtn { background:#ffffff2b; border:none; color:#fff; font-size:.8rem;
     font-weight:700; padding:5px 12px; border-radius:999px; cursor:pointer; }
@@ -275,6 +277,13 @@
   .cycrow .bar i { display:block; height:100%; background:var(--green); }
   .cycrow.over .bar i { background:var(--amber); }
   .cyc-note { color:var(--muted); font-size:.8rem; margin:20px 2px; }
+  /* "might need this week" is a softer call to action than "buy now" — a left
+     rule rather than the full due highlight, so the two never look alike */
+  .cycrow.tier-potential { border-left:3px solid var(--amber); }
+  /* nothing due: real history, but no call to action this week */
+  .cycrow.tier-none { opacity:.62; }
+  .cycrow.tier-none .bar { visibility:hidden; }
+  .chip.maybe { border-style:dashed; }
   #hist-panel { position:fixed; inset:0; background:var(--bg); z-index:35; display:none;
                 flex-direction:column; }
   #hist-panel header { position:static; }
@@ -294,6 +303,35 @@
   }
   .histrow .undo-btn:disabled { opacity:.45; cursor:default; }
   .hist-note { color:var(--muted); font-size:.8rem; margin:20px 2px; }
+  /* ---- travel panel: review the days the calendar thinks you were away ---- */
+  #trip-panel { position:fixed; inset:0; background:var(--bg); z-index:35; display:none;
+                flex-direction:column; }
+  #trip-panel header { position:static; }
+  #trip-panel .body { flex:1; overflow-y:auto; padding:14px 16px 40px; }
+  #trip-panel .topbtn { background:#ffffff2b; border:none; color:#fff; font-size:.8rem;
+    font-weight:700; padding:5px 12px; border-radius:999px; cursor:pointer; }
+  .triprow { background:var(--card); border-radius:12px; padding:12px 14px; margin-bottom:8px;
+             box-shadow:0 1px 2px #0000000a; }
+  .triprow.settled { opacity:.55; }
+  .triprow .when { font-weight:700; font-size:.95rem; }
+  .triprow .what { font-size:.9rem; overflow-wrap:anywhere; margin-top:2px; }
+  .triprow .why  { color:var(--muted); font-size:.76rem; margin-top:3px; }
+  .triprow .acts { display:flex; gap:8px; margin-top:10px; }
+  .triprow .acts button {
+    flex:1; border-radius:999px; padding:9px 10px; font-size:.85rem; font-weight:700;
+    cursor:pointer; border:1.5px solid transparent;
+  }
+  .triprow .yes { background:#e8f6ec; border-color:#bfe3c9; color:#1c6b33; }
+  .triprow .no  { background:#fbe9e5; border-color:#e6c6bd; color:var(--red); }
+  .triprow .acts button[aria-pressed="true"] { outline:2px solid currentColor; }
+  .trip-add { display:flex; gap:8px; margin:6px 0 4px; }
+  .trip-add input { flex:1; padding:9px 11px; border:1px solid #dfe4e0; border-radius:10px;
+                    font-size:.9rem; background:var(--card); color:inherit; }
+  .trip-add button { border:none; background:var(--green); color:#fff; font-weight:700;
+                     border-radius:10px; padding:9px 14px; cursor:pointer; }
+  .trip-note { color:var(--muted); font-size:.8rem; margin:20px 2px; }
+  .trip-status { font-size:.8rem; margin:2px 2px 14px; }
+  .trip-status.bad { color:var(--red); }
 </style>
 </head>
 <body>
@@ -301,6 +339,7 @@
   <h1>ThinCart</h1>
   <button id="stores-btn" aria-label="Stores">🏬</button>
   <button id="hist" aria-label="History">🕘</button>
+  <button id="trips" aria-label="Travel">✈️</button>
   <button id="lang">🌐 EN</button>
   <button id="plants">🌱 –/30</button>
   <span id="pill" class="syncing">…</span>
@@ -326,8 +365,12 @@
   <div class="body">
     <h3 id="cyc-due-h"></h3>
     <div id="cyc-due"></div>
+    <h3 id="cyc-soon-h" hidden></h3>
+    <div id="cyc-soon" hidden></div>
     <h3 id="cyc-all-h"></h3>
     <div id="cyc-all"></div>
+    <h3 id="cyc-once-h" hidden></h3>
+    <div id="cyc-once"></div>
     <p class="cyc-note" id="cyc-note"></p>
   </div>
 </div>
@@ -340,6 +383,24 @@
   <div class="body">
     <div id="hist-list"></div>
     <p class="hist-note" id="hist-note"></p>
+  </div>
+</div>
+
+<div id="trip-panel">
+  <header>
+    <h1 id="trip-h1"></h1>
+    <button class="topbtn" id="trip-sync"></button>
+    <button class="topbtn" id="trip-close">✕</button>
+  </header>
+  <div class="body">
+    <p class="trip-status" id="trip-status"></p>
+    <h3 id="trip-add-h"></h3>
+    <div class="trip-add">
+      <input id="trip-day" type="date">
+      <button id="trip-day-go"></button>
+    </div>
+    <div id="trip-list"></div>
+    <p class="trip-note" id="trip-note"></p>
   </div>
 </div>
 
@@ -491,11 +552,36 @@ const STR = {
     added_btn:'✓ added', added:n=>`＋ ${n} added to list`,
     new_plants:(n,l)=>`+${n} new plants: ${l}`,
     tray_more:n=>`+${n} more…`, cyc_title:'📊 Purchase cycles',
-    cyc_due_h:'Due now — tap to add', cyc_all_h:'Everything the app is tracking',
+    cyc_due_h:'Buy now — tap to add', cyc_all_h:'Everything the app is tracking',
     cyc_none_due:'Nothing due right now.',
     cyc_none:'No learned cycles yet — items appear after 3 purchases.',
-    cyc_note:'An item earns a cycle after 3 purchases. It gets suggested at ~85% of its cycle and retires if 3× overdue (seasonal). ✓ = already on the list.',
+    cyc_note:'Everything you have ever bought is listed here, grouped by how many weeks apart you buy it. The top section is what to buy now — due, on a rhythm worth trusting. The second is what may run out before the week is out, including items that are due but whose history is too thin or too erratic to be sure about. Cycles are measured from your most recent purchases, so a rhythm that changed stops arguing with the one in force now. ✓ = already on the list. Days are counted at home — travel days from your calendar are skipped, and a week spent away asks for almost nothing.',
+    cyc_once:'bought once',
+    cyc_once_h:n=>`Bought once — no cycle yet (${n})`,
+    cyc_soon_h:d=>`Might need this week · ${Math.round(d)} days at home`,
+    cyc_weekly:'weekly', cyc_biweekly:'every 2 weeks',
+    cyc_nweeks:n=>`every ${n} weeks`, cyc_subweekly:'more than weekly',
+    due_in:d=>`due in ${d}d`, due_over:d=>`${d}d over`,
+    tier_evidence:(n,s)=>`${n} purchases · spread ${s}`,
+    tier_shaky:'not enough consistent history to be sure',
     last_bought:d=>`bought ${d}d ago`,
+    // the cycles panel counts in-town days, so it must not say "days ago"
+    cyc_since:d=>`${d}d at home since`,
+    trip_title:'✈️ Travel',
+    trip_sync:'↻ sync',
+    trip_add_h:'Mark a day away by hand',
+    trip_add_go:'Away',
+    trip_h_pending:'Detected — were you away? (not counted yet)',
+    trip_h_settled:'Already reviewed',
+    trip_yes:'Away', trip_no:'I was home',
+    trip_none:'No trips detected yet.',
+    trip_unlinked:'No calendar linked yet. On the server, run: python3 calendar_sync.py --authorize',
+    trip_synced:t=>`Calendar synced ${t}.`,
+    trip_never:'Calendar linked — not synced yet.',
+    trip_error:e=>`Last sync failed: ${e}`,
+    trip_days:n=>n === 1 ? '1 day' : `${n} days`,
+    trip_manual:'marked by hand',
+    trip_note:'Purchase cycles are measured in days at home, so a week away does not read as a week of groceries. Detected trips do NOT count until you confirm them — until then they are only shown here, and your cycles are unchanged. Days you confirm or reject are never overwritten by a later calendar sync.',
     hist_title:'🕘 Purchase history',
     hist_undo:'Not bought',
     hist_today:'today', hist_by:n=>`by ${n}`,
@@ -514,8 +600,6 @@ const STR = {
     est:n=>`~💰${n}`, plus_unk:n=>`+${n}?`, src_hist:'(usual)',
     del_confirm:n=>`Delete ${n}? Purchases stay in history but forget this store.`,
     stores_note:'Long-press an item to pin its store, or pick “I’m at…” while shopping — check-offs then remember where things were bought and the plan fills itself in.',
-    cycles:{'twice a week':'twice a week', weekly:'weekly', 'bi-weekly':'bi-weekly',
-            monthly:'monthly', occasional:'occasional'},
   },
   ja: {
     add_ph:'追加… (牛乳, 卵, りんご など)', qty_ph:'数量', tray:'提案 — そろそろ買い時',
@@ -538,11 +622,35 @@ const STR = {
     added_btn:'✓ 追加済み', added:n=>`＋ ${n} をリストに追加`,
     new_plants:(n,l)=>`+${n}種の植物: ${l}`,
     tray_more:n=>`他${n}件…`, cyc_title:'📊 購入サイクル',
-    cyc_due_h:'そろそろ買い時 — タップで追加', cyc_all_h:'追跡中のすべての品目',
+    cyc_due_h:'いま買うもの — タップで追加', cyc_all_h:'追跡中のすべての品目',
     cyc_none_due:'いま買い時のものはありません。',
     cyc_none:'学習済みサイクルはまだありません — 3回購入すると表示されます。',
-    cyc_note:'3回購入するとサイクルを学習します。サイクルの約85%で提案され、3倍超過すると（季節品として）引退します。✓ = リストに追加済み。',
+    cyc_note:'これまでに購入したすべての品目を、購入間隔の「週数」でグループ分けして表示します。上のセクションは「今買うもの」— 購入時期が来ており、リズムも安定しているもの。二番目は「今週必要かも」— 今週中に切れそうなものと、時期は来ているが履歴が少ない・間隔がばらついて確信できないもの。サイクルは直近の購入から算出するため、変わった習慣が現在のリズムの邪魔をしません。✓ = リストに追加済み。日数は在宅日で数えます — カレンダーの旅行日は除外され、一週間不在ならほとんど提案されません。',
+    cyc_once:'購入1回',
+    cyc_once_h:n=>`購入1回 — サイクル未学習 (${n})`,
+    cyc_soon_h:d=>`今週必要かも · 在宅${Math.round(d)}日`,
+    cyc_weekly:'毎週', cyc_biweekly:'2週ごと',
+    cyc_nweeks:n=>`${n}週ごと`, cyc_subweekly:'週2回以上',
+    due_in:d=>`あと${d}日`, due_over:d=>`${d}日超過`,
+    tier_evidence:(n,s)=>`購入${n}回 · ばらつき ${s}`,
+    tier_shaky:'履歴が少なく確実ではありません',
     last_bought:d=>`${d}日前に購入`,
+    cyc_since:d=>`在宅${d}日経過`,
+    trip_title:'✈️ 旅行',
+    trip_sync:'↻ 同期',
+    trip_add_h:'手動で不在日を登録',
+    trip_add_go:'不在',
+    trip_h_pending:'検出されました — 不在でしたか？（未反映）',
+    trip_h_settled:'確認済み',
+    trip_yes:'不在だった', trip_no:'在宅だった',
+    trip_none:'旅行はまだ検出されていません。',
+    trip_unlinked:'カレンダー未連携です。サーバーで python3 calendar_sync.py --authorize を実行してください。',
+    trip_synced:t=>`カレンダー同期: ${t}`,
+    trip_never:'カレンダー連携済み — まだ同期していません。',
+    trip_error:e=>`前回の同期に失敗: ${e}`,
+    trip_days:n=>`${n}日間`,
+    trip_manual:'手動で登録',
+    trip_note:'購入サイクルは在宅日数で測るため、1週間の旅行が「1週間分の買い物」として扱われることはありません。検出された旅行は、確認するまでサイクルに反映されません（表示のみ）。確認・却下した日は、以降のカレンダー同期で上書きされません。',
     hist_title:'🕘 購入履歴',
     hist_undo:'買ってない',
     hist_today:'今日', hist_by:n=>`${n}`,
@@ -561,8 +669,6 @@ const STR = {
     est:n=>`約💰${n}`, plus_unk:n=>`+${n}?`, src_hist:'（いつもの）',
     del_confirm:n=>`${n}を削除しますか？購入履歴は残りますが、この店の記録は消えます。`,
     stores_note:'品目を長押しして店を指定するか、買い物中に「いまいる店」を選ぶと、チェックした品の購入場所を記憶してプランが自動で埋まります。',
-    cycles:{'twice a week':'週2回', weekly:'毎週', 'bi-weekly':'隔週',
-            monthly:'毎月', occasional:'たまに'},
   },
 };
 let lang = localStorage.getItem('pc_lang') || 'en';
@@ -606,6 +712,11 @@ function applyLang() {
   $('cyc-note').textContent = T().cyc_note;
   $('hist-h1').textContent = T().hist_title;
   $('hist-note').textContent = T().hist_note;
+  $('trip-h1').textContent = T().trip_title;
+  $('trip-sync').textContent = T().trip_sync;
+  $('trip-add-h').textContent = T().trip_add_h;
+  $('trip-day-go').textContent = T().trip_add_go;
+  $('trip-note').textContent = T().trip_note;
   $('sheet-note-label').textContent = T().note_label;
   $('sheet-budget-label').textContent = T().sheet_budget;
   $('sheet-store-label').textContent = T().sheet_store;
@@ -676,7 +787,11 @@ function renderTray() {
     chip.innerHTML = `<span class="nm"></span><span class="lbl"></span>
                       <button class="snz" aria-label="Snooze">✕</button>`;
     chip.querySelector('.nm').textContent = '＋ ' + disp(s);
-    chip.querySelector('.lbl').textContent = T().cycles[s.label] || s.label;
+    // a potential suggestion rests on thin or erratic history — say so, don't
+    // dress it up as a settled rhythm
+    chip.querySelector('.lbl').textContent =
+      cycWeeks(s) + (s.tier === 'potential' ? ' ?' : '');
+    chip.classList.toggle('maybe', s.tier === 'potential');
     chip.onclick = () => enqueue({ type:'add', name:s.name, qty_note:'', item_id:uuid() });
     chip.querySelector('.snz').onclick = e => {
       e.stopPropagation();
@@ -694,6 +809,35 @@ function renderTray() {
 }
 
 /* ============ full suggestion / cycles panel ============ */
+/* Cycles are grouped in whole weeks — weekly, bi-weekly, every 3 weeks, with no
+   upper bin. The measured days ride alongside, because rounding 17 days to
+   "bi-weekly" must not be mistaken for the number the app is actually using. */
+const cycWeeks = c =>
+  c.weeks === null || c.weeks === undefined ? T().cyc_subweekly
+  : c.weeks === 1 ? T().cyc_weekly
+  : c.weeks === 2 ? T().cyc_biweekly
+  : T().cyc_nweeks(c.weeks);
+
+const cycText = c =>
+  c.median_days === null || c.median_days === undefined
+    ? T().cyc_once
+    : `${cycWeeks(c)} · ${Math.round(c.median_days)}d`;
+
+/* "due in 3 days" / "4 days over" — the number a person can act on, where the
+   raw 0.71 score never was. */
+const dueText = c => {
+  if (c.due_in_days === null || c.due_in_days === undefined) return '';
+  const d = Math.round(c.due_in_days);
+  return d > 0 ? T().due_in(d) : T().due_over(Math.abs(d));
+};
+
+/* The evidence behind the tier stays available on hover rather than as a badge
+   on every row: it explains a suggestion when questioned, without competing
+   with the suggestion itself. */
+const evidence = c =>
+  T().tier_evidence(c.events, c.spread === null ? '—' : c.spread)
+  + (c.trusted ? '' : ' · ' + T().tier_shaky);
+
 $('tray-label').onclick = openCycles;
 $('cyc-close').onclick = () => $('cyc').style.display = 'none';
 
@@ -702,30 +846,50 @@ async function openCycles() {
   $('cyc-due').innerHTML = $('cyc-all').innerHTML = '<div class="cyc-note">…</div>';
   try {
     const res = await fetch('/api/cycles');
-    const rows = (await res.json()).cycles;
+    const body = await res.json();
+    const rows = body.cycles;
     const mk = c => {
       const div = document.createElement('div');
-      div.className = 'cycrow' + (c.due ? ' due' : '') + (c.score > 1.15 ? ' over' : '');
+      const tier = c.tier || 'none';
+      div.className = 'cycrow tier-' + tier
+        + (c.tier ? ' due' : '') + (c.score > 1.15 ? ' over' : '');
       div.innerHTML = `<span class="nm"></span>
         <span class="meta"><b></b><br><span class="ago"></span>
         <span class="bar"><i></i></span></span>`;
-      div.querySelector('.nm').textContent = (c.due ? '＋ ' : '') + disp(c)
+      div.querySelector('.nm').textContent = (c.tier ? '＋ ' : '') + disp(c)
         + (c.on_list ? ' ✓' : '');
-      div.querySelector('b').textContent = T().cycles[c.label] || c.label;
-      div.querySelector('.ago').textContent = T().last_bought(Math.round(c.days_since));
-      div.querySelector('.bar i').style.width = Math.min(c.score * 100, 100) + '%';
-      if (c.due) div.onclick = () => {
+      // the week is the grouping; the measured days are what actually decides
+      // due-ness, so show both rather than let the rounding look like the truth
+      div.querySelector('b').textContent = cycText(c);
+      div.title = evidence(c);
+      div.querySelector('.ago').textContent = dueText(c);
+      div.querySelector('.bar i').style.width =
+        c.score === null ? '0%' : Math.min(c.score * 100, 100) + '%';
+      if (c.tier) div.onclick = () => {
         enqueue({ type:'add', name:c.name, qty_note:'', item_id: uuid() });
         div.remove();
         showToast(T().added(disp(c)), () => {});
       };
       return div;
     };
-    const due = rows.filter(c => c.due), rest = rows.filter(c => !c.due);
-    $('cyc-due').innerHTML = due.length ? '' : `<div class="cyc-note">${T().cyc_none_due}</div>`;
-    due.forEach(c => $('cyc-due').appendChild(mk(c)));
-    $('cyc-all').innerHTML = rest.length ? '' : `<div class="cyc-note">${T().cyc_none}</div>`;
-    rest.forEach(c => $('cyc-all').appendChild(mk(c)));
+    /* Four sections, in the order a shopping trip needs them: buy these, you
+       might need these before the week is out, everything else being tracked,
+       and the bought-once tail. */
+    const fill = (box, list, empty) => {
+      box.innerHTML = list.length ? '' : `<div class="cyc-note">${empty}</div>`;
+      list.forEach(c => box.appendChild(mk(c)));
+    };
+    fill($('cyc-due'), rows.filter(c => c.tier === 'high'), T().cyc_none_due);
+    const soon = rows.filter(c => c.tier === 'potential');
+    $('cyc-soon-h').textContent = T().cyc_soon_h(body.week_horizon);
+    $('cyc-soon-h').hidden = !soon.length;
+    fill($('cyc-soon'), soon, '');
+    $('cyc-soon').hidden = !soon.length;
+    fill($('cyc-all'), rows.filter(c => !c.tier && c.median_days !== null), T().cyc_none);
+    const once = rows.filter(c => c.median_days === null);
+    $('cyc-once-h').textContent = T().cyc_once_h(once.length);
+    $('cyc-once-h').hidden = !once.length;
+    fill($('cyc-once'), once, '');
   } catch (e) {
     $('cyc-due').innerHTML = `<div class="cyc-note">offline</div>`;
   }
@@ -768,6 +932,114 @@ async function openHistory() {
       showToast(T().hist_restored(disp(h)), () => {});
     };
     box.appendChild(div);
+  }
+}
+
+/* ============ travel panel: review the days the calendar calls "away" ============
+   Detection only ever proposes. Every day here is one tap from being corrected,
+   and the server never overwrites a day that has been ruled on — which is what
+   makes it safe for the heuristics to guess in the first place. */
+$('trips').onclick = openTrips;
+$('trip-close').onclick = () => $('trip-panel').style.display = 'none';
+
+$('trip-sync').onclick = async () => {
+  const btn = $('trip-sync');
+  btn.disabled = true; btn.textContent = '…';
+  try {
+    const res = await fetch('/api/calendar/sync', { method:'POST' });
+    if (!res.ok) throw new Error((await res.json()).detail || res.status);
+    await openTrips();
+  } catch (e) {
+    setTripStatus(T().trip_error(e.message), true);
+  } finally {
+    btn.disabled = false; btn.textContent = T().trip_sync;
+  }
+};
+
+$('trip-day-go').onclick = async () => {
+  const day = $('trip-day').value;
+  if (!day) return;
+  await setAway([day], 'confirmed');
+  $('trip-day').value = '';
+  openTrips();
+};
+
+function setTripStatus(text, bad) {
+  const el = $('trip-status');
+  el.textContent = text;
+  el.classList.toggle('bad', !!bad);
+}
+
+/* A trip is a run of days; the user rules on the whole run at once, but the
+   server stores days, so partial trips stay expressible via the date field. */
+async function setAway(days, status) {
+  for (const day of days) {
+    await fetch('/api/away', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ day, status }),
+    });
+  }
+}
+
+function fmtSpan(trip) {
+  const opts = { month:'short', day:'numeric' };
+  const a = new Date(trip.start + 'T12:00:00').toLocaleDateString(lang === 'ja' ? 'ja-JP' : 'en-US', opts);
+  if (trip.start === trip.end) return a;
+  const b = new Date(trip.end + 'T12:00:00').toLocaleDateString(lang === 'ja' ? 'ja-JP' : 'en-US', opts);
+  return `${a} – ${b}`;
+}
+
+async function openTrips() {
+  $('trip-panel').style.display = 'flex';
+  const box = $('trip-list');
+  box.innerHTML = `<div class="trip-note">…</div>`;
+  let data;
+  try {
+    data = await (await fetch('/api/away')).json();
+  } catch (e) {
+    box.innerHTML = `<div class="trip-note">offline</div>`;
+    return;
+  }
+
+  if (!data.linked) setTripStatus(T().trip_unlinked, true);
+  else if (data.last_error) setTripStatus(T().trip_error(data.last_error), true);
+  else if (data.last_sync) setTripStatus(T().trip_synced(new Date(data.last_sync).toLocaleString()), false);
+  else setTripStatus(T().trip_never, false);
+
+  box.innerHTML = '';
+  if (!data.trips.length) { box.innerHTML = `<div class="trip-note">${T().trip_none}</div>`; return; }
+
+  const mk = trip => {
+    const div = document.createElement('div');
+    div.className = 'triprow' + (trip.pending ? '' : ' settled');
+    div.innerHTML = `<div class="when"></div><div class="what"></div><div class="why"></div>
+      <div class="acts"><button class="yes"></button><button class="no"></button></div>`;
+    div.querySelector('.when').textContent =
+      `${fmtSpan(trip)} · ${T().trip_days(trip.days.length)}`;
+    div.querySelector('.what').textContent =
+      [trip.summary, trip.location].filter(Boolean).join(' · ') || T().trip_manual;
+    div.querySelector('.why').textContent = trip.reason;
+    const yes = div.querySelector('.yes'), no = div.querySelector('.no');
+    yes.textContent = T().trip_yes; no.textContent = T().trip_no;
+    if (!trip.pending) yes.setAttribute('aria-pressed', 'true');
+    const rule = async status => {
+      yes.disabled = no.disabled = true;
+      await setAway(trip.days, status);
+      openTrips();  // cycles moved — re-read rather than guess at the new state
+    };
+    yes.onclick = () => rule('confirmed');
+    no.onclick = () => rule('rejected');
+    return div;
+  };
+
+  const pending = data.trips.filter(t => t.pending), settled = data.trips.filter(t => !t.pending);
+  for (const [rows, label] of [[pending, T().trip_h_pending], [settled, T().trip_h_settled]]) {
+    if (!rows.length) continue;
+    const h = document.createElement('h3');
+    h.textContent = label;
+    box.appendChild(h);
+    rows.forEach(t => box.appendChild(mk(t)));
   }
 }
 
@@ -870,6 +1142,11 @@ function render() {
       && !$('stores-panel').contains(document.activeElement)) renderStores();
   if (base.plants)
     $('plants').textContent = `🌱 ${base.plants.count}/${base.plants.target}`;
+  // detected days nobody has ruled on yet — they are already bending the
+  // cycles, so the button says how many rather than waiting to be found
+  const pend = base.away_pending || 0;
+  $('trips').textContent = pend ? `✈️ ${pend}` : '✈️';
+  $('trips').classList.toggle('pending', pend > 0);
   const items = view(), list = $('list');
   list.innerHTML = '';
   $('empty').hidden = items.length > 0;

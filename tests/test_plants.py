@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "server"))
 from fastapi.testclient import TestClient
 
 import app as appmod
+import ideas
 import catalog
 import db
 import llm
@@ -129,7 +130,7 @@ def test_ideas_endpoint_shapes_and_cache(monkeypatch):
         return {"suggestions": [{"plant": "chard", "buy": "スイスチャード"}]}
 
     monkeypatch.setattr(llm, "chat_json", fake_llm(respond))
-    appmod.ideas_cache["data"] = None
+    ideas.cache["data"] = None
 
     data = client.get("/api/ideas?refresh=1").json()
     assert data["recipes"][0]["missing"] == ["豆腐"]
@@ -142,7 +143,7 @@ def test_ideas_endpoint_shapes_and_cache(monkeypatch):
 
 def test_ideas_llm_down_returns_503_not_crash(monkeypatch):
     monkeypatch.setattr(llm, "chat_json", fake_llm(None))
-    appmod.ideas_cache["data"] = None
+    ideas.cache["data"] = None
     assert client.get("/api/ideas?refresh=1").status_code == 503
     # and the list is unaffected
     assert client.get("/api/state").status_code == 200
@@ -164,7 +165,7 @@ def test_ideas_filters_already_eaten_plants(monkeypatch):
         }  # empty buy dropped too
 
     monkeypatch.setattr(llm, "chat_json", fake_llm(respond))
-    appmod.ideas_cache["data"] = None
+    ideas.cache["data"] = None
     data = client.get("/api/ideas?refresh=1").json()
     assert [s["plant"] for s in data["diversity"]] == ["kohlrabi"]
 

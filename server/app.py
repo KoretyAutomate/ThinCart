@@ -29,11 +29,11 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+import away
 import catalog
 import cycles
 import db
-import llm
-import plants
+import ideas
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("thincart")
@@ -49,6 +49,12 @@ sockets: set[WebSocket] = set()
 
 def now_iso() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
+
+
+# Feature modules own their own endpoints; they borrow the shared connection and
+# broadcast through bind() rather than importing app, which would be circular.
+# Routers are included at the bottom, after broadcast_state exists.
+ideas.bind(conn)
 
 
 class Op(BaseModel):
@@ -323,12 +329,20 @@ def apply_edit(op: Op, ts: str) -> dict:
 
 
 def apply_snooze(op: Op, ts: str) -> dict:
-    """Dismiss a suggestion: snooze for ½ its median cycle (PLAN.md), min 2 days."""
+    """Dismiss a suggestion: snooze for ½ its median cycle (PLAN.md), min 2 days.
+
+    The half-cycle is in in-town days, so the deadline is walked forward with
+    `Away.advance` — a snooze must not burn away while nobody is home to shop.
+    """
     if op.catalog_id is None:
         raise HTTPException(422, "snooze requires catalog_id")
     hist = db.purchase_history(conn).get(op.catalog_id, [])
-    half = (cycles.median_interval_days(hist) or 7.0) / 2
-    until = (datetime.fromisoformat(ts) + timedelta(days=max(half, 2.0))).isoformat(timespec="seconds")
+    away = db.away_set(conn)
+    # a potential item's own gap is a better snooze basis than the 7-day
+    # default; only a bought-once item has nothing of its own to go on
+    cycle = cycles.estimate(hist, away).cycle
+    half = (cycle if cycle is not None else 7.0) / 2
+    until = away.advance(datetime.fromisoformat(ts), max(half, 2.0)).isoformat(timespec="seconds")
     cur = conn.execute("UPDATE item_catalog SET snoozed_until=? WHERE id=?", (until, op.catalog_id))
     if cur.rowcount == 0:
         return {"noop": True}
@@ -401,6 +415,7 @@ async def enrich_sweeper() -> None:
 @app.on_event("startup")
 async def startup():
     asyncio.create_task(enrich_sweeper())
+    asyncio.create_task(away.sweeper())
 
 
 @app.post("/api/op")
@@ -455,38 +470,75 @@ async def get_catalog():
 
 @app.get("/api/cycles")
 async def get_cycles():
-    """Every item with a learned cycle (≥3 coalesced purchases): the full
-    suggestion list + what the engine knows, most-due first."""
+    """EVERY item the household has ever bought, with its confidence tier
+    (PLAN.md §1c), most-due first.
+
+    Scope is deliberately the whole purchase history, not just the items with a
+    learned median: an item bought once is real information, and hiding it made
+    the app look like it had forgotten the purchase. What separates the tiers is
+    how much is claimed about them, not whether they appear.
+
+    median_days and days_since are **in-town** days (PLAN.md §1b) — the panel
+    labels them as such, since "6 days since" reading as 9 calendar days is
+    otherwise indistinguishable from a bug.
+    """
     now = datetime.now(UTC)
+    away = db.away_set(conn)
+    now_iso_s = now.isoformat(timespec="seconds")
     on_list = {r["catalog_id"] for r in conn.execute("SELECT catalog_id FROM items")}
     out = []
     for cid, ts in db.purchase_history(conn).items():
-        m = cycles.median_interval_days(ts)
-        if not m:
-            continue
-        since = (now - cycles.coalesce(ts)[-1]).total_seconds() / 86400
+        est = cycles.estimate(ts, away)
         row = conn.execute(
             "SELECT display_name, aliases_json, snoozed_until FROM item_catalog WHERE id=?",
             (cid,),
         ).fetchone()
-        score = since / m
+        if row is None:
+            continue
+        score = est.score(now, away)
+        due_in = est.due_in_days(now, away)
+        # snoozed / already-listed items keep their numbers but lose their call
+        # to action: the panel still shows the rhythm, the tray stays quiet
+        silenced = cid in on_list or bool(row["snoozed_until"] and row["snoozed_until"] > now_iso_s)
+        tier = None if silenced else est.tier(now, away)
         out.append(
             {
                 "catalog_id": cid,
                 "name": row["display_name"],
                 "name_en": db.name_en(row["aliases_json"], row["display_name"]),
-                "label": cycles.cycle_label(m),
-                "median_days": round(m, 1),
-                "days_since": round(since, 1),
-                "score": round(score, 2),
-                "due": cycles.DUE_MIN <= score <= cycles.DUE_MAX
-                and cid not in on_list
-                and not (row["snoozed_until"] and row["snoozed_until"] > now.isoformat(timespec="seconds")),
+                "tier": tier,
+                "trusted": est.trusted,
+                "events": est.events,
+                # all None for a bought-once item: there is no interval to name
+                "weeks": est.weeks,
+                "label": cycles.cycle_label(est.cycle_days) if est.has_cycle else None,
+                "median_days": round(est.cycle_days, 1) if est.has_cycle else None,
+                "spread": round(est.spread, 2) if est.spread is not None else None,
+                "days_since": round(away.between(est.last, now), 1) if est.last else None,
+                "due_in_days": round(due_in, 1) if due_in is not None else None,
+                "score": round(score, 2) if score is not None else None,
+                "due": tier is not None,
                 "on_list": cid in on_list,
             }
         )
-    out.sort(key=lambda x: -x["score"])
-    return {"cycles": out}
+    # buy-now first, then coming-up, then merely tracked, then bought-once
+    order = {cycles.HIGH: 0, cycles.POTENTIAL: 1}
+    out.sort(key=lambda x: (order.get(x["tier"], 2), x["score"] is None, -(x["score"] or 0)))
+    return {
+        "cycles": out,
+        "away_days": len(away.days),
+        "unit": "in-town days",
+        "recent_intervals": cycles.RECENT_INTERVALS,
+        # in-town days the coming week holds — the horizon POTENTIAL is measured
+        # against, and near zero when the household is away for it
+        "week_horizon": round(cycles.week_horizon(now, away), 1),
+        "tiers": {
+            "high": sum(1 for c in out if c["tier"] == cycles.HIGH),
+            "potential": sum(1 for c in out if c["tier"] == cycles.POTENTIAL),
+            "tracked": sum(1 for c in out if c["tier"] is None and c["median_days"] is not None),
+            "once": sum(1 for c in out if c["median_days"] is None),
+        },
+    }
 
 
 @app.get("/api/history")
@@ -494,79 +546,6 @@ async def get_history(limit: int = 100):
     """Recent purchases, newest first — the History panel that lets a mis-swipe
     be corrected (undo_purchase) long after the ~8 s undo toast is gone."""
     return {"history": db.recent_history(conn, limit)}
-
-
-IDEAS_TTL_H = 6
-ideas_cache: dict = {"data": None, "at": None}
-
-
-def _recipes_prompt(available, on_list, plants) -> str:
-    return (
-        "You help a Japanese/English bilingual household diversify toward 30 different "
-        f"edible plants per week. Plants eaten this week: {json.dumps(plants)}.\n"
-        f"Ingredients they have (bought recently): {json.dumps(available, ensure_ascii=False)}.\n"
-        f"Already on their shopping list: {json.dumps(on_list, ensure_ascii=False)}.\n"
-        'Suggest 3 easy dinner recipes. Reply ONLY JSON: {"recipes": [{'
-        '"title": str (English, may add Japanese in parens), '
-        '"uses": [ingredients they already have], '
-        '"missing": [1-3 grocery items to buy, in the language the ingredient is usually '
-        "listed on their list], "
-        '"new_plants": [lowercase English plant tokens this adds beyond their week]}]}'
-    )
-
-
-def _diversity_prompt(recent_plants) -> str:
-    return (
-        f"A household ate these plants recently: {json.dumps(recent_plants)}.\n"
-        "Suggest 8 DIFFERENT edible plants, common in Japanese supermarkets, to broaden "
-        'their variety toward 30 plants/week. Reply ONLY JSON: {"suggestions": [{'
-        '"plant": lowercase English plant token, '
-        '"buy": the concrete grocery item to put on the list, in Japanese}]}'
-    )
-
-
-@app.get("/api/ideas")
-async def get_ideas(refresh: int = 0):
-    """Recipes + diversity suggestions (LLM). Cached; failure never blocks the list."""
-    if (
-        not refresh
-        and ideas_cache["data"]
-        and (datetime.now(UTC) - ideas_cache["at"]).total_seconds() < IDEAS_TTL_H * 3600
-    ):
-        return ideas_cache["data"]
-
-    available = [p["name"] for p in catalog.recent_purchases(conn)]
-    on_list = [i["name"] for i in db.state(conn)["items"]]
-    week = catalog.weekly_plants(conn)
-    month = catalog.weekly_plants(conn, window_days=30)
-
-    recipes, diversity = await asyncio.gather(
-        llm.chat_json(_recipes_prompt(available, on_list, week), max_tokens=700, timeout=90),
-        llm.chat_json(_diversity_prompt(month), max_tokens=400, timeout=90),
-    )
-    recipes = recipes.get("recipes") if isinstance(recipes, dict) else None
-    diversity = diversity.get("suggestions") if isinstance(diversity, dict) else None
-    if diversity is not None:
-        # the LLM sometimes suggests plants just eaten despite the prompt —
-        # enforce "different" deterministically against the 30-day set. Canonicalize
-        # the suggestion first, or a synonym ("capsicum" for an eaten "bell pepper")
-        # walks straight through the filter.
-        eaten = set(month)
-        diversity = [
-            s
-            for s in diversity
-            if isinstance(s, dict) and s.get("buy") and not set(plants.normalize([str(s.get("plant", ""))])) & eaten
-        ]
-    if recipes is None and diversity is None:
-        raise HTTPException(503, "LLM unavailable — list and sync are unaffected")
-
-    data = {
-        "recipes": recipes or [],
-        "diversity": diversity or [],
-        "generated_at": now_iso(),
-    }
-    ideas_cache["data"], ideas_cache["at"] = data, datetime.now(UTC)
-    return data
 
 
 @app.get("/health")
@@ -586,6 +565,11 @@ async def ws_endpoint(ws: WebSocket):
         pass
     finally:
         sockets.discard(ws)
+
+
+away.bind(away.Context(conn=conn, write_lock=write_lock, broadcast=broadcast_state, now_iso=now_iso))
+app.include_router(away.router)
+app.include_router(ideas.router)
 
 
 @app.get("/")

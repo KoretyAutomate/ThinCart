@@ -151,8 +151,10 @@ full-width Japanese characters.
 For each catalog item with **≥3 purchase events**:
 - intervals = successive `bought_at` deltas (days), after **coalescing events
   <1 day apart into one** (burst buys and double-checkoffs must not crush the
-  median toward zero); estimate = **median** (robust to one vacation/skip);
-  classify into bins: ≤4.5 d → "twice a week", ≤9 d → "weekly",
+  median toward zero); estimate = **median**. The median absorbs *one* stray
+  trip, but not a household that travels regularly — hence layer 1b, which
+  measures the deltas in **in-town days** instead of calendar days.
+  Classify into bins: ≤4.5 d → "twice a week", ≤9 d → "weekly",
   ≤18 d → "bi-weekly", ≤45 d → "monthly", else "occasional".
 - **Due score** = days_since_last / median_interval. Suggest when
   **0.85 ≤ score ≤ 3.0** and the item isn't already on the list; sort by score.
@@ -164,6 +166,133 @@ For each catalog item with **≥3 purchase events**:
 - Items with <3 events simply never appear — no cold-start noise.
 
 Deterministic, testable with synthetic histories, zero LLM dependency.
+
+## Intelligence layer 1b — cycles measured in in-town days (Google Calendar)
+
+A week away from home is not a week of groceries. Calendar-day intervals count
+travel as consumption, so every cycle an item has is inflated by however much
+the household happened to be gone, and the suggestion arrives late. Layer 1b
+subtracts the days spent out of town from every interval the estimator sees.
+
+**Unit change.** `median_days` and `days_since` are now *in-town* days. A
+"weekly" item is one bought every 7 days **at home**; the label bins are
+unchanged, because the quantity they describe is the one the household
+actually consumes against. With no away days recorded the arithmetic is
+identical to layer 1 — this is a refinement, not a replacement.
+
+**Subtraction is fractional, not whole-day.** Each away day contributes the
+overlap between its home-local midnight-to-midnight window and the interval,
+so a trip that starts mid-afternoon costs a fraction of that day, not all of
+it. Whole-day rounding on a 3-day gap is a >30 % error.
+
+- **Coalescing stays on wall-clock time.** Two checkoffs 20 minutes apart are
+  one shopping trip whether the household is home or in Boston; that rule is
+  about the physical act of shopping, not about consumption.
+- **Floor at zero, and never divide by it.** A pathological history (bought,
+  left town, returned, bought) can make an interval all-travel; intervals
+  clamp at 0 and a median of 0 disables suggestions for that item rather than
+  producing an infinite due score.
+
+### Where away days come from
+
+Read-only Google Calendar over OAuth (`calendar.readonly`). Credentials live
+in `~/.config/thincart/google_oauth.json`, **outside the repo** — ThinCart is
+a public repo and this file is a bearer credential. `calendar_sync.py
+--authorize` runs the consent flow once and stores the refresh token; the
+server refreshes access tokens itself and polls every 6 h. Calendar failure is
+never fatal: a sync error logs and leaves the previous away set in place.
+
+### Detection is a proposal, not a verdict
+
+The calendar does not have a "travel" field, so detection is heuristic:
+`OUT_OF_OFFICE` events, all-day events spanning ≥2 days, and hotel/flight/trip
+wording (including Gmail's auto-created `Stay at …` / `Flight to …` bookings,
+which is how the real Jul 31–Aug 2 Boston trip appears). Timed single events
+are never travel — an evening dinner reservation or a Saturday open house is a
+day at home.
+
+Every detected day lands in `away_days` with status `auto` and is **shown for
+review** in the Travel panel. The user confirms or rejects; `confirmed` and
+`rejected` are decisions and a later sync must never overwrite them. Days can
+also be marked away by hand — a manual entry is born `confirmed`, because
+typing it in *is* the decision.
+
+**Only `confirmed` days affect the cycle arithmetic** (`db.away_set`). An
+`auto` row is inert: visible, one tap from counting, and until then changing
+nothing. This is what makes the review real rather than cosmetic — the first
+sync ingests 180 days of calendar in one pass, so admitting proposals would
+let a single bad match (the genuine 12-day hotel booking in the household's
+own town) silently reshape every cycle, suggestion and snooze deadline in the
+app before anyone had looked at it. That is the fully-automatic behaviour this
+design was chosen over.
+
+The cost is that the feature does nothing until someone reviews the first
+batch, which the Travel panel's badge and its "not counted yet" heading say
+plainly.
+
+## Intelligence layer 1c — whole-week cycles over the entire purchase history
+
+Three changes, all pulling the same way: describe the household's rhythm in the
+unit it actually shops in, over everything it has ever bought, and never let a
+weak estimate pass for a strong one.
+
+### Scope is every item ever bought
+
+`/api/cycles` returns all of them, not just the ones with a learned median.
+Restricting the panel to ≥3-purchase items made the app look like it had
+forgotten a purchase it had in fact recorded — on a 28-day history with 6
+shopping trips, that was 14 items out of 89. What separates a thin item from a
+settled one is how much is *claimed* about it, not whether it is listed.
+
+### Cycles are grouped in whole weeks, open-ended
+
+weekly, bi-weekly, every 3 weeks, every 4 weeks, … with no top bin. Shopping
+runs on a weekly rhythm, so "every 3 weeks" is a sentence about this household;
+"monthly" was a bin that silently merged 3-week and 6-week items, and
+"occasional" said nothing at all.
+
+**The week is for grouping and display only.** Due-scoring always uses the
+measured interval in days, so a 17-day item is labelled bi-weekly and judged at
+17 days — never at the 14 its label rounds to.
+
+### Two tiers, and they answer a shopping question
+
+- **HIGH — buy now.** Due (≥0.85× its cycle) on a rhythm worth trusting: ≥3
+  purchases whose recent gaps agree (spread ≤ 1.0, i.e. the widest at most
+  about double the narrowest).
+- **POTENTIAL — might need this week.** Either due now but the evidence is thin
+  or erratic, or not due yet and arriving within the coming week.
+- Everything else is listed with its rhythm and no call to action.
+
+Tiering on estimator confidence alone was the wrong axis. "This estimate has a
+wide spread" is not something anyone can act on in a supermarket aisle.
+Evidence quality still decides *which* tier a due item lands in, but the tier
+itself is about what goes in the basket. A shaky cycle also retires at 2×
+rather than 3×, so a guess stops nagging sooner than a known rhythm does.
+
+Consistency remains a separate axis from purchase count on purpose: bought at
+7, 8, 7 days is a different claim from 4, 25, 9, and counting purchases cannot
+tell them apart. On the real history this is what separates オレンジジュース
+(spread 1.07) and バナナ (1.43) from the onions (0.07).
+
+### "This week" is in-town days, with a half-cycle floor
+
+The horizon is the in-town days the next seven calendar days actually contain,
+so a week that is mostly a trip pulls almost nothing forward — and a week spent
+entirely away pulls nothing at all, which is correct and is only knowable
+because of the calendar link.
+
+The horizon alone cannot decide anything for an item whose cycle is already
+shorter than a week: milk bought yesterday is "due within 7 days" and would sit
+in POTENTIAL permanently — for the 13 weekly items in this household, that is
+most of the list, most of the time. So an item must ALSO be at least halfway
+through its cycle before it can be called coming-up. Before that, it
+demonstrably still has some.
+
+### Only the recent rhythm counts
+
+The estimate uses the last **4** intervals. A household's rhythm drifts, and a
+gap from four months ago is evidence about a routine that may no longer exist.
 
 ## Intelligence layer 2 — plants & recipes (LLM with graceful fallback)
 

@@ -1,0 +1,30 @@
+ThinCart — actionable tiering (BUY NOW / MIGHT NEED THIS WEEK), burst detection removed
+Date: 2026-08-11
+Suite + real-data check against a COPY of the live DB (live service untouched)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+137 passed, 2 warnings in 1.48s
+
+tiers: {'high': 0, 'potential': 12, 'tracked': 20, 'once': 57} | week horizon: 7.0 in-town days
+
+=== BUY NOW (0) ===
+
+=== MIGHT NEED THIS WEEK (12) ===
+  ズッキーニ                       bi-weekly      6d over     shaky (2 buys, spread 0.0)
+  卵                           bi-weekly      6d over     shaky (2 buys, spread 0.0)
+  air chilled chicken drumps  bi-weekly      6d over     shaky (2 buys, spread 0.0)
+  oat milk                    bi-weekly      6d over     shaky (2 buys, spread 0.0)
+  カリフラワー                      weekly         due in 1d   trusted (4 buys, spread 0.88)
+  レモン                         weekly         due in 1d   trusted (4 buys, spread 0.88)
+  Lime                        weekly         due in 1d   trusted (4 buys, spread 0.88)
+  cheese slices provolone     weekly         due in 1d   trusted (4 buys, spread 0.88)
+  grass fed 2% milk           weekly         due in 1d   trusted (4 buys, spread 0.88)
+  Greek yogurt                weekly         due in 1d   trusted (4 buys, spread 0.87)
+  Tart cherry juice           weekly         due in 1d   trusted (4 buys, spread 0.87)
+  Avocado bags                weekly         due in 3d   trusted (3 buys, spread 0.52)
+
+=== tier counts over the coming days (proves BUY NOW populates) ===
+  +0d  HIGH= 0  POTENTIAL=13
+  +1d  HIGH= 7  POTENTIAL= 8
+  +2d  HIGH= 7  POTENTIAL=13
+  +5d  HIGH= 8  POTENTIAL=13

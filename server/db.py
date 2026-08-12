@@ -13,7 +13,7 @@ import unicodedata
 from pathlib import Path
 
 import emoji
-from datetime import UTC
+from datetime import date, UTC
 
 DB_PATH = Path(os.environ.get("THINCART_DB", Path(__file__).parent / "data" / "thincart.db"))
 
@@ -54,6 +54,20 @@ CREATE TABLE IF NOT EXISTS stores(
   name TEXT NOT NULL,                    -- display, as first typed
   canonical_name TEXT UNIQUE NOT NULL,
   notes TEXT NOT NULL DEFAULT ''         -- "cheap produce, good fish"
+);
+
+-- Days the household was out of town (PLAN.md §Intelligence layer 1b). Detection
+-- from Google Calendar writes status='auto'; the user's own confirm/reject is a
+-- decision a later sync must never overwrite.
+CREATE TABLE IF NOT EXISTS away_days(
+  day TEXT PRIMARY KEY,                  -- YYYY-MM-DD, home-local date
+  status TEXT NOT NULL DEFAULT 'auto' CHECK(status IN ('auto','confirmed','rejected')),
+  source TEXT NOT NULL DEFAULT 'calendar' CHECK(source IN ('calendar','manual')),
+  event_id TEXT NOT NULL DEFAULT '',
+  summary TEXT NOT NULL DEFAULT '',
+  location TEXT NOT NULL DEFAULT '',
+  reason TEXT NOT NULL DEFAULT '',
+  detected_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -230,6 +244,94 @@ def recent_history(conn: sqlite3.Connection, limit: int = 100) -> list[dict]:
     return out
 
 
+def away_set(conn: sqlite3.Connection):
+    """The days that count as out of town — CONFIRMED ones only.
+
+    Detection proposes; only a person decides (PLAN.md §1b). An 'auto' row is a
+    heuristic guess awaiting review, and letting it into this set would make the
+    review cosmetic: the first sync reads 180 days of calendar at once, so a
+    single bad match — the real 12-day hotel booking in the household's OWN
+    town — would silently reshape every cycle, every suggestion and every snooze
+    deadline in the app before anyone had seen it. That is precisely the
+    fully-automatic behaviour the review step exists to avoid.
+
+    Manual entries are born 'confirmed', so marking a day away by hand counts
+    immediately.
+    """
+    import cycles
+
+    rows = conn.execute("SELECT day FROM away_days WHERE status = 'confirmed'")
+    return cycles.Away(date.fromisoformat(r["day"]) for r in rows)
+
+
+def away_rows(conn: sqlite3.Connection) -> list[dict]:
+    """Every away day, oldest first — the substrate for the Travel review panel."""
+    return [dict(r) for r in conn.execute("SELECT * FROM away_days ORDER BY day")]
+
+
+def record_away_candidates(conn: sqlite3.Connection, candidates, detected_at: str) -> int:
+    """Upsert detected days, leaving the user's confirm/reject decisions alone.
+
+    The WHERE on the DO UPDATE is the whole point: re-running a sync refreshes
+    the event details behind a still-unreviewed 'auto' day, but a day the user
+    has already ruled on is never touched. Without it every poll would quietly
+    resurrect a trip the user had just rejected.
+    """
+    n = 0
+    for c in candidates:
+        cur = conn.execute(
+            """INSERT INTO away_days(day, status, source, event_id, summary, location, reason, detected_at)
+               VALUES(?, 'auto', 'calendar', ?, ?, ?, ?, ?)
+               ON CONFLICT(day) DO UPDATE SET
+                 event_id=excluded.event_id, summary=excluded.summary,
+                 location=excluded.location, reason=excluded.reason,
+                 detected_at=excluded.detected_at
+               WHERE away_days.status='auto' AND away_days.source='calendar'""",
+            (c.day.isoformat(), c.event_id, c.summary, c.location, c.reason, detected_at),
+        )
+        n += cur.rowcount
+    return n
+
+
+def prune_away_candidates(conn: sqlite3.Connection, start: str, end: str, keep: set) -> int:
+    """Drop unreviewed calendar days in [start, end] the calendar no longer claims.
+
+    A deleted or rescheduled trip has to stop counting, but only unreviewed
+    ('auto') calendar rows are eligible — a manual entry or a confirmed day
+    outlives whatever the calendar currently says.
+    """
+    stale = [
+        r["day"]
+        for r in conn.execute(
+            """SELECT day FROM away_days
+               WHERE status='auto' AND source='calendar' AND day BETWEEN ? AND ?""",
+            (start, end),
+        )
+        if r["day"] not in keep
+    ]
+    conn.executemany("DELETE FROM away_days WHERE day=?", [(d,) for d in stale])
+    return len(stale)
+
+
+def set_away_status(conn: sqlite3.Connection, day: str, status: str, detected_at: str) -> dict:
+    """Review action: confirm/reject a detected day, or mark one away by hand.
+
+    A confirmed day with no calendar row behind it is a manual entry — the
+    household travelled and the calendar never knew.
+    """
+    if status not in ("auto", "confirmed", "rejected"):
+        raise ValueError(f"bad away status: {status}")
+    date.fromisoformat(day)  # reject malformed keys before they reach the table
+    cur = conn.execute("UPDATE away_days SET status=? WHERE day=?", (status, day))
+    if cur.rowcount == 0:
+        conn.execute(
+            """INSERT INTO away_days(day, status, source, reason, detected_at)
+               VALUES(?,?, 'manual', 'marked by hand', ?)""",
+            (day, status, detected_at),
+        )
+    return {"day": day, "status": status}
+
+
 def suggestions(conn: sqlite3.Connection, now) -> list[dict]:
     """Due items (cycles.suggest) minus already-listed and snoozed catalog rows."""
     import cycles
@@ -237,7 +339,7 @@ def suggestions(conn: sqlite3.Connection, now) -> list[dict]:
     on_list = {r["catalog_id"] for r in conn.execute("SELECT catalog_id FROM items")}
     now_iso = now.isoformat(timespec="seconds")
     out = []
-    for s in cycles.suggest(purchase_history(conn), now):
+    for s in cycles.suggest(purchase_history(conn), now, away_set(conn)):
         if s["catalog_id"] in on_list:
             continue
         row = conn.execute(
@@ -281,6 +383,8 @@ def state(conn: sqlite3.Connection, now=None) -> dict:
         "items": items,
         "stores": stores,
         "suggestions": suggestions(conn, now),
+        # badge on the Travel button: detected days nobody has ruled on yet
+        "away_pending": conn.execute("SELECT COUNT(*) FROM away_days WHERE status='auto'").fetchone()[0],
         # count is plant points per plants.COUNTING_MODE — currently "agp": a flat
         # count of distinct plant species (the study's own method, no fractions).
         # Under "rossi" it becomes fractional (herbs/spices ¼). `weights` carries

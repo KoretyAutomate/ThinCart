@@ -1,0 +1,68 @@
+ThinCart — in-town purchase cycles (Google Calendar link)
+Test: end-to-end verification against a COPY of the live DB + real calendar events
+Date: 2026-08-10
+Runner: /home/korety/miniconda3/bin/python3 (FastAPI TestClient — live service untouched)
+
+==============================================================================
+1. DETECTION over the real calendar window (no home-region hint)
+==============================================================================
+  2026-07-17 → 2026-07-28    12d  Stay at Graduate by Hilton Princeton
+                                 [12-day all-day event]  10 Chambers Street, Princeton, NJ 08542, USA
+  2026-07-31 → 2026-08-02     3d  Stay at Hotel AKA Boston Common
+                                 [3-day all-day event]  90 Tremont Street, Boston, Massachusetts 02108, United States
+  → 15 away days proposed
+
+==============================================================================
+2. SAME EVENTS with THINCART_HOME_PATTERNS="princeton"
+==============================================================================
+  2026-07-20 → 2026-07-24     5d  Afternoon Off  [5-day all-day event]
+  2026-07-31 → 2026-08-02     3d  Stay at Hotel AKA Boston Common  [3-day all-day event]
+  → 8 away days proposed
+
+==============================================================================
+3. BASELINE /api/cycles on the real purchase history (no away days)
+==============================================================================
+  away_days=14  tracked items=14
+  Avocado bags           median=  3.4d  since=  4.1d  due=True
+  Greek yogurt           median=  4.3d  since=  4.2d  due=True
+  Tart cherry juice      median=  4.3d  since=  4.2d  due=True
+  grass fed 2% milk      median=  4.3d  since=  4.1d  due=True
+  カリフラワー                 median=  4.3d  since=  4.1d  due=True
+  レモン                    median=  4.3d  since=  4.1d  due=True
+  Lime                   median=  4.3d  since=  4.1d  due=True
+  cheese slices provolon median=  4.3d  since=  4.1d  due=True
+
+==============================================================================
+4. WRITE the Boston trip through the real endpoint, then re-read cycles
+==============================================================================
+  linked=False  tz=America/New_York  trips=2
+  2026-07-17 → 2026-07-28  (12d)  pending=True  Stay at Graduate by Hilton Princeton
+  2026-07-31 → 2026-08-02  (3d)  pending=False  (manual)
+
+  away_days now = 15  unit = in-town days
+  items whose median changed: 6 of 14
+  Avocado bags             3.4d →   2.9d   since   4.1d →   4.1d
+  white onion              5.5d →   5.0d   since   4.1d →   4.1d
+  玉ねぎ                      5.5d →   5.0d   since   4.1d →   4.1d
+  red onion                5.5d →   5.0d   since   4.1d →   4.1d
+  bell pepper bag          5.5d →   5.0d   since   4.1d →   4.1d
+  オレンジジュース                 5.5d →   5.0d   since   4.1d →   4.1d
+  newly due: []
+  no longer due: []
+
+==============================================================================
+5. REJECT a day: the user's decision must survive a later calendar sync
+==============================================================================
+  away set after reject: ['2026-07-17', '2026-07-18', '2026-07-19', '2026-07-20', '2026-07-21', '2026-07-22', '2026-07-23', '2026-07-24', '2026-07-25', '2026-07-26', '2026-07-27', '2026-07-28', '2026-07-31', '2026-08-02']
+  2026-08-01 status after re-sync: rejected  (must stay 'rejected')
+  2026-08-02 status after re-sync: confirmed  (user-confirmed, must stay)
+  ✅ user decisions survived a re-sync
+
+==============================================================================
+6. /api/away with the full detected set (what the panel would show)
+==============================================================================
+  2026-07-17 → 2026-07-28  (12d)  pending=True  Stay at Graduate by Hilton Princeton
+  2026-07-31 → 2026-07-31  (1d)  pending=False  (manual)
+  2026-08-02 → 2026-08-02  (1d)  pending=False  (manual)
+  rejected days: ['2026-08-01']
+  state away_pending badge = 12

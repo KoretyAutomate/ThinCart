@@ -360,7 +360,12 @@ def test_suggestions_and_snooze_flow():
 
 
 def test_cycles_endpoint_full_list():
-    """/api/cycles: every learned cycle, most-due first, due/on_list flags."""
+    """/api/cycles: EVERY item ever bought, most-due first, due/on_list flags.
+
+    Scope is the whole purchase history (PLAN.md §1c), so bought-once items
+    appear with score None and sort last — the ordering assertion below has to
+    respect that rather than assume every row carries a number.
+    """
     from datetime import datetime, timedelta
 
     t0 = datetime.now(UTC)
@@ -378,8 +383,18 @@ def test_cycles_endpoint_full_list():
     assert rows["cyc_overdue"]["due"] and rows["cyc_overdue"]["label"] == "weekly"
     assert not rows["cyc_fresh"]["due"]  # bought yesterday
     assert not rows["cyc_lapsed"]["due"]  # retired, but still visible in the list
-    scores = [c["score"] for c in client.get("/api/cycles").json()["cycles"]]
-    assert scores == sorted(scores, reverse=True)
+    rows2 = client.get("/api/cycles").json()["cycles"]
+    # tier decides the section, score orders within it: a lapsed item with a
+    # huge score belongs BELOW a due one, not above it
+    rank = {"high": 0, "potential": 1}
+    groups = [rank.get(c["tier"], 2) for c in rows2]
+    assert groups == sorted(groups)
+    for g in (0, 1, 2):
+        scores = [c["score"] for c in rows2 if rank.get(c["tier"], 2) == g and c["score"] is not None]
+        assert scores == sorted(scores, reverse=True)
+    # unscored (bought-once) rows come last within the untiered group
+    tail = [c["score"] for c in rows2 if rank.get(c["tier"], 2) == 2]
+    assert tail == [s for s in tail if s is not None] + [s for s in tail if s is None]
     # an item currently on the list is flagged and not due
     iid = str(uuid.uuid4())
     op(type="add", name="cyc_overdue", item_id=iid)
