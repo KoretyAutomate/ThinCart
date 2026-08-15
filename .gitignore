@@ -5,3 +5,17 @@ server/data/
 
 # machine-local prepush-gate config (python path etc.)
 .prepush.env
+
+# Weekly bootcamp report drafts + their cron logs. These are published to the
+# PRIVATE repo KoretyAutomate/Mega-Trend-Reports (see CLAUDE.md) — keeping them
+# untracked here is what lets THIS repo be public. Ignored rather than merely
+# uncommitted so a stray `git add -A` cannot publish them.
+reports/
+
+# Local working material the owner chose not to publish (decided 2026-08-15):
+# project instructions, the weekly-report tooling, and test-run output. Files
+# under these paths that are ALREADY tracked stay tracked and keep their
+# history — this only stops new ones being swept in.
+CLAUDE.md
+scripts/
+test_results/
