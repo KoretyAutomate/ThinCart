@@ -19,3 +19,9 @@ reports/
 CLAUDE.md
 scripts/
 test_results/
+
+# Capacitor Android shell (mobile/). The native project itself IS committed;
+# these are install/build output. mobile/android/.gitignore (the Capacitor
+# template's) already covers the generated assets and Gradle output inside it.
+mobile/node_modules/
+*.apk

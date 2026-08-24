@@ -1,0 +1,19 @@
+{
+  "appId": "com.korety.thincart",
+  "appName": "ThinCart",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https",
+    "allowNavigation": [
+      "*.ts.net",
+      "100.*",
+      "192.168.*",
+      "10.*",
+      "localhost"
+    ]
+  },
+  "android": {
+    "allowMixedContent": true,
+    "backgroundColor": "#f6f7f4"
+  }
+}
