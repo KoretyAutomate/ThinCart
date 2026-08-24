@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">ThinCart</string>
+    <string name="title_activity_main">ThinCart</string>
+    <string name="package_name">com.korety.thincart</string>
+    <string name="custom_url_scheme">com.korety.thincart</string>
+</resources>

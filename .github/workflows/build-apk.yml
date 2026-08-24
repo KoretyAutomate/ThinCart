@@ -1,0 +1,99 @@
+name: Build debug APK
+
+# The DGX this project is developed on is aarch64, and Google ships no aarch64
+# aapt2/zipalign — so the APK cannot be built there. GitHub's ubuntu-latest
+# runners are x86-64, so it is built here and published as an artifact to
+# sideload. Same arrangement as OutfitAdvisor.
+#
+# Only mobile/ triggers it. The web layer the app actually shows lives in app/
+# and is served live by the DGX: changing the list UI needs a service restart,
+# NOT a new APK. That asymmetry is the point of the shell.
+on:
+  push:
+    branches: [ master ]
+    paths:
+      - 'mobile/**'
+      - '.github/workflows/build-apk.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK packages
+        run: sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+
+      # Without a persistent key every run signs with a fresh throwaway debug
+      # keystore, and the phone then refuses the update
+      # (INSTALL_FAILED_UPDATE_INCOMPATIBLE) — forcing an uninstall, which wipes
+      # the WebView's localStorage: the saved server address and any op queued
+      # offline in a shop dead zone. The keystore lives in the
+      # DEBUG_KEYSTORE_B64 repo secret (master copy on the DGX at
+      # ~/.android-ci/debug.keystore; standard debug alias/passwords). Its path
+      # is handed to Gradle explicitly via DEBUG_KEYSTORE_PATH — writing it to
+      # ~/.android/debug.keystore is NOT enough, AGP resolves its default
+      # keystore elsewhere on this runner and silently signs with a fresh key.
+      - name: Restore persistent debug keystore
+        run: |
+          echo "$DEBUG_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/debug.keystore"
+          test -s "$RUNNER_TEMP/debug.keystore" || { echo "keystore secret empty"; exit 1; }
+          echo "DEBUG_KEYSTORE_PATH=$RUNNER_TEMP/debug.keystore" >> "$GITHUB_ENV"
+        env:
+          DEBUG_KEYSTORE_B64: ${{ secrets.DEBUG_KEYSTORE_B64 }}
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Launcher tests
+        run: npm test
+
+      - name: Capacitor sync (copy web assets + plugins into android/)
+        run: npx cap sync android
+
+      - name: Build debug APK
+        working-directory: mobile/android
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Verify APK exists
+        working-directory: mobile/android
+        run: |
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          test -f "$APK" && ls -lh "$APK" || { echo "APK NOT PRODUCED"; exit 1; }
+
+      # Guard the persistent-signing invariant: an APK signed with any other key
+      # would force a data-wiping uninstall on the phone. Fail rather than ship it.
+      - name: Verify APK signed with the persistent key
+        working-directory: mobile/android
+        run: |
+          EXPECTED="067bcb5f27b863b77d75e8dff39b9dc78b7d5998735ece815eb7cf6decd84113"
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort | tail -1)
+          DIGEST=$("$APKSIGNER" verify --print-certs app/build/outputs/apk/debug/app-debug.apk \
+            | grep -oP 'certificate SHA-256 digest: \K[0-9a-f]+' | head -1)
+          echo "signed with: $DIGEST"
+          [ "$DIGEST" = "$EXPECTED" ] || { echo "WRONG SIGNING KEY (expected $EXPECTED)"; exit 1; }
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: thincart-debug
+          path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error

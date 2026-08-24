@@ -18,8 +18,10 @@ See `PLAN.md` for the full architecture (agent-reviewed, approved 2026-07-03).
 - **Candidates + categories**: ✅ live — 173-item seeded catalog, typing dropdown
   (kana/EN folded), emoji category grouping, swipe gestures (→ bought / ← skip),
   EN/日本語 toggle, purchase-cycle panel.
-- **Phase 3 — install**: HTTPS ✅ (`https://spark-d28c.<your-tailnet>.ts.net`); remaining:
-  A2HS both phones, wife's iPhone Tailscale onboarding, two-phone in-store test.
+- **Phase 3 — install**: HTTPS ✅ (`https://spark-d28c.<your-tailnet>.ts.net`).
+  Android now has a real installable app (`mobile/`, Capacitor — sideloaded, no
+  store); iPhone stays Add-to-Home-Screen. Remaining: wife's iPhone Tailscale
+  onboarding, two-phone in-store test.
 - **Travel-aware cycles**: ✅ code complete — cycles counted in *days at home*,
   away days read from Google Calendar. Needs the one-time OAuth link below.
 - 151/151 tests (`tests/`); live verifications in `test_results/`.
@@ -42,6 +44,42 @@ browser). Enter your name once.
 - Works offline in store dead zones — ops queue and flush on reconnect;
   the pill in the header shows synced / syncing / offline.
 
+## Install as an app (Android)
+
+`mobile/` is a Capacitor shell: an installable app with its own icon, off the
+store, that opens the very same PWA the DGX serves. The list, the sync, the
+offline op queue and the service worker are unchanged — they run at their own
+https origin inside the app's WebView, exactly as they do in a browser tab.
+
+That split is deliberate: **changing the UI does not need a new APK.** Edit
+`app/index.html`, restart the service, and both phones have it. The APK only
+changes when the shell itself does.
+
+The address is **asked for on first launch**, not compiled in — this repo is
+public and a tailnet name is not something to publish. Type the same address you
+open in the browser; it is remembered per install. If the server can't be
+reached the app says so instead of showing a browser error page, and the
+hardware Back button from the list returns to that screen, so a wrong address is
+always correctable.
+
+The APK is built by GitHub Actions (`.github/workflows/build-apk.yml`) — Google
+ships no aarch64 `aapt2`, so an ARM host cannot build it locally. Grab the
+`thincart-debug` artifact from the latest run and sideload it:
+
+```bash
+gh run download <run-id> --name thincart-debug
+adb pair <phone-ip>:<pair-port>        # once, from Developer options → Wireless debugging
+adb connect <phone-ip>:<connect-port>  # port rotates; check the phone each time
+adb install -r app-debug.apk
+```
+
+CI signs with a persistent debug keystore (`DEBUG_KEYSTORE_B64` repo secret) and
+fails the build if the signature ever changes — an unexpected key would force a
+data-wiping uninstall, taking the saved address and any offline-queued ops with
+it.
+
+Shell tests: `cd mobile && npm install && npm test`.
+
 ## One-time setup still needed (user actions)
 
 1. ~~Enable Tailscale Serve + HTTPS~~ **done 2026-07-03**:
@@ -49,8 +87,8 @@ browser). Enter your name once.
    (disable with `tailscale serve --https=443 off`).
 2. **Wife's iPhone**: install Tailscale from the App Store, sign in (invite her
    or share your account), then open https://spark-d28c.<your-tailnet>.ts.net
-   **in Safari** → Share → *Add to Home Screen*. Do the same on the Pixel
-   (Chrome → Install app).
+   **in Safari** → Share → *Add to Home Screen*. (The Pixel uses the sideloaded
+   app instead — see *Install as an app* above.)
 3. **Link Google Calendar** (for travel-aware cycles — see below).
 
 ## Travel-aware cycles ✈️

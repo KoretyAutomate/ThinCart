@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ThinCart</title>
+<style>
+  :root {
+    --bg: #f6f7f4;
+    --ink: #22291f;
+    --muted: #6b7566;
+    --green: #2f6f4f;
+    --green-dark: #24583e;
+    --line: #d9ded4;
+    --card: #ffffff;
+    --bad: #a33a2b;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.5 system-ui, -apple-system, "Noto Sans JP", sans-serif;
+    display: flex; align-items: center; justify-content: center;
+    padding: max(24px, env(safe-area-inset-top)) 20px max(24px, env(safe-area-inset-bottom));
+  }
+  main { width: 100%; max-width: 420px; }
+  .mark { text-align: center; margin-bottom: 22px; }
+  .mark img { width: 76px; height: 76px; border-radius: 20px; }
+  h1 { font-size: 24px; margin: 12px 0 4px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); font-size: 14px; margin: 0; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+    padding: 18px; margin-top: 20px;
+  }
+  label { display: block; font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
+  input {
+    width: 100%; padding: 12px 13px; font-size: 16px; font-family: inherit;
+    border: 1px solid var(--line); border-radius: 10px; background: #fbfcfa; color: var(--ink);
+  }
+  input:focus { outline: 2px solid var(--green); outline-offset: 1px; border-color: transparent; }
+  .hint { font-size: 12.5px; color: var(--muted); margin: 8px 2px 0; }
+  button {
+    width: 100%; margin-top: 12px; padding: 13px; font-size: 16px; font-weight: 600;
+    font-family: inherit; border: 0; border-radius: 10px; background: var(--green); color: #fff;
+  }
+  button:active { background: var(--green-dark); }
+  button.ghost { background: transparent; color: var(--muted); font-weight: 500; border: 1px solid var(--line); }
+  button.ghost:active { background: #eef0ea; }
+  .err { color: var(--bad); font-size: 13.5px; margin: 10px 2px 0; display: none; }
+  .err.on { display: block; }
+  .spin {
+    width: 30px; height: 30px; margin: 4px auto 0; border-radius: 50%;
+    border: 3px solid var(--line); border-top-color: var(--green);
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .screen { display: none; }
+  .screen.on { display: block; }
+  .current { font-size: 13.5px; color: var(--muted); word-break: break-all; margin: 0 0 4px; }
+  .current b { color: var(--ink); font-weight: 600; }
+</style>
+</head>
+<body>
+<main>
+  <div class="mark">
+    <img src="icon-192.png" alt="">
+    <h1>ThinCart</h1>
+    <p class="sub">Shared shopping list</p>
+  </div>
+
+  <!-- Connecting: shown while the server is probed on a cold start -->
+  <section id="screen-connecting" class="screen">
+    <div class="card" style="text-align:center">
+      <div class="spin"></div>
+      <p class="hint" id="connecting-text">Connecting…</p>
+    </div>
+  </section>
+
+  <!-- Setup: first run, or after "use a different server" -->
+  <section id="screen-setup" class="screen">
+    <div class="card">
+      <label for="url">Server address</label>
+      <input id="url" type="url" inputmode="url" autocapitalize="off" autocorrect="off"
+             spellcheck="false" placeholder="spark-xxxx.your-tailnet.ts.net">
+      <p class="hint">
+        The same address you open in the browser — your Tailscale HTTPS name, or the
+        tailnet IP with its port. Your phone must be on the tailnet.
+      </p>
+      <p class="err" id="setup-err"></p>
+      <button id="connect">Connect</button>
+    </div>
+  </section>
+
+  <!-- Settings / retry: shown when the probe fails, or on returning with Back -->
+  <section id="screen-settings" class="screen">
+    <div class="card">
+      <p class="current">Server: <b id="current-url"></b></p>
+      <p class="err" id="settings-err"></p>
+      <button id="open">Open ThinCart</button>
+      <button id="change" class="ghost">Use a different server</button>
+    </div>
+  </section>
+</main>
+
+<script>
+"use strict";
+/* ThinCart launcher.
+ *
+ * The APK is a shell: the real app is the PWA the DGX serves over Tailscale, and
+ * it is loaded from its own https origin so its relative /api calls, its /ws
+ * WebSocket, its service worker and its localStorage op queue all keep working
+ * exactly as they do in the browser. Nothing about the list lives in here.
+ *
+ * The address is asked for at first run rather than compiled in: this repo is
+ * public, and a tailnet name is not something to publish. It is remembered in
+ * localStorage afterwards, so it is asked once per install.
+ */
+
+var STORE_KEY = "thincart.server";      // localStorage — survives app restarts
+var LAUNCH_KEY = "thincart.launched";   // sessionStorage — cleared on cold start
+var PROBE_TIMEOUT_MS = 8000;
+
+/* Turn what a human types into a URL to load, or null if it cannot be one.
+ * Bare IPv4 means the plain-HTTP dev address (100.x.x.x:8123); a name means the
+ * Tailscale HTTPS serve endpoint. An explicit scheme is always respected. */
+function normalizeServerUrl(raw) {
+  if (typeof raw !== "string") return null;
+  var s = raw.trim();
+  if (!s || /\s/.test(s)) return null;
+
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(s)) {
+    var hostPart = s.split("/")[0].split(":")[0];
+    s = (/^\d{1,3}(\.\d{1,3}){3}$/.test(hostPart) ? "http://" : "https://") + s;
+  }
+
+  var u;
+  try { u = new URL(s); } catch (e) { return null; }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+  if (!u.hostname) return null;
+  if (u.hostname.indexOf(".") === -1 && u.hostname !== "localhost") return null;
+
+  var out = u.origin + u.pathname.replace(/\/+$/, "");
+  return out;
+}
+
+/* Reachability only. The probe is cross-origin from this page, so it runs
+ * no-cors: the response is opaque and unreadable, but a dead server still
+ * rejects — which is the whole question being asked. */
+function probeServer(url, fetchImpl, timeoutMs) {
+  var f = fetchImpl || window.fetch.bind(window);
+  var ctl = typeof AbortController === "function" ? new AbortController() : null;
+  var timer = setTimeout(function () { if (ctl) ctl.abort(); }, timeoutMs || PROBE_TIMEOUT_MS);
+  var opts = { method: "GET", mode: "no-cors", cache: "no-store" };
+  if (ctl) opts.signal = ctl.signal;
+  return f(url + "/health", opts).then(
+    function () { clearTimeout(timer); return true; },
+    function () { clearTimeout(timer); return false; }
+  );
+}
+
+/* The one real navigation this app performs. It goes through a named function
+ * because jsdom locks location.assign, and the branch logic around it — cold
+ * start vs Back, reachable vs not — is exactly what the tests need to drive. */
+function openServer(url) {
+  window.location.assign(url);
+}
+
+window.normalizeServerUrl = normalizeServerUrl;
+window.probeServer = probeServer;
+window.openServer = openServer;
+
+/* ---- screens ---------------------------------------------------------- */
+
+var $ = function (id) { return document.getElementById(id); };
+
+function show(name) {
+  ["connecting", "setup", "settings"].forEach(function (s) {
+    $("screen-" + s).classList.toggle("on", s === name);
+  });
+}
+
+function setErr(el, msg) {
+  el.textContent = msg || "";
+  el.classList.toggle("on", !!msg);
+}
+
+function savedServer() {
+  try { return localStorage.getItem(STORE_KEY); } catch (e) { return null; }
+}
+
+function saveServer(url) {
+  try { localStorage.setItem(STORE_KEY, url); } catch (e) { /* private mode: this run only */ }
+}
+
+/* Mark that we handed off, so the hardware Back button lands on the settings
+ * screen instead of bouncing straight back out to the server. */
+function launch(url) {
+  try { sessionStorage.setItem(LAUNCH_KEY, "1"); } catch (e) { /* non-fatal */ }
+  window.openServer(url);
+}
+
+function showSettings(msg) {
+  $("current-url").textContent = savedServer() || "—";
+  setErr($("settings-err"), msg);
+  show("settings");
+}
+
+function showSetup(prefill, msg) {
+  $("url").value = prefill || "";
+  setErr($("setup-err"), msg);
+  show("setup");
+}
+
+function tryLaunch(url) {
+  show("connecting");
+  $("connecting-text").textContent = "Connecting to " + url.replace(/^https?:\/\//, "") + "…";
+  return probeServer(url).then(function (ok) {
+    if (ok) { launch(url); return; }
+    showSettings("Can't reach that server. Check that Tailscale is connected on this phone.");
+  });
+}
+
+function start() {
+  var saved = savedServer();
+  var returned = false;
+  try { returned = sessionStorage.getItem(LAUNCH_KEY) === "1"; } catch (e) { /* ignore */ }
+
+  if (!saved) { showSetup("", ""); return; }
+  if (returned) { showSettings(""); return; }
+  tryLaunch(saved);
+}
+
+$("connect").addEventListener("click", function () {
+  var url = normalizeServerUrl($("url").value);
+  if (!url) {
+    setErr($("setup-err"), "That doesn't look like an address. Try spark-xxxx.your-tailnet.ts.net");
+    return;
+  }
+  saveServer(url);
+  tryLaunch(url);
+});
+
+$("url").addEventListener("keydown", function (e) {
+  if (e.key === "Enter") { e.preventDefault(); $("connect").click(); }
+});
+
+$("open").addEventListener("click", function () {
+  var saved = savedServer();
+  if (saved) tryLaunch(saved); else showSetup("", "");
+});
+
+$("change").addEventListener("click", function () {
+  showSetup(savedServer() || "", "");
+});
+
+start();
+</script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ThinCart palette; mirrors the PWA's theme_color / background_color so the
+     splash, the launcher shell and the loaded app are one continuous surface. -->
+<resources>
+    <color name="colorPrimary">#2F6F4F</color>
+    <color name="colorPrimaryDark">#24583E</color>
+    <color name="colorAccent">#2F6F4F</color>
+</resources>

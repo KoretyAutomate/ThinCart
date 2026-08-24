@@ -30,7 +30,7 @@ off-the-shelf app offers:
 | Decision | Choice |
 |---|---|
 | Hosting | **Self-host on DGX + Tailscale-only** (same pattern as OutfitAdvisor). Both phones must be on the tailnet — **wife's phone needs Tailscale installed + invited to the tailnet** (one-time setup, user action). |
-| App form | **PWA** served by the backend; both phones "Add to Home Screen". No APK, no store. |
+| App form | **PWA** served by the backend; both phones "Add to Home Screen". No APK, no store. *(Revised 2026-08-23: Android additionally gets a sideloaded Capacitor shell — see the change-log entry. Still no store, and still the same served PWA inside.)* |
 | Purchase history | **Start fresh** — no import. Frequency estimates mature after ~3–4 purchase cycles per item; until then the app is a synced list. |
 | Recommendations engine | **Local LLM on DGX** — vLLM Qwen3.5-122B at `:8000` (OpenAI-compatible, `enable_thinking:false` mandatory, else empty output — see OutfitAdvisor empirical finding). Rule-based fallbacks where the LLM is optional. |
 
@@ -509,8 +509,14 @@ shopping-list/
 │  │                    #   live here — page JS, not the SW)
 │  ├─ sw.js             # app-shell cache only
 │  └─ manifest.json
+├─ mobile/              # Capacitor 6 Android shell (2026-08-23)
+│  ├─ www/index.html   # launcher ONLY: asks/remembers the server address,
+│  │                    #   probes it, hands the WebView to the real PWA
+│  ├─ android/         # native project (no custom code; icons + signing only)
+│  └─ tests/           # jsdom tests for the launcher's branch logic
 ├─ tests/               # estimator, canonicalization, sync-op unit tests
 ├─ test_results/
+├─ .github/workflows/build-apk.yml   # CI APK build (the DGX is aarch64)
 └─ PLAN.md
 ```
 
@@ -631,3 +637,55 @@ Source tag ("preferred"/"history") is carried so the UI can show why.
    naming it re-creates it (documented property, acceptable).
 8. "I'm at:" selection expires after 6 h (stale selection would silently poison
    where-bought history).
+
+### 2026-08-23 — Android app (sideloaded Capacitor shell)
+
+User request: "build a ThinCart app like the outfit advisor I installed to my
+phone" — i.e. a real installed app, off the Play Store. Same shape as
+OutfitAdvisor: debug APK from CI, `adb install`.
+
+Delegation: considered, rejected — one small new component, no volume to grind.
+
+**The choice that mattered: shell vs. bundle.** OutfitAdvisor's APK bundles its
+whole web layer, because that app's phone side owns the schedule and the GPS and
+must work with the server unreachable. ThinCart's does not. Its web layer is
+~80 KB of vanilla JS that talks to its own origin — relative `/api/*`, a `/ws`
+WebSocket keyed on `location.host`, a service worker scoped to `/`, and an op
+queue in that origin's localStorage. Bundling it would mean threading a
+configurable base URL through every one of those, adding CORS to the server, and
+rebuilding + reinstalling the APK on both phones for every UI change — for an
+app whose UI changes most weeks. So:
+
+- **The APK is a shell.** `mobile/www/index.html` is a launcher, not the app: it
+  asks for the server address, probes it, and hands the WebView to the live PWA
+  at its own https origin. Everything downstream — sync, offline queue, SW —
+  is byte-identical to the browser, because it *is* the browser.
+- **UI changes ship by restarting the service, not by rebuilding the APK.** CI
+  triggers on `mobile/**` only. This is the property the shell was chosen for.
+- **The address is asked for at first launch, not compiled in.** This repo is
+  public; a tailnet name is not something to publish. Remembered in
+  localStorage thereafter.
+- **Back is the escape hatch.** `location.assign` (not `replace`) plus a
+  sessionStorage flag: a cold start with a saved address goes straight through,
+  but Back from the list lands on the settings screen instead of re-launching.
+  Without that, an address that is wrong but *reachable* could only be fixed by
+  clearing app data.
+- **Signed with the same persistent debug keystore as OutfitAdvisor**
+  (`~/.android-ci/debug.keystore`, pinned by SHA-256 in the workflow). A key
+  change forces a data-wiping uninstall — here that costs the saved address and
+  any op queued in a shop dead zone, so the workflow fails rather than ship it.
+
+Build is CI-only: Google ships no aarch64 `aapt2`, so the DGX cannot produce an
+APK. `npx cap add/sync` run fine there; only `assembleDebug` needs x86-64.
+
+Verified: 36/36 launcher tests (`test_results/mobile_launcher_2026-08-23.txt`)
+covering URL normalization, cold start, unreachable server, Back-return, and
+first-run save. APK build + on-device install are the remaining gates.
+
+iPhone is unchanged (A2HS via Safari) — Capacitor could target it, but that
+needs a Mac to build and an Apple developer account to sideload, which is a
+different project.
+
+**Banked:** in-app updater (OutfitAdvisor's `server/publish_apk.py` + a
+versionCode check) — worth it only once the shell changes often enough that
+`adb install` is a chore. Today it is one file that rarely moves.
