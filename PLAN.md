@@ -689,3 +689,80 @@ different project.
 **Banked:** in-app updater (OutfitAdvisor's `server/publish_apk.py` + a
 versionCode check) — worth it only once the shell changes often enough that
 `adb install` is a chore. Today it is one file that rarely moves.
+
+### 2026-08-30 — v1.0 could never leave the launcher (allowNavigation)
+
+Installed on the Pixel, v1.0 sat on "Connecting to spark-d28c…" forever. The
+address was right, the server was up, the probe succeeded — and then nothing.
+
+**Cause: Capacitor's `server.allowNavigation` masks are LABEL-COUNTED.**
+`HostMask.Simple.matches` (Capacitor 6, `com.getcapacitor.util.HostMask`) splits
+mask and host on `.`, and returns false immediately unless the two have the same
+number of parts. `*` is a whole-label wildcard — never a substring, never
+multi-label. So of the five masks v1.0 shipped:
+
+| mask | intended | actually matches |
+|---|---|---|
+| `*.ts.net` | any tailnet name | only 3-label `foo.ts.net` — **not** `spark-d28c.tailae3b9b.ts.net` (4) |
+| `100.*` | the tailnet IP | nothing (2 parts vs an IPv4's 4) |
+| `192.168.*`, `10.*` | LAN | nothing, same reason |
+| `localhost` | localhost | localhost — the only one that ever matched |
+
+Tailscale MagicDNS is always `<host>.<tailnet>.ts.net`, four labels. So every
+pattern blocked exactly what it was written to allow. Capacitor then declines
+the navigation **silently** — no callback, no error page, no log the phone
+shows — leaving the launcher on screen with its spinner running.
+
+Two fixes, because the second is what made the first take a week to find:
+
+1. **Masks corrected** to ts.net at both label depths, `*.local`, RFC1918, and
+   Tailscale's CGNAT range — and pinned by a test. Getting the IP half right
+   took two rounds of the pre-push gate. `*.*.*.*` (P1) is label-complete and
+   so it worked, but it matched every other four-label host, public IPs and
+   `a.b.evil.com` included. `100.*.*.*` (P2) still trusted the publicly
+   routable majority of `100.0.0.0/8`; Tailscale only uses `100.64.0.0/10`.
+   `HostMask` has no numeric ranges, so the config now **enumerates second
+   octets 64–127** — 64 entries, verbose but exact. `allowNavigation` is what
+   decides which origins the WebView treats as app content, and that boundary
+   is worth spelling out. Both rejected masks are negative cases in the test,
+   as are the addresses just outside the range. `mobile/tests/allowed_hosts.test.js`
+   ports HostMask into JS, reads the REAL `capacitor.config.json`, and asserts
+   every address shape the README or the setup screen can produce is allowed —
+   including the v1.0 masks as negative cases, so a Capacitor upgrade that
+   changes the semantics fails here rather than on a phone.
+2. **A handoff that never completes is now visible.** `launch()` arms a 6 s
+   timer before navigating; if the launcher is still on screen after it, the
+   settings screen says so and offers Retry / change-address. It is cancelled
+   on `pagehide`, because a successful navigation can park this document in the
+   WebView's back-forward cache where timers are paused rather than dropped,
+   and Back within the grace period would otherwise have blamed the app for
+   something it did correctly.
+
+   It deliberately **names no cause**, and that took three rounds of the gate to
+   arrive at. A refusal (Capacitor fires `ACTION_VIEW`, so the address opens in
+   the system browser) and a navigation that was accepted but is slow to commit
+   are indistinguishable from inside the page. Backgrounding looked like the
+   signal that separated them — until you notice that locking the phone or
+   following a notification backgrounds the app too. Detecting a refusal
+   properly means native code observing the navigation decision, which is a
+   real cost for a diagnostic; the honest alternative was to stop asserting.
+   The message now states only what is observable — the server answered, the
+   app is still here — and points at the address. An unreachable server was already handled;
+   a *reachable* server the app declines to open was the gap. The timer is
+   cancelled on `pagehide` — Codex caught (P2) that a successful navigation can
+   park this document in the WebView's back-forward cache, where timers are
+   paused rather than dropped, so Back within the grace period would have
+   resumed it and reported a refusal that never happened.
+
+**The lesson, and it is not thincart-specific:** the jsdom suite was green and
+stayed green — it covers the launcher's JS, and the bug was in the native
+navigation policy, which no jsdom test can reach. A shell app has a seam
+between the web layer and the container, and tests that live entirely on one
+side of it prove nothing about the other. `allowed_hosts.test.js` exists to sit
+*on* that seam. OutfitAdvisor bundles its web layer and never navigates
+cross-origin, so it is unaffected — but any future Capacitor app that does
+navigate needs this same check.
+
+Verified: 55/55 (`test_results/mobile_launcher_2026-08-30.txt`) and the APK
+build. On-device confirmation of v1.1 (versionCode 2) is the remaining gate —
+v1.0's whole point is that a green suite did not mean a working app.

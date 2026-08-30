@@ -120,6 +120,7 @@
 var STORE_KEY = "thincart.server";      // localStorage — survives app restarts
 var LAUNCH_KEY = "thincart.launched";   // sessionStorage — cleared on cold start
 var PROBE_TIMEOUT_MS = 8000;
+var HANDOFF_GRACE_MS = 6000;   // still on this page after a launch => something went wrong
 
 /* Turn what a human types into a URL to load, or null if it cannot be one.
  * Bare IPv4 means the plain-HTTP dev address (100.x.x.x:8123); a name means the
@@ -194,9 +195,49 @@ function saveServer(url) {
 }
 
 /* Mark that we handed off, so the hardware Back button lands on the settings
- * screen instead of bouncing straight back out to the server. */
+ * screen instead of bouncing straight back out to the server.
+ *
+ * A handoff can also be REFUSED, and silently: Capacitor checks the target
+ * against server.allowNavigation and simply declines a host that does not
+ * match, leaving this page on screen with its spinner running forever. That
+ * shipped once already — the masks are label-counted, so "*.ts.net" did not
+ * match a four-label MagicDNS name. The address was fine and the server was
+ * up; only the app said no, and it said it to nobody. So: if we are still
+ * here a moment later, the navigation did not happen, and that is worth
+ * saying out loud rather than spinning. */
+var refusalTimer = null;
+
+function cancelRefusal() {
+  if (refusalTimer !== null) {
+    window.clearTimeout(refusalTimer);
+    refusalTimer = null;
+  }
+}
+
+/* A navigation that DID happen leaves this document either torn down or parked
+ * in the WebView's back-forward cache, where timers are paused rather than
+ * dropped — so a Back press within the grace period would resume the refusal
+ * timer and blame the app for something it did correctly. pagehide fires in
+ * both cases and is the signal that the handoff worked. */
+window.addEventListener("pagehide", cancelRefusal);
+
 function launch(url) {
   try { sessionStorage.setItem(LAUNCH_KEY, "1"); } catch (e) { /* non-fatal */ }
+  cancelRefusal();
+  /* Deliberately does NOT name a cause. From in here the two ways this can go
+   * wrong are indistinguishable: Capacitor refusing the address (it fires an
+   * ACTION_VIEW intent, so the page opens in the system browser instead), or a
+   * navigation that was accepted and is merely slow to commit. Backgrounding
+   * looked like it separated them until you notice that locking the phone
+   * backgrounds the app too. So this says what is observably true and offers
+   * the two actions that help either way. */
+  refusalTimer = window.setTimeout(function () {
+    refusalTimer = null;
+    showSettings("Couldn't finish opening " + url.replace(/^https?:\/\//, "") +
+      ". The server answered, so the address is reachable. Try again — and if " +
+      "it keeps landing here, or opens in your browser instead, check the " +
+      "address matches the one you use in the browser.");
+  }, HANDOFF_GRACE_MS);
   window.openServer(url);
 }
 
