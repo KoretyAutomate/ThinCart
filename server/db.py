@@ -80,6 +80,19 @@ CREATE TABLE IF NOT EXISTS applied_ops(
 
 CREATE INDEX IF NOT EXISTS idx_events_catalog ON purchase_events(catalog_id, bought_at);
 CREATE INDEX IF NOT EXISTS idx_items_catalog ON items(catalog_id);
+
+-- Phase 6. Everything any outbound lookup has ever learned, with the date it
+-- learned it. Read before the network is asked anything, which bounds how often
+-- the shopping list is described to a search engine. Disposable: deleting a row
+-- costs one re-fetch, never a fact the household typed.
+CREATE TABLE IF NOT EXISTS lookup_cache(
+  kind TEXT NOT NULL,                    -- store | product | aisle | price
+  key TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  fetched_at TEXT NOT NULL,
+  PRIMARY KEY (kind, key)
+);
+
 """
 
 
@@ -112,6 +125,18 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
         "ALTER TABLE item_catalog ADD COLUMN budget REAL",
         "ALTER TABLE item_catalog ADD COLUMN preferred_store_id INTEGER REFERENCES stores(id)",
         "ALTER TABLE purchase_events ADD COLUMN store_id INTEGER REFERENCES stores(id)",
+    ):
+        with contextlib.suppress(sqlite3.OperationalError):
+            conn.execute(ddl)
+    # migrations for DBs created before stores were pinned to a real place (Phase 6).
+    # A store with no osm_id is still a perfectly good store — free text stays a
+    # first-class way to add one, for shops OpenStreetMap has never heard of.
+    for ddl in (
+        "ALTER TABLE stores ADD COLUMN osm_id TEXT",
+        "ALTER TABLE stores ADD COLUMN address TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE stores ADD COLUMN lat REAL",
+        "ALTER TABLE stores ADD COLUMN lon REAL",
+        "ALTER TABLE stores ADD COLUMN brand TEXT NOT NULL DEFAULT ''",
     ):
         with contextlib.suppress(sqlite3.OperationalError):
             conn.execute(ddl)
@@ -171,7 +196,12 @@ def get_or_create_store(conn: sqlite3.Connection, name: str) -> int | None:
 
 
 def stores_list(conn: sqlite3.Connection) -> list[dict]:
-    return [dict(r) for r in conn.execute("SELECT id, name, notes FROM stores ORDER BY name")]
+    return [
+        dict(r)
+        for r in conn.execute(
+            "SELECT id, name, notes, osm_id, address, lat, lon, brand FROM stores ORDER BY name"
+        )
+    ]
 
 
 def recommended_stores(conn: sqlite3.Connection) -> dict[int, tuple[int, str]]:

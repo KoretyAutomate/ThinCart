@@ -201,6 +201,22 @@
     border-radius:10px; font-size:.95rem; outline:none; min-width:0; }
   #newstore-row button { background:var(--green); color:#fff; border:none;
     border-radius:10px; padding:0 16px; font-size:1.1rem; cursor:pointer; }
+  #storesearch-row { display:flex; gap:8px; margin-top:8px; }
+  #storesearch-row input { flex:1; padding:11px 12px; border:1.5px solid #d4dcd4;
+    border-radius:10px; font-size:.95rem; outline:none; min-width:0; }
+  #storesearch-row button { background:#eef2ec; color:var(--ink); border:1.5px solid #d4dcd4;
+    border-radius:10px; padding:0 16px; font-size:1.05rem; cursor:pointer; }
+  #storesearch-results:not(:empty) { margin-top:10px; border:1.5px solid #d4dcd4;
+    border-radius:12px; overflow:hidden; background:var(--card); }
+  .osmhit { padding:11px 13px; cursor:pointer; border-bottom:1px solid #eceee9; }
+  .osmhit:last-child { border-bottom:none; }
+  .osmhit:active { background:#eef2ec; }
+  .osmhit b { display:block; font-size:.95rem; }
+  .osmhit span { display:block; color:var(--muted); font-size:.78rem; margin-top:2px;
+    overflow-wrap:anywhere; }
+  .osmnote { padding:11px 13px; color:var(--muted); font-size:.83rem; }
+  .storerow .addr { color:var(--muted); font-size:.78rem; margin-top:3px;
+    overflow-wrap:anywhere; }
   .stores-note { color:var(--muted); font-size:.8rem; margin:20px 2px; }
   #namedlg {
     position:fixed; inset:0; background:var(--bg); z-index:40; display:none;
@@ -466,6 +482,11 @@
       <input id="newstore-name" maxlength="60">
       <button id="newstore-add" aria-label="Add store">＋</button>
     </div>
+    <div id="storesearch-row">
+      <input id="storesearch-area" maxlength="80">
+      <button id="storesearch-go" aria-label="Find the exact store">🔍</button>
+    </div>
+    <div id="storesearch-results"></div>
     <p class="stores-note" id="stores-note"></p>
   </div>
 </div>
@@ -596,6 +617,12 @@ const STR = {
     store_notes_ph:'Notes — e.g. cheap produce, good fish',
     save_notes:'Save notes', store_del:'Delete',
     new_store_ph:'Add store… (OK Store, …)',
+    area_ph:'…in which town? (for 🔍)',
+    osm_searching:'Searching OpenStreetMap…',
+    osm_none:'No shop of that name found there. The ＋ button still adds it by name.',
+    osm_off:'Store search is off on the server (THINCART_LOOKUP).',
+    osm_fail:'Could not reach OpenStreetMap. The ＋ button still adds it by name.',
+    osm_need:'Type a store name above first.',
     unassigned:'🛒 Anywhere / not sure yet',
     est:n=>`~💰${n}`, plus_unk:n=>`+${n}?`, src_hist:'(usual)',
     del_confirm:n=>`Delete ${n}? Purchases stay in history but forget this store.`,
@@ -665,6 +692,12 @@ const STR = {
     store_notes_ph:'メモ — 例: 野菜が安い、魚が良い',
     save_notes:'メモを保存', store_del:'削除',
     new_store_ph:'店舗を追加… (OKストア など)',
+    area_ph:'どの街？（🔍 用）',
+    osm_searching:'OpenStreetMap を検索中…',
+    osm_none:'その名前の店は見つかりませんでした。＋ で名前だけ登録もできます。',
+    osm_off:'サーバー側で店舗検索が無効です（THINCART_LOOKUP）。',
+    osm_fail:'OpenStreetMap に接続できません。＋ で名前だけ登録もできます。',
+    osm_need:'先に上の欄に店名を入力してください。',
     unassigned:'🛒 どこでも / 未定',
     est:n=>`約💰${n}`, plus_unk:n=>`+${n}?`, src_hist:'（いつもの）',
     del_confirm:n=>`${n}を削除しますか？購入履歴は残りますが、この店の記録は消えます。`,
@@ -726,6 +759,7 @@ function applyLang() {
   $('manage-h').textContent = T().manage_h;
   $('stores-note').textContent = T().stores_note;
   $('newstore-name').placeholder = T().new_store_ph;
+  $('storesearch-area').placeholder = T().area_ph;
 }
 
 let catalog = JSON.parse(localStorage.getItem('pc_catalog') || '[]');
@@ -1110,6 +1144,11 @@ function renderStores() {
     div.innerHTML = `<div class="srhead"><b></b><button class="del"></button></div>
       <textarea maxlength="300"></textarea><button class="savenotes"></button>`;
     div.querySelector('b').textContent = '🏬 ' + s.name;
+    if (s.address) {
+      const a = document.createElement('div');
+      a.className = 'addr'; a.textContent = '📍 ' + s.address;
+      div.querySelector('.srhead').insertAdjacentElement('afterend', a);
+    }
     const ta = div.querySelector('textarea');
     ta.value = s.notes || ''; ta.placeholder = T().store_notes_ph;
     const sv = div.querySelector('.savenotes'); sv.textContent = T().save_notes;
@@ -1131,7 +1170,65 @@ function renderStores() {
     if (!v) return;
     enqueue({ type:'store_upsert', store_name: v });
     $('newstore-name').value = '';
+    $('storesearch-results').innerHTML = '';
   };
+  $('storesearch-go').onclick = searchStores;
+  $('storesearch-area').onkeydown = e => { if (e.key === 'Enter') searchStores(); };
+}
+
+/* 🔍 — pin a store to the real shop it is, via OpenStreetMap.
+ *
+ * The ＋ button is deliberately left alone: a shop OSM has never heard of must
+ * still be addable by name, and it then behaves exactly as stores did before
+ * Phase 6. This is an extra way in, never a gate.
+ *
+ * Nothing here invents anything. No results means "no results" — the one thing
+ * it must never do is offer a plausible address it did not receive. */
+function osmNote(msg) {
+  const box = $('storesearch-results');
+  box.innerHTML = '';
+  const d = document.createElement('div');
+  d.className = 'osmnote'; d.textContent = msg;
+  box.appendChild(d);
+}
+
+async function searchStores() {
+  const name = $('newstore-name').value.trim();
+  if (!name) { osmNote(T().osm_need); return; }
+  const area = $('storesearch-area').value.trim();
+  osmNote(T().osm_searching);
+  let data;
+  try {
+    const res = await fetch('/api/stores/search?q=' + encodeURIComponent(name)
+      + '&area=' + encodeURIComponent(area));
+    if (res.status === 503) { osmNote(T().osm_off); return; }
+    if (!res.ok) { osmNote(T().osm_fail); return; }
+    data = await res.json();
+  } catch (e) { osmNote(T().osm_fail); return; }
+
+  const hits = (data && data.results) || [];
+  if (!hits.length) { osmNote(T().osm_none); return; }
+
+  const box = $('storesearch-results');
+  box.innerHTML = '';
+  for (const h of hits) {
+    const d = document.createElement('div');
+    d.className = 'osmhit';
+    d.innerHTML = '<b></b><span></span>';
+    d.querySelector('b').textContent = '🏬 ' + h.name;
+    d.querySelector('span').textContent = h.address || '';
+    d.onclick = () => {
+      enqueue({
+        type:'store_upsert', store_name: h.name,
+        store_osm_id: h.osm_id, store_address: h.address || '',
+        store_lat: h.lat, store_lon: h.lon, store_brand: h.brand || '',
+      });
+      $('newstore-name').value = '';
+      $('storesearch-area').value = '';
+      box.innerHTML = '';
+    };
+    box.appendChild(d);
+  }
 }
 
 function render() {

@@ -34,6 +34,7 @@ import catalog
 import cycles
 import db
 import ideas
+import lookup
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("thincart")
@@ -55,6 +56,7 @@ def now_iso() -> str:
 # broadcast through bind() rather than importing app, which would be circular.
 # Routers are included at the bottom, after broadcast_state exists.
 ideas.bind(conn)
+lookup.bind(conn)
 
 
 class Op(BaseModel):
@@ -86,6 +88,14 @@ class Op(BaseModel):
     # store_upsert
     store_name: str | None = Field(None, max_length=60)
     store_notes: str | None = Field(None, max_length=300)
+    # store_upsert (Phase 6): the real-world place this store IS, from the
+    # OpenStreetMap picker. All optional — a store added as free text has none of
+    # them and works exactly as it did before.
+    store_osm_id: str | None = Field(None, max_length=40)
+    store_address: str | None = Field(None, max_length=300)
+    store_lat: float | None = None
+    store_lon: float | None = None
+    store_brand: str | None = Field(None, max_length=60)
     # store_delete
     store_id: int | None = None
     # add (client-generated item uuid) / checkoff / remove
@@ -358,6 +368,18 @@ def apply_store_upsert(op: Op, ts: str) -> dict:
     sid = db.get_or_create_store(conn, op.store_name)
     if op.store_notes is not None:
         conn.execute("UPDATE stores SET notes=? WHERE id=?", (op.store_notes.strip(), sid))
+    # Pinning to a real place is an edit, never a migration: a field the op does
+    # not carry is left alone, so re-adding a store by name cannot blank the
+    # address a previous pick established.
+    for sql, val in (
+        ("UPDATE stores SET osm_id=? WHERE id=?", op.store_osm_id),
+        ("UPDATE stores SET address=? WHERE id=?", op.store_address),
+        ("UPDATE stores SET lat=? WHERE id=?", op.store_lat),
+        ("UPDATE stores SET lon=? WHERE id=?", op.store_lon),
+        ("UPDATE stores SET brand=? WHERE id=?", op.store_brand),
+    ):
+        if val is not None:
+            conn.execute(sql, (val, sid))
     db.bump_revision(conn)
     return {"store_id": sid}
 
@@ -570,6 +592,7 @@ async def ws_endpoint(ws: WebSocket):
 away.bind(away.Context(conn=conn, write_lock=write_lock, broadcast=broadcast_state, now_iso=now_iso))
 app.include_router(away.router)
 app.include_router(ideas.router)
+app.include_router(lookup.router)
 
 
 @app.get("/")

@@ -766,3 +766,123 @@ navigate needs this same check.
 Verified: 55/55 (`test_results/mobile_launcher_2026-08-30.txt`) and the APK
 build. On-device confirmation of v1.1 (versionCode 2) is the remaining gate —
 v1.0's whole point is that a green suite did not mean a working app.
+
+---
+
+## Phase 6 — exact stores, price comparison, aisle view (2026-08-30)
+
+User request, three parts: (1) pin each store in the registry to the *exact*
+real-world shop, via a search that offers options to pick from; (2) compare
+prices, with a brand/product picker so the comparison is about a specific
+product rather than "milk"; (3) while **I'm at ⟨store⟩** is active, let the list
+be grouped **by aisle** as well as by category.
+
+**Data sources — decided by the user 2026-08-30**, after being offered a
+local-history alternative for each:
+
+| feature | source | offered alternative, declined |
+|---|---|---|
+| store identity | OpenStreetMap (type an area) | Google Places; OSM + phone GPS |
+| brand/product list | online product search | own purchase history; LLM guess |
+| prices | **online lookup only** | own recorded prices; hybrid |
+| aisle | online lookup per store | learned from check-off order; LLM guess |
+
+The online-only price choice was made with the objection on the table — that
+per-store retail prices are not reliably available and an LLM reading search
+results will sometimes produce a confident wrong number. It is the user's call
+and it stands. What follows from it is a build obligation, not a veto: **every
+number this feature shows carries its source URL and its fetch date, and "no
+price found" is a first-class answer.** The failure mode to design against is
+not "we couldn't find it" — it is a plausible figure with nothing behind it.
+
+### The posture change, stated plainly
+
+Until now ThinCart made **no outbound network calls at all**. Everything lived
+on the tailnet, and the only non-local dependency was vLLM on `127.0.0.1:8000`.
+These three features change that: the DGX will fetch from Nominatim and from
+SearXNG's upstream engines, and the queries carry **store names and the things
+the household is buying**. SearXNG proxies to public engines, so that content
+leaves the tailnet.
+
+That is a real change to what this app is, and it is why this phase is written
+down before it is built rather than after. The mitigations are structural:
+
+- **One choke point.** `server/lookup.py` is the only module in the repo
+  permitted to make an outbound request. Everything else calls it. Grepping for
+  outbound HTTP anywhere else is a review failure.
+- **Per-feature kill switches.** `THINCART_LOOKUP=off|stores|all` in the systemd
+  unit. Off is a supported state: the app degrades to exactly today's behaviour.
+- **Cache before network.** Every lookup is cached in SQLite with its fetch
+  date; a repeat question never re-queries. This is a privacy measure as much as
+  a latency one.
+- **No identifiers.** Queries carry item and store names, never the household,
+  the list, the calendar, or anything from `away_days`.
+
+### Shape, following the module conventions already here
+
+`lookup.py` is a bound `APIRouter` like `ideas.py`: handed its connection at
+startup, best-effort throughout, and **nothing in the list or its sync may ever
+depend on it**. When it is down or off, every endpoint 503s and the rest of the
+app does not notice — the same contract the LLM features already keep.
+
+Provenance is not optional anywhere in this phase. Every row any of the three
+features writes carries `source` (URL or engine), `fetched_at`, and for prices a
+`confidence`. A record that cannot say where it came from is not written.
+
+### 6A — exact store  *(no dependencies; unblocks 6B and 6C)*
+
+- `GET /api/stores/search?q=&area=` → Nominatim, filtered to grocery-ish OSM
+  tags. Returns name, address, lat/lon, `osm_id`. Rate-limited to Nominatim's
+  1 req/s policy with a real User-Agent, and cached.
+- `stores` gains `osm_id`, `address`, `lat`, `lon`, `brand` via the existing
+  migration list (`db.py:109`). `store_upsert` carries them.
+- Stores panel: **Add store** → name + area → pick from results. Free-text add
+  stays, because a shop OSM does not know must still be addable.
+- Existing stores keep working untouched; pinning one to an OSM entry is an
+  edit, never a migration.
+
+### 6B — aisle view  *(needs 6A: an aisle question is meaningless without a real store)*
+
+- `aisle_hints(store_id, catalog_id, label, source, fetched_at)`.
+- `GET /api/aisles?store_id=` → for the items currently on the list, look up
+  each one's aisle at that specific store (SearXNG + LLM extraction, long TTL —
+  a shop's layout changes on the order of months). Cached per (store, item).
+- UI: while **I'm at ⟨store⟩** is set, a segmented control appears above the
+  list — **Category | Aisle**. Category is today's view and stays the default.
+- Aisle view groups by label in learned walking order where known, and puts
+  everything unknown in a final group. **An item with no known aisle is shown as
+  unknown, never guessed into a plausible one** — a wrong aisle costs a lap of
+  the shop, which is worse than an honest blank.
+- With the toggle set to Aisle and nothing known, it falls back to category
+  grouping and says why.
+
+### 6C — product + price comparison  *(largest, most uncertain)*
+
+- `products(catalog_id, brand, name, size, source, fetched_at)` and
+  `price_quotes(product_id, store_id, price, currency, source_url, fetched_at,
+  confidence)`.
+- `GET /api/products/search?catalog_id=` → online product search → brand/size
+  options to pick from. The pick is remembered against the catalog item, so the
+  question is asked once per product, not once per shop.
+- `GET /api/prices?catalog_id=&product_id=` → a quote per store in the registry.
+- Item sheet gains **Compare prices** → brand picker → a table of store, price,
+  date, source. Every screen of it is labelled as looked up online and not
+  verified at the shelf; a quote past its TTL is shown greyed with its age, not
+  refreshed silently. Tapping a row sets the preferred store, which is an
+  existing mechanism.
+- The currency display is already symbol-free (`fmtYen` renders 💰 + number), so
+  no locale work is needed.
+
+### Test obligation
+
+The seam lesson from the APK (§2026-08-30) applies directly. These features are
+the first in this repo whose correctness depends on **something outside the
+process**, so the suite has to be split accordingly: parsers, extraction and
+provenance rules tested against **recorded fixtures** with no network; the
+network path itself tested separately and allowed to be skipped when offline. A
+green suite must never again be able to mean "the code is fine" while the thing
+it talks to has changed shape.
+
+Explicitly tested: a lookup that finds nothing renders as "not found" and never
+as a number; a quote without a source URL is refused at write time;
+`THINCART_LOOKUP=off` leaves every existing endpoint byte-identical.
