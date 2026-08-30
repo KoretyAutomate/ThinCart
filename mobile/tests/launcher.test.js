@@ -152,6 +152,55 @@ for (const bad of BAD) {
       b.w.document.getElementById("url").value === "https://old.example.ts.net");
   }
 
+  console.log("\n--- 9. handoff that never completes: says so, offers a way out ---");
+  {
+    // What v1.0 did on the phone: probe fine, navigation refused by
+    // allowNavigation, launcher left on screen with its spinner and no message.
+    // The message deliberately names no cause — a refusal (Capacitor fires
+    // ACTION_VIEW, so the page opens in the browser) and a merely-slow commit
+    // cannot be told apart from in here, and backgrounding does not separate
+    // them either since locking the phone backgrounds the app too.
+    const b = boot({ saved: "https://spark.example.ts.net", reachable: true });
+    b.w.openServer = () => { /* never completes, for whichever reason */ };
+    // The launcher runs under "use strict", so its top-level vars are not window
+    // properties and the grace period cannot be shortened from out here. Capture
+    // the timer instead: launch() schedules it via window.setTimeout, and the
+    // probe's own timer was already created (and cleared) during eval.
+    let handoffCb = null;
+    b.w.setTimeout = (fn) => { handoffCb = fn; return 0; };
+    await drain(); await drain();
+    check("was on the connecting screen at handoff", b.visible() === "connecting", b.visible());
+    check("scheduled a check", typeof handoffCb === "function");
+    if (handoffCb) handoffCb();
+    check("falls back to settings", b.visible() === "settings", b.visible());
+    const msg = b.w.document.getElementById("settings-err").textContent;
+    check("says the server was reachable", /server answered/.test(msg), msg);
+    check("offers the address as the thing to check", /check the\s+address/.test(msg), msg);
+    check("claims no cause it cannot know",
+      !/because|disallowed|refused to/.test(msg), msg);
+  }
+
+  console.log("\n--- 10. successful handoff cancels the refusal timer (Codex P2) ---");
+  {
+    // A successful navigation may park this document in the WebView's
+    // back-forward cache, where the timer is paused, not dropped. Back within
+    // four seconds would resume it and report a refusal that never happened.
+    const b = boot({ saved: "https://spark.example.ts.net", reachable: true });
+    const TIMER_ID = 987654;
+    const cleared = [];
+    b.w.setTimeout = () => TIMER_ID;
+    b.w.clearTimeout = (id) => cleared.push(id);
+    await drain(); await drain();
+    check("navigated", b.navigated[0] === "https://spark.example.ts.net", b.navigated);
+    check("refusal timer not cancelled while still on the launcher",
+      !cleared.includes(TIMER_ID), cleared);
+    b.w.dispatchEvent(new b.w.Event("pagehide"));
+    check("pagehide cancels the refusal timer", cleared.includes(TIMER_ID), cleared);
+    check("no false refusal shown",
+      b.w.document.getElementById("settings-err").textContent === "",
+      b.w.document.getElementById("settings-err").textContent);
+  }
+
   console.log(`\n================ ${passed} passed, ${failed} failed ================`);
   process.exit(failed === 0 ? 0 : 1);
 })();
