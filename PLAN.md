@@ -886,3 +886,275 @@ it talks to has changed shape.
 Explicitly tested: a lookup that finds nothing renders as "not found" and never
 as a number; a quote without a source URL is refused at write time;
 `THINCART_LOOKUP=off` leaves every existing endpoint byte-identical.
+
+### 2026-09-06 — the data source, found (supersedes the 6B/6C sourcing above)
+
+The plan above assumed web search would answer "what does this cost here" and
+"which aisle is it in". It cannot, and two rounds of being wrong about it are
+worth recording, because both errors were the same error.
+
+**What actually happened.** SearXNG returned nothing (every general engine it
+proxies is CAPTCHA'd or access-denied from this box; `bing` and `seznam` work
+and are merely `disabled: true` in its config). With search fixed, the results
+for these questions are marketing pages and a cashback app coincidentally
+called "Aisle" — better search does not put a price into a page that has none.
+The user then pointed at a product page and said the information is visibly
+there. It is. **The mistake both times was concluding from the anonymous page
+that the data did not exist, when it is store-scoped and fetched after load.**
+Price and aisle were never two problems; they are one.
+
+**Where it lives.** wegmans.com runs on Algolia (app `QGPPR19V8V`, public search
+key in the JS bundle). The `products` index holds **one record per (product ×
+store)** — 14.1M records — and `filters: "storeNumber:<n>"` scopes it. Verified
+2026-09-06 for Princeton, store 93 (from `/stores/princeton-nj`, which carries
+`storeNumber":93`):
+
+| field | example |
+|---|---|
+| `price_inStore` | `{"amount": 6.99, "unitPrice": "$0.44/ounce", "channelKey": "93-Instore"}` |
+| `planogram` | `{"aisle": "14B", "aisleSide": "L", "section": "11", "shelf": "1"}` |
+| identity | `skuId` 44442, `consumerBrandName`, `consumerSubBrandName`, `packSize`, `upc` |
+| stock | `isSoldAtStore`, `isAvailable` |
+
+The same sku across stores: 93 → $6.99, 111 → $7.99, 139 → $4.99, each with its
+own aisle. So price comparison is real rather than notional, and the aisle is
+per store rather than a generic guess — which is exactly what made the
+"learn it from check-off order" fallback worth avoiding.
+
+Note `products_v2` is the store-agnostic index: no price, no `skuId`, and a
+`planogram` keyed by an opaque store ordinal. `products` is the one to use.
+
+**Consequences for the build.**
+
+- **A store may or may not have a price source.** This is a Wegmans adapter, not
+  a general capability. `stores` gains `chain` + `chain_store_id`; a store
+  without them simply has no prices or aisles, and every screen must read
+  correctly in that state rather than looking broken.
+- **The keys are theirs and can rotate without notice.** The failure mode is a
+  visible "prices unavailable", never a stale number presented as current and
+  never a blank that reads as "free". Each quote keeps its `fetched_at`.
+- **The ToS question is the user's, taken knowingly** (asked and answered
+  2026-08-31). Volume stays low: cache first, one request per (sku, store), and
+  the whole path sits behind `THINCART_LOOKUP` like everything else in Phase 6.
+- The aisle is richer than planned — side of aisle, section and shelf, not just
+  a number. Worth showing, since "14B, left, section 11" is a findable
+  instruction and "aisle 14" is not.
+
+### 2026-09-06 — gate findings on Phase 6 (what was accepted, what was not)
+
+Nine findings across four rounds. Eight were real and are fixed; the ninth was
+wrong and is recorded here so it is not "fixed" by a later reader.
+
+**Accepted.** The price request raced the product pick (`enqueue()` is
+optimistic, so the first comparison after choosing priced whatever the generic
+name matched — the sku now travels with the request instead of being read back).
+Repinning a store kept the old branch's chain link, which for a chain whose
+branches share a name meant Princeton's prices under Bridgewater's address. The
+2-day price TTL never applied, because price-bearing records were cached under
+the 14-day product kind — `cache_get` now takes a `max_age` so one record can be
+fresh enough for an aisle and too old for a price. Quotes reported the response
+clock as `fetched_at`, making a stale price read as current. Aisles sorted as
+text, so aisle 10 walked before aisle 2 — the one thing the view promises. The
+aisle map never refreshed, so an item added mid-walk stayed in "unknown" until
+you changed shops. Out-of-stock quotes sorted among buyable ones and could be
+picked as the cheapest. And every quote said `source: "wegmans"` where the
+contract in `lookup.py`'s own docstring promises a source that can be **looked
+at** — now the product URL, rendered as a ↗ on each row.
+
+**Rejected, with evidence.** [P1] "the Algolia multi-query payload is invalid;
+`/1/indexes/*/queries` needs `{indexName, params}` URL-encoded, so uncached
+aisle lookups return unscoped or empty results." Checked against the live API:
+the flat shape returns HTTP 200 with the filter applied — every hit came back
+`storeNumber: "93"` with aisles 14B and Dairy, identical to the single-query
+path, and the params-encoded form returns the same rows. Algolia accepts both.
+The uncached path had already been exercised end to end before the review.
+
+A fifth round found two more, both consequences of an incomplete fix in the
+fourth: passing the sku to `/api/prices` was not enough, because the SEARCH TERM
+was still the item's generic name — the picked jar need not appear in the top
+hits for "sunflower butter", so an exact quote could still be replaced by an
+approximate one. The picked name now travels with the request too. And picking a
+product while the aisle view is open left the aisle map keyed on store + item
+ids, neither of which changed, so the old approximate aisle stayed on screen;
+the map is now dropped on a pick.
+
+A sixth round found the sharpest one. `wegmans_products_many` returned its
+partial cache as a success when the network leg failed, so items nobody could
+ask about arrived at the UI indistinguishable from items that genuinely have no
+aisle — and were rendered as "Aisle unknown". That is rule 2 broken by the
+module that declares it. It now returns `(records, complete)` and the endpoint
+reports `partial`, which the UI says out loud: *those are not "unknown", just
+unasked.* The same round asked for the provider's app id, index and store URL to
+be configurable rather than baked in; accepted in substance (all four are
+theirs, not ours, and can change without notice) though not in its framing —
+this repo has no `.env`, and its configuration lives in the systemd unit
+alongside THINCART_TZ and THINCART_LOOKUP, which is where these went.
+
+A seventh round caught the same race a third time, now in the aisle path:
+choosing a product fired `/api/aisles` alongside the optimistic pick, so the map
+could be rebuilt from the OLD generic name and cached under an unchanged key,
+pinning the stale aisle. The fix removes the request rather than sequencing it —
+`/api/products/search` now returns each option's aisle label, so choosing one
+updates the aisle view from the record already in hand. Three findings in a row
+came from the same source: **the op queue is optimistic, so anything read back
+from the server immediately after an `enqueue()` is racing it.** Where a value
+is already known client-side, use it; where it is not, send it with the request.
+Never read it back.
+
+An eighth round found three, and the first showed the seventh's fix was half
+done: a global `partial` flag still left the UI unable to say WHICH items went
+unasked, so it grouped them under "Aisle unknown" anyway — the very confusion
+the flag was added to prevent. The endpoint now names them, and they get their
+own group ("Not looked up — try again"). Also: an empty list made
+`_algolia_multi` return None for an empty request set, so opening the aisle view
+with nothing on the list reported the lookup as unavailable. And every 503 was
+rendered as "lookup is off", though 503 also covers a missing key or a provider
+failure — one is a setting to change, the other is weather to wait out, so the
+body now carries `lookup_disabled` vs `lookup_unavailable` and all three screens
+branch on it.
+
+A ninth round found the last one: choosing a product with no aisle data left the
+previous approximate entry in place, so the generic match's location was then
+shown as the chosen product's exact one. The entry is now deleted.
+
+A tenth round caught the list-sync gap: the aisle map is keyed on the list, but
+only `loadAisles()` evaluated that key, and websocket state updates call
+`render()` alone. An item the other phone added while you were walking therefore
+sat in "Aisle unknown" for the rest of the trip. Both state paths now call a
+`syncAisles()` that reloads when the key has moved and no-ops otherwise.
+
+An eleventh round found two more. Overlapping `loadAisles()` calls could land
+out of order — change shops mid-request and the older reply, arriving last,
+would put the previous store's aisles on screen under the current store's name;
+responses are now discarded unless the key they were fetched for is still the
+one on screen. And `/api/products/search` still searched the generic name even
+when a pick existed, so a remembered product outside the top hits came back
+absent from its own options list: shown as chosen, impossible to see.
+
+A twelfth round found the deepest one, and it bites the very case this phase
+exists for. Stores are keyed by canonical NAME, so pinning a second Wegmans
+collapses both branches into one row: the second pick overwrites the first
+branch's address and clears its chain link, and comparing one product at two
+branches — the obvious use of price comparison when only one chain has an
+adapter — becomes impossible. Rather than re-key store identity on `osm_id`
+(which ops reference by name throughout, and would ripple into checkoff, edit
+and the "I'm at" selector), the OSM picker now names a colliding branch after
+its town: *Wegmans (Bridgewater)* beside *Wegmans*. The town comes from
+Nominatim's structured address, which we already request, rather than being
+picked out of the display string. Re-keying identity properly is banked, not
+done; this makes the two branches coexist, which is what the feature needed.
+
+A thirteenth round found the last two, both about a change made on the OTHER
+phone. The branch-clash check compared names with `===` while the server keys
+stores by `canonical()`, so a free-text "wegmans" followed by an OSM "Wegmans"
+missed the clash and repinned the existing row — the check now uses `canon()`,
+the client twin of that function. And the aisle key held store + item ids but
+not product picks, so a pick made on the other phone never moved the key and
+this phone kept showing the old product's aisle indefinitely; `state()` now
+carries a compact `catalog_id -> sku` map and the key includes the picks for
+items actually on the list.
+
+Rounds fourteen and fifteen closed the last two. Picking a product cleared its
+aisle entry but left it in the "unasked" set, so an item we HAD looked up and
+which genuinely has no aisle was reported as "Not looked up". And only the
+success path of `loadAisles()` checked whether its reply was still the current
+one — an older 503 or a thrown error landing after a newer success would wipe
+the current store's aisles and blame the wrong thing; the guard now sits on
+every exit, `catch` included. The Nominatim endpoint also became overridable,
+for the same reason the chain identifiers are: it is somebody else's URL.
+
+A sixteenth round found the same distinction broken at its own boundary: when
+EVERY priced store failed, `/api/prices` returned 200 with an empty quote list,
+so the UI's empty-check fired first and said "no price found" — a claim about
+the shop when the truth was an outage on our side. It now 503s when something
+broke and nothing came back, keeping `partial` for the mixed case.
+
+A seventeenth round made the best structural point of the review: **the default
+should be `off`, not `all`.** The contract before Phase 6 was no outbound
+request at all, and that is what an unconfigured launch should still do — a dev
+run, a test process, somebody cloning this public repo. Reaching outside is now
+something a deployment opts into, and the systemd unit does
+(`THINCART_LOOKUP=all`), so the live app is unchanged. This also surfaced a test
+isolation bug: `MODE` is read once at import, and whichever test module imports
+the server first fixes it for the process — so the opt-in moved to
+`tests/conftest.py`, which runs before any of them.
+
+An eighteenth round caught the contract broken in the one place it was written
+down: store-search records carried `source` but not `fetched_at`, though the
+module docstring promises both on every record. Stamped at parse time and
+carried through the cache.
+
+A nineteenth round found two more, one of them nasty. `THINCART_LOOKUP=stores`
+promises OpenStreetMap and nothing else, but *Link prices* went on to fetch the
+chain's branch page — stepping outside the mode the owner chose, quietly. And a
+branch page that returned 200 without a store number (a redesign, an
+interstitial, a bot wall) was cached as `""` under the 90-day chain TTL, turning
+a failure to READ into a durable "there is no such branch" that would not retry
+for three months. Both fixed: linking now requires a content mode, and only a
+validated number is ever cached.
+
+A twentieth round closed the branch-collision fix properly: Nominatim does not
+guarantee a town on every result, and with an empty one the name fell back
+unchanged and the collision returned. A clash must always produce a different
+name, so it now falls through town → street → osm_id. The last is ugly and
+always present, which is the right trade when the alternative is silently
+overwriting the other branch.
+
+A twenty-first round overturned a deliberate design decision, and was right to.
+Approximate matches were being SHOWN in the price comparison, marked with a ≈
+and a footnote. The objection: a price is a claim about one product, and putting
+a different jar's amount into the same price-sorted list implies a
+comparability that marking the row does not undo — the cheapest line could be
+something the household does not buy. Once a product has been picked, a near
+match now leaves the comparison entirely and appears beneath it under "Not
+listed there — what they have instead". Before a pick there is nothing to be
+approximate *to*, so the best match on the item's own name stays the answer.
+
+This is the one finding that changed a decision rather than fixing a slip, and
+it is the same lesson as all the others arriving from a new direction: marking
+a value as uncertain is not the same as not presenting it as certain. The layout
+was doing the asserting.
+
+A twenty-second round caught a bug introduced by the twenty-first: the quote
+dict was named `row`, shadowing the catalog row it was built from, so the SECOND
+priced store raised `KeyError` — i.e. the comparison feature crashed in exactly
+the case comparison exists for, and only there. There is now a test with two
+priced stores, driven from the cache so it needs no network. The same round
+noted `zip(strict=False)` would silently drop terms if Algolia returned fewer
+results than queries, reporting `complete=True` over a short list; the count is
+now checked.
+
+Codex reached LGTM on the twenty-third round; the remaining block was the
+600-line ceiling, `lookup.py` having grown back to 639. Split again along the
+seam that matters: the HTTP surface moved to `lookup_api.py`, and **lookup.py
+remains the only module in this repo that makes an outbound request** — the
+handlers ask it for facts and shape them into responses. So the outbound surface
+is still auditable by reading one file, which was the point of concentrating it.
+
+**Rejected, with reasons.** [P2] "make the provider's app id, index and endpoint
+REQUIRED env values and report the adapter unavailable when any is absent,
+rather than falling back to constants." Declined. The key alone already gates
+the adapter: unset means no prices and no aisles. Making three more variables
+mandatory adds deployment steps for no correctness gain — and if the provider
+does change an identifier, the stale default produces a failed request, which
+surfaces as a visible "couldn't reach", not as a silently wrong answer. The
+overridability the previous round asked for is in place; requiring it as well
+would trade a working default for friction. (The premise that this repo has a
+`.env` "source of truth" is also wrong, and was checked rather than assumed:
+there is no `.env` in the tree, nothing in the code or docs references one, and
+configuration is four `Environment=` lines in `server/deploy/thincart.service`.
+The same finding arrived three times across rounds 8, 10 and 12; the answer did
+not change.)
+
+**The pattern worth keeping.** Nine rounds, thirteen real findings, and almost
+every one was the same mistake wearing a different hat: *a value presented as
+more certain than it was.* A stale price as current. An approximate match as the
+product. An unbuyable one as the cheapest. An unasked item as one with no aisle.
+A provider outage as a setting. A previous product's aisle as this one's. The
+phase was designed against exactly this and it still got in thirteen times,
+which is worth remembering next time the design feels like enough.
+
+Three of them shared one mechanical cause worth stating on its own: **the op
+queue is optimistic, so anything read back from the server immediately after an
+`enqueue()` is racing it.** Where the value is already known client-side, use
+it; where it is not, send it with the request. Never read it back.

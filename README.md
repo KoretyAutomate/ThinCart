@@ -29,7 +29,19 @@ See `PLAN.md` for the full architecture (agent-reviewed, approved 2026-07-03).
 Runs on a home DGX box over a private Tailscale tailnet (bind IP + hostname are
 placeholders — swap in your own). Requires Python 3.11+, and a local
 OpenAI-compatible LLM endpoint on `:8000` for the enrichment/recipe features
-(the list + sync work without it). No cloud, no accounts, no app store.
+(the list + sync work without it). No accounts, no app store.
+
+**On "no cloud" (changed 2026-09-06).** Until Phase 6 this app made no outbound
+request at all. Store search, price comparison and the aisle view do — to
+OpenStreetMap, and to a store's own product catalogue — and those queries carry
+shop names and the things you are buying. That is a real change and the claim
+above was edited rather than left standing. It is confined and switchable:
+every outbound call in the repo lives in `server/lookup.py`, results are cached
+so a repeat question never re-asks, no household/list/calendar data is ever
+sent, and `THINCART_LOOKUP` decides how far it may reach: `off` (the default,
+and exactly the pre-Phase-6 behaviour), `stores` (shop name + town only), or
+`all`. An unconfigured run makes no outbound request; the systemd unit is
+where a deployment opts in.
 
 ## Use it
 
@@ -125,6 +137,41 @@ day you confirm or reject is never overwritten by a later sync.
 Set `THINCART_HOME_PATTERNS` (see `server/deploy/thincart.service`) to the place
 words that mean *still home* — without `princeton`, a hotel booked in town
 proposed 12 away days that had to be rejected by hand.
+
+## Exact stores, prices and the aisle view
+
+**Pin a store to the real shop.** 🏬 → type the name, type the town, tap 🔍 →
+pick from OpenStreetMap. The row then carries an address and an `osm_id`.
+Adding by name with ＋ still works and is unchanged — a shop OSM has never
+heard of stays first class.
+
+**Link its prices.** A pinned store shows *Link prices*, which resolves it to
+the chain's own branch number (Wegmans Princeton = 93). Only Wegmans has an
+adapter; any other store answers plainly that it has none, and simply has no
+prices or aisles. That is the ordinary case.
+
+**Compare prices.** Long-press an item → *💲 Find product & compare prices*.
+It asks which product you actually buy — "milk" has no price, *Wegmans Organic
+Creamy Sunflower Butter, 16 ounce* has one — then shows that product's price at
+every linked store, cheapest first, with the unit price and the aisle. The
+choice is remembered per product, so it is asked once rather than every trip.
+Tapping a row pins that store as where the item is bought.
+
+A row marked `≈` is the closest name match rather than the product you chose:
+useful for finding an aisle, and explicitly not the same thing as your product's
+price. A lookup that finds nothing says so — it never falls back to a number it
+did not receive.
+
+**Walk the aisles.** While *I'm at ⟨store⟩* is set on a linked store, a
+**By category | By aisle** toggle appears above the list. Aisle order groups by
+that branch's own shelf data (`Aisle 14B · left · sec 11`; perishables come back
+as a department, `Dairy`). Anything whose aisle is unknown goes to a group at
+the end and says *Aisle unknown* — never into a plausible-looking aisle, because
+being sent to the wrong one costs a lap of the shop.
+
+The key for the store catalogue is not in this repo — it is theirs and they can
+rotate it. Set `THINCART_WEGMANS_KEY` in the systemd unit; unset means no prices
+and no aisles, and nothing else changes.
 
 ## Ops
 

@@ -81,10 +81,25 @@ CREATE TABLE IF NOT EXISTS applied_ops(
 CREATE INDEX IF NOT EXISTS idx_events_catalog ON purchase_events(catalog_id, bought_at);
 CREATE INDEX IF NOT EXISTS idx_items_catalog ON items(catalog_id);
 
+-- Phase 6. WHICH product the household actually buys for a catalog item —
+-- "milk" is not a thing you can price, "Wegmans Organic Creamy Sunflower Butter
+-- 16oz" is. Chosen once from the chain's own catalogue, then reused, so the
+-- question is asked per product rather than per shopping trip.
+CREATE TABLE IF NOT EXISTS product_picks(
+  catalog_id INTEGER NOT NULL REFERENCES item_catalog(id) ON DELETE CASCADE,
+  chain TEXT NOT NULL,                   -- which chain's catalogue this sku is from
+  sku TEXT NOT NULL,
+  name TEXT NOT NULL DEFAULT '',
+  brand TEXT NOT NULL DEFAULT '',
+  pack_size TEXT NOT NULL DEFAULT '',
+  picked_at TEXT NOT NULL,
+  PRIMARY KEY (catalog_id, chain)
+);
+
 -- Phase 6. Everything any outbound lookup has ever learned, with the date it
 -- learned it. Read before the network is asked anything, which bounds how often
--- the shopping list is described to a search engine. Disposable: deleting a row
--- costs one re-fetch, never a fact the household typed.
+-- the shopping list is described to anyone outside the tailnet. Disposable:
+-- deleting a row costs one re-fetch, never a fact the household typed.
 CREATE TABLE IF NOT EXISTS lookup_cache(
   kind TEXT NOT NULL,                    -- store | product | aisle | price
   key TEXT NOT NULL,
@@ -137,6 +152,12 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
         "ALTER TABLE stores ADD COLUMN lat REAL",
         "ALTER TABLE stores ADD COLUMN lon REAL",
         "ALTER TABLE stores ADD COLUMN brand TEXT NOT NULL DEFAULT ''",
+        # The chain's OWN id for this branch (Wegmans Princeton = "93"). Distinct
+        # from osm_id: that pins the store on a map, this is what the chain's
+        # product data is keyed by. A store with no chain simply has no prices
+        # and no aisles, which is the normal case and must read as such.
+        "ALTER TABLE stores ADD COLUMN chain TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE stores ADD COLUMN chain_store_id TEXT NOT NULL DEFAULT ''",
     ):
         with contextlib.suppress(sqlite3.OperationalError):
             conn.execute(ddl)
@@ -199,7 +220,8 @@ def stores_list(conn: sqlite3.Connection) -> list[dict]:
     return [
         dict(r)
         for r in conn.execute(
-            "SELECT id, name, notes, osm_id, address, lat, lon, brand FROM stores ORDER BY name"
+            "SELECT id, name, notes, osm_id, address, lat, lon, brand, chain, chain_store_id "
+            "FROM stores ORDER BY name"
         )
     ]
 
@@ -412,6 +434,14 @@ def state(conn: sqlite3.Connection, now=None) -> dict:
         "revision": get_revision(conn),
         "items": items,
         "stores": stores,
+        # catalog_id -> sku of the product the household settled on. Small, and
+        # it has to be SYNCED: the other phone choosing a specific jar changes
+        # which aisle this phone should be showing, and without it here that
+        # change is invisible until the app is reopened.
+        "picks": {
+            str(r["catalog_id"]): r["sku"]
+            for r in conn.execute("SELECT catalog_id, sku FROM product_picks")
+        },
         "suggestions": suggestions(conn, now),
         # badge on the Travel button: detected days nobody has ruled on yet
         "away_pending": conn.execute("SELECT COUNT(*) FROM away_days WHERE status='auto'").fetchone()[0],

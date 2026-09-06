@@ -22,12 +22,10 @@ import unicodedata
 import uuid
 from datetime import datetime, timedelta, UTC
 from pathlib import Path
-from typing import Literal
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
 
 import away
 import catalog
@@ -35,6 +33,8 @@ import cycles
 import db
 import ideas
 import lookup
+import lookup_api
+from ops import Op
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("thincart")
@@ -57,56 +57,6 @@ def now_iso() -> str:
 # Routers are included at the bottom, after broadcast_state exists.
 ideas.bind(conn)
 lookup.bind(conn)
-
-
-class Op(BaseModel):
-    op_id: str = Field(..., min_length=8, max_length=64)
-    type: Literal[
-        "add",
-        "checkoff",
-        "remove",
-        "skip",
-        "undo_checkoff",
-        "undo_purchase",
-        "snooze",
-        "edit",
-        "store_upsert",
-        "store_delete",
-    ]
-    actor: str = Field("", max_length=40)
-    # add / edit
-    name: str | None = Field(None, max_length=120)
-    qty_note: str | None = Field(None, max_length=120)
-    # edit (category adjustment — one of catalog.CATEGORIES)
-    category: str | None = Field(None, max_length=20)
-    # edit: persistent purchase criteria (catalog-level — survive checkoff→re-add)
-    note: str | None = Field(None, max_length=200)
-    # edit: typical price. STRING on the wire: "" clears; "３００円"/"¥1,200" parse
-    budget: str | None = Field(None, max_length=20)
-    # edit / checkoff: store display name ("" clears the preference on edit)
-    store: str | None = Field(None, max_length=60)
-    # store_upsert
-    store_name: str | None = Field(None, max_length=60)
-    store_notes: str | None = Field(None, max_length=300)
-    # store_upsert (Phase 6): the real-world place this store IS, from the
-    # OpenStreetMap picker. All optional — a store added as free text has none of
-    # them and works exactly as it did before.
-    store_osm_id: str | None = Field(None, max_length=40)
-    store_address: str | None = Field(None, max_length=300)
-    store_lat: float | None = None
-    store_lon: float | None = None
-    store_brand: str | None = Field(None, max_length=60)
-    # store_delete
-    store_id: int | None = None
-    # add (client-generated item uuid) / checkoff / remove
-    item_id: str | None = Field(None, min_length=8, max_length=64)
-    # undo_checkoff: the op_id of the checkoff being undone
-    target_op_id: str | None = Field(None, max_length=64)
-    # undo_purchase: the purchase_events.id being corrected from the History panel
-    event_id: int | None = None
-    # snooze (suggestion dismissal — server-side so it silences BOTH phones)
-    # edit fallback: lets criteria apply when the item row vanished mid-edit
-    catalog_id: int | None = None
 
 
 def parse_budget(raw: str) -> float | None:
@@ -368,6 +318,15 @@ def apply_store_upsert(op: Op, ts: str) -> dict:
     sid = db.get_or_create_store(conn, op.store_name)
     if op.store_notes is not None:
         conn.execute("UPDATE stores SET notes=? WHERE id=?", (op.store_notes.strip(), sid))
+    # Repinning to a DIFFERENT real place drops the chain link. Branches of one
+    # chain share a name, and stores are keyed by canonical name — so pinning
+    # "Wegmans" from Princeton to Bridgewater would otherwise keep serving
+    # Princeton's prices and aisles under Bridgewater's address, with nothing on
+    # screen to show it. The link must be re-earned whenever the place changes.
+    if op.store_osm_id:
+        prev = conn.execute("SELECT osm_id FROM stores WHERE id=?", (sid,)).fetchone()
+        if prev and prev["osm_id"] and prev["osm_id"] != op.store_osm_id:
+            conn.execute("UPDATE stores SET chain='', chain_store_id='' WHERE id=?", (sid,))
     # Pinning to a real place is an edit, never a migration: a field the op does
     # not carry is left alone, so re-adding a store by name cannot blank the
     # address a previous pick established.
@@ -377,6 +336,8 @@ def apply_store_upsert(op: Op, ts: str) -> dict:
         ("UPDATE stores SET lat=? WHERE id=?", op.store_lat),
         ("UPDATE stores SET lon=? WHERE id=?", op.store_lon),
         ("UPDATE stores SET brand=? WHERE id=?", op.store_brand),
+        ("UPDATE stores SET chain=? WHERE id=?", op.store_chain),
+        ("UPDATE stores SET chain_store_id=? WHERE id=?", op.store_chain_id),
     ):
         if val is not None:
             conn.execute(sql, (val, sid))
@@ -400,6 +361,23 @@ def apply_store_delete(op: Op, ts: str) -> dict:
     return {"deleted_store": op.store_id}
 
 
+def apply_product_pick(op: Op, ts: str) -> dict:
+    """Remember WHICH product an item means, so price and aisle are questions
+    about a real thing. One pick per (item, chain): the same milk is a different
+    sku at a different chain, and pretending otherwise would quietly compare
+    two unrelated products."""
+    if op.catalog_id is None or not op.pick_chain or not op.pick_sku:
+        raise HTTPException(422, "product_pick requires catalog_id, pick_chain and pick_sku")
+    conn.execute(
+        "INSERT OR REPLACE INTO product_picks(catalog_id, chain, sku, name, brand, pack_size, picked_at)"
+        " VALUES(?,?,?,?,?,?,?)",
+        (op.catalog_id, op.pick_chain.strip(), op.pick_sku.strip(), (op.pick_name or "").strip(),
+         (op.pick_brand or "").strip(), (op.pick_size or "").strip(), ts),
+    )
+    db.bump_revision(conn)
+    return {"catalog_id": op.catalog_id, "sku": op.pick_sku}
+
+
 APPLY = {
     "add": apply_add,
     "checkoff": apply_checkoff,
@@ -411,6 +389,7 @@ APPLY = {
     "edit": apply_edit,
     "store_upsert": apply_store_upsert,
     "store_delete": apply_store_delete,
+    "product_pick": apply_product_pick,
 }
 
 
@@ -592,7 +571,7 @@ async def ws_endpoint(ws: WebSocket):
 away.bind(away.Context(conn=conn, write_lock=write_lock, broadcast=broadcast_state, now_iso=now_iso))
 app.include_router(away.router)
 app.include_router(ideas.router)
-app.include_router(lookup.router)
+app.include_router(lookup_api.router)
 
 
 @app.get("/")

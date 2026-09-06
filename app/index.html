@@ -73,6 +73,16 @@
   main { flex:1; overflow-y:auto; padding:8px 12px 90px; }
   .cat { font-size:.72rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
          color:var(--muted); margin:14px 6px 6px; }
+  .cat .approx { font-weight:600; letter-spacing:0; text-transform:none; opacity:.75; }
+  /* Category | Aisle — only while standing in a store that can answer. */
+  #viewtoggle { display:none; gap:0; margin:2px 0 10px; border:1.5px solid #d4dcd4;
+    border-radius:999px; overflow:hidden; background:var(--card); }
+  #viewtoggle.on { display:flex; }
+  #viewtoggle button { flex:1; border:none; background:none; padding:8px 10px;
+    font:inherit; font-size:.82rem; font-weight:600; color:var(--muted); cursor:pointer; }
+  #viewtoggle button.sel { background:var(--green); color:#fff; }
+  #aislenote { display:none; font-size:.78rem; color:var(--muted); margin:0 4px 10px; }
+  #aislenote.on { display:block; }
   ul#list { list-style:none; margin:0; padding:0; }
   li.item {
     position:relative; overflow:hidden; border-radius:12px; margin-bottom:8px;
@@ -217,6 +227,24 @@
   .osmnote { padding:11px 13px; color:var(--muted); font-size:.83rem; }
   .storerow .addr { color:var(--muted); font-size:.78rem; margin-top:3px;
     overflow-wrap:anywhere; }
+  .linkbtn { border:1.5px solid #d4dcd4; background:#eef2ec; color:var(--ink);
+    border-radius:999px; padding:5px 11px; font-size:.76rem; font-weight:700;
+    cursor:pointer; font-family:inherit; }
+  .linkbtn:disabled { opacity:.6; }
+  #sheet-compare { margin:2px 0 6px; }
+  #sheet-prices:not(:empty) { margin-bottom:12px; border:1.5px solid #d4dcd4;
+    border-radius:12px; overflow:hidden; }
+  .prow { display:flex; align-items:baseline; gap:8px; padding:9px 11px;
+    border-bottom:1px solid #eceee9; cursor:pointer; font-size:.86rem; }
+  .prow:last-child { border-bottom:none; }
+  .prow:active { background:#eef2ec; }
+  .prow.sel { background:#eaf3ec; }
+  .prow.oos { opacity:.55; cursor:default; }
+  .prow .psrc { color:var(--muted); text-decoration:none; padding:0 2px; font-size:.9rem; }
+  .prow .pn { flex:1; overflow-wrap:anywhere; }
+  .prow .pp { font-weight:700; white-space:nowrap; }
+  .prow .pu { color:var(--muted); font-size:.76rem; white-space:nowrap; }
+  .pnote { padding:9px 11px; color:var(--muted); font-size:.79rem; }
   .stores-note { color:var(--muted); font-size:.8rem; margin:20px 2px; }
   #namedlg {
     position:fixed; inset:0; background:var(--bg); z-index:40; display:none;
@@ -421,6 +449,10 @@
 </div>
 
 <main>
+  <div id="viewtoggle">
+    <button id="view-cat"></button><button id="view-aisle"></button>
+  </div>
+  <p id="aislenote"></p>
   <ul id="list"></ul>
   <div id="empty" hidden></div>
 </main>
@@ -439,6 +471,8 @@
     <textarea id="sheet-note-input" maxlength="200" rows="2"></textarea></label>
   <label class="sheet-field"><span id="sheet-budget-label"></span>
     <input id="sheet-budget" maxlength="20" inputmode="numeric"></label>
+  <button id="sheet-compare" class="linkbtn"></button>
+  <div id="sheet-prices"></div>
   <div class="sheet-field-label" id="sheet-store-label"></div>
   <div id="sheet-stores"></div>
   <div class="sheet-field-label" id="sheet-cat-label"></div>
@@ -623,6 +657,30 @@ const STR = {
     osm_off:'Store search is off on the server (THINCART_LOOKUP).',
     osm_fail:'Could not reach OpenStreetMap. The ＋ button still adds it by name.',
     osm_need:'Type a store name above first.',
+    view_cat:'By category', view_aisle:'By aisle',
+    aisle_loading:s=>`Finding aisles at ${s}…`,
+    aisle_unknown:'🤷 Aisle unknown',
+    aisle_approx:'matched by name, not your usual product',
+    aisle_none:'No aisle information for this store.',
+    aisle_off:'Aisle lookup is off on the server.',
+    aisle_fail:'Could not reach the aisle data — showing categories.',
+    aisle_partial:'Some aisles could not be looked up just now.',
+    aisle_unasked:'⏳ Not looked up (try again)',
+    link_prices:'Link prices', link_linked:s=>`💲 prices linked (store ${s})`,
+    link_trying:'Linking…',
+    compare:'💲 Find product & compare prices',
+    cmp_need_store:'Link a store to its prices first (Stores 🏬 → Link prices).',
+    cmp_searching:'Searching the store catalogue…',
+    cmp_none:'That store does not list anything matching this.',
+    cmp_off:'Price lookup is off on the server.',
+    cmp_fail:'Could not reach the store catalogue.',
+    cmp_pick:'Which one do you buy?',
+    cmp_at:n=>`Price at ${n} store${n>1?'s':''}`,
+    cmp_stale:d=>`looked up ${d}`,
+    cmp_approx:'≈ closest name match, not your usual product',
+    cmp_today:'today', cmp_days:n=>`${n} d ago`,
+    cmp_oos:'not in stock',
+    cmp_alt_head:'Not listed there — what they have instead:',
     unassigned:'🛒 Anywhere / not sure yet',
     est:n=>`~💰${n}`, plus_unk:n=>`+${n}?`, src_hist:'(usual)',
     del_confirm:n=>`Delete ${n}? Purchases stay in history but forget this store.`,
@@ -698,6 +756,30 @@ const STR = {
     osm_off:'サーバー側で店舗検索が無効です（THINCART_LOOKUP）。',
     osm_fail:'OpenStreetMap に接続できません。＋ で名前だけ登録もできます。',
     osm_need:'先に上の欄に店名を入力してください。',
+    view_cat:'カテゴリ順', view_aisle:'売り場順',
+    aisle_loading:s=>`${s} の売り場を検索中…`,
+    aisle_unknown:'🤷 売り場不明',
+    aisle_approx:'名前が近い商品の売り場です',
+    aisle_none:'この店舗の売り場情報はありません。',
+    aisle_off:'サーバー側で売り場検索が無効です。',
+    aisle_fail:'売り場情報を取得できませんでした — カテゴリ表示です。',
+    aisle_partial:'一部の売り場は取得できませんでした。',
+    aisle_unasked:'⏳ 未取得（再試行してください）',
+    link_prices:'価格を連携', link_linked:s=>`💲 価格連携済み（店舗 ${s}）`,
+    link_trying:'連携中…',
+    compare:'💲 商品を選んで価格比較',
+    cmp_need_store:'先に店舗と価格を連携してください（🏬 → 価格を連携）。',
+    cmp_searching:'店舗の商品カタログを検索中…',
+    cmp_none:'この店舗に該当する商品が見つかりません。',
+    cmp_off:'サーバー側で価格検索が無効です。',
+    cmp_fail:'商品カタログに接続できません。',
+    cmp_pick:'どれを買いますか？',
+    cmp_at:n=>`${n}店舗の価格`,
+    cmp_stale:d=>`取得: ${d}`,
+    cmp_approx:'≈ 名前が近い商品です（いつもの商品ではありません）',
+    cmp_today:'本日取得', cmp_days:n=>`${n}日前`,
+    cmp_oos:'在庫なし',
+    cmp_alt_head:'その店には無し — 代わりにある商品:',
     unassigned:'🛒 どこでも / 未定',
     est:n=>`約💰${n}`, plus_unk:n=>`+${n}?`, src_hist:'（いつもの）',
     del_confirm:n=>`${n}を削除しますか？購入履歴は残りますが、この店の記録は消えます。`,
@@ -1089,7 +1171,14 @@ function renderStores() {
     const c = document.createElement('span');
     c.className = 'chip' + ((cur || '') === val ? ' sel' : '');
     c.textContent = label;
-    c.onclick = () => { setCurrentStore(val); renderStores(); };
+    c.onclick = () => {
+      setCurrentStore(val);
+      // A different shop is a different shelf layout; nothing learned about the
+      // last one carries over.
+      aisleMap = null; aisleFor = null; aisleMsg = '';
+      renderStores();
+      if (viewMode() === 'aisle') loadAisles(); else render();
+    };
     at.appendChild(c);
   };
   mkAt(T().at_none, '');
@@ -1144,11 +1233,40 @@ function renderStores() {
     div.innerHTML = `<div class="srhead"><b></b><button class="del"></button></div>
       <textarea maxlength="300"></textarea><button class="savenotes"></button>`;
     div.querySelector('b').textContent = '🏬 ' + s.name;
+    const meta = [];
     if (s.address) {
       const a = document.createElement('div');
       a.className = 'addr'; a.textContent = '📍 ' + s.address;
-      div.querySelector('.srhead').insertAdjacentElement('afterend', a);
+      meta.push(a);
     }
+    // Linking a store to the chain's own branch number is what makes prices and
+    // aisles askable. Most stores can never be linked, and say so plainly when
+    // asked rather than offering the button and failing silently.
+    const lk = document.createElement('div');
+    lk.className = 'addr';
+    if (s.chain_store_id) {
+      lk.textContent = T().link_linked(s.chain_store_id);
+    } else {
+      const b = document.createElement('button');
+      b.className = 'linkbtn'; b.textContent = T().link_prices;
+      b.onclick = async () => {
+        b.disabled = true; b.textContent = T().link_trying;
+        try {
+          const res = await fetch('/api/stores/link?store_id=' + encodeURIComponent(s.id));
+          const d = res.ok ? await res.json() : {};
+          if (d.chain_store_id) {
+            enqueue({ type:'store_upsert', store_name: s.name,
+                      store_chain: d.chain, store_chain_id: d.chain_store_id });
+          } else {
+            lk.textContent = '— ' + (d.reason || T().osm_fail);
+          }
+        } catch (e) { lk.textContent = '— ' + T().osm_fail; }
+      };
+      lk.appendChild(b);
+    }
+    meta.push(lk);
+    let anchor = div.querySelector('.srhead');
+    for (const el of meta) { anchor.insertAdjacentElement('afterend', el); anchor = el; }
     const ta = div.querySelector('textarea');
     ta.value = s.notes || ''; ta.placeholder = T().store_notes_ph;
     const sv = div.querySelector('.savenotes'); sv.textContent = T().save_notes;
@@ -1201,7 +1319,7 @@ async function searchStores() {
   try {
     const res = await fetch('/api/stores/search?q=' + encodeURIComponent(name)
       + '&area=' + encodeURIComponent(area));
-    if (res.status === 503) { osmNote(T().osm_off); return; }
+    if (res.status === 503) { osmNote(await why503(res, T().osm_off, T().osm_fail)); return; }
     if (!res.ok) { osmNote(T().osm_fail); return; }
     data = await res.json();
   } catch (e) { osmNote(T().osm_fail); return; }
@@ -1218,8 +1336,28 @@ async function searchStores() {
     d.querySelector('b').textContent = '🏬 ' + h.name;
     d.querySelector('span').textContent = h.address || '';
     d.onclick = () => {
+      // Two branches of one chain share a name, and stores are keyed by their
+      // canonical name — so adding "Wegmans" twice would collapse them into one
+      // row, overwriting the first branch's address and its price link. That
+      // matters most for exactly the case this feature exists for: comparing
+      // the same product at two branches. Disambiguate with the town, and only
+      // when a DIFFERENT real place is already using that name.
+      // canon() is the twin of the server's db.canonical(), which is what
+      // stores are actually keyed by — a free-text "wegmans" and an OSM
+      // "Wegmans" are one row there, and a strict === here would miss it.
+      const clash = (base.stores || []).some(s =>
+        canon(s.name) === canon(h.name) && s.osm_id && s.osm_id !== h.osm_id);
+      // A clash MUST produce a different name, so fall through to whatever is
+      // available: the town reads best, the street still reads like an address,
+      // and the osm_id is ugly but always there. Leaving the name unchanged
+      // would let the server's canonical-name upsert overwrite the other branch
+      // — which is the whole bug this exists to prevent.
+      const tag = h.town
+        || (h.address || '').split(',')[0].trim()
+        || h.osm_id;
+      const name = clash ? `${h.name} (${tag})` : h.name;
       enqueue({
-        type:'store_upsert', store_name: h.name,
+        type:'store_upsert', store_name: name,
         store_osm_id: h.osm_id, store_address: h.address || '',
         store_lat: h.lat, store_lon: h.lon, store_brand: h.brand || '',
       });
@@ -1244,16 +1382,35 @@ function render() {
   const pend = base.away_pending || 0;
   $('trips').textContent = pend ? `✈️ ${pend}` : '✈️';
   $('trips').classList.toggle('pending', pend > 0);
-  const items = view(), list = $('list');
+  const byAisle = viewMode() === 'aisle' && storeCanAisle() && !!aisleMap;
+  let items = view();
+  const list = $('list');
+  if (byAisle) {
+    // Walking order, with everything unknown deliberately last rather than
+    // scattered through the aisles it is not in.
+    items = items.slice().sort((a, b) => {
+      const ga = groupOf(a), gb = groupOf(b);
+      return rankCmp(ga.rank, gb.rank) || ga.key.localeCompare(gb.key);
+    });
+  }
   list.innerHTML = '';
   $('empty').hidden = items.length > 0;
-  let lastCat = undefined;
+  renderViewToggle();
+  if (byAisle && items.some(i => (groupOf(i) || {}).approx)) {
+    // Said once, above the list, rather than on every row: the aisle is
+    // probably right, the certainty about WHICH product is not.
+    const n = $('aislenote');
+    n.textContent = (aisleMsg ? aisleMsg + ' · ' : '') + '≈ ' + T().aisle_approx;
+    n.classList.add('on');
+  }
+  let lastKey = undefined;
   for (const it of items) {
-    const cat = it.category || 'other';
-    if (cat !== lastCat && items.some(i => i.category)) {
+    const g = groupOf(it);
+    const heads = byAisle || items.some(i => i.category);
+    if (g.key !== lastKey && heads) {
       const h = document.createElement('div');
-      h.className = 'cat'; h.textContent = catLabel(it.category);
-      list.appendChild(h); lastCat = cat;
+      h.className = 'cat'; h.textContent = g.label;
+      list.appendChild(h); lastKey = g.key;
     }
     const li = document.createElement('li');
     li.className = 'item' + (it.pending ? ' pending' : '');
@@ -1396,6 +1553,197 @@ let clearAddRowOnSave = false;
 function closeSheet() {
   $('sheet').style.display = 'none'; editState = null; clearAddRowOnSave = false;
 }
+/* ============ price comparison (Phase 6C) ===================================
+ *
+ * "Milk" has no price. "Wegmans Organic Creamy Sunflower Butter, 16 ounce" has
+ * one, and a different one at each branch — which is why the product question
+ * comes first and is remembered, rather than being asked on every trip.
+ *
+ * Everything here is looked up from the chain's own catalogue and carries the
+ * date it was fetched. Two things it must never do: show a number it did not
+ * receive, and let an approximate name match pass as the product the household
+ * actually buys. The second is marked, not hidden — the aisle from a near match
+ * is useful, the price from one is a different product's price.
+ */
+function pnote(msg) {
+  const box = $('sheet-prices');
+  box.innerHTML = '';
+  const d = document.createElement('div');
+  d.className = 'pnote'; d.textContent = msg;
+  box.appendChild(d);
+}
+
+function pricedStores() {
+  return (base.stores || []).filter(s => s.chain_store_id);
+}
+
+async function comparePrices(it) {
+  const stores = pricedStores();
+  if (!stores.length) { pnote(T().cmp_need_store); return; }
+  // Ask the store you are standing in, else the first that can answer.
+  const cur = currentStoreRow();
+  const ask = (cur && cur.chain_store_id) ? cur : stores[0];
+
+  pnote(T().cmp_searching);
+  let opts = [];
+  try {
+    const res = await fetch('/api/products/search?catalog_id=' + encodeURIComponent(it.catalog_id)
+      + '&store_id=' + encodeURIComponent(ask.id));
+    if (res.status === 503) { pnote(await why503(res, T().cmp_off, T().cmp_fail)); return; }
+    if (!res.ok) { pnote(T().cmp_fail); return; }
+    const d = await res.json();
+    opts = d.options || [];
+    if (!opts.length) { pnote(T().cmp_none); return; }
+    renderProductChoice(it, opts, d.picked);
+  } catch (e) { pnote(T().cmp_fail); }
+}
+
+function renderProductChoice(it, opts, picked) {
+  const box = $('sheet-prices');
+  box.innerHTML = '';
+  const h = document.createElement('div');
+  h.className = 'pnote'; h.textContent = T().cmp_pick;
+  box.appendChild(h);
+  for (const o of opts) {
+    const row = document.createElement('div');
+    row.className = 'prow' + (picked && picked.sku === o.sku ? ' sel' : '');
+    row.innerHTML = '<span class="pn"></span><span class="pp"></span><span class="pu"></span>';
+    row.querySelector('.pn').textContent =
+      [o.brand, o.name].filter(Boolean).join(' · ') + (o.pack_size ? ` (${o.pack_size})` : '');
+    row.querySelector('.pp').textContent = o.amount == null ? '—' : fmtYen(o.amount);
+    row.querySelector('.pu').textContent = o.unit_price || '';
+    row.onclick = () => {
+      enqueue({ type:'product_pick', catalog_id: it.catalog_id, pick_chain: o.source,
+                pick_sku: o.sku, pick_name: o.name, pick_brand: o.brand, pick_size: o.pack_size });
+      // The sku goes with the request rather than being read back from the op:
+      // enqueue() is optimistic, so the pick has not necessarily landed yet and
+      // the first comparison would otherwise price whatever the generic name
+      // happened to match.
+      // The aisle view was built from the generic name; this item now means a
+      // specific jar, which may sit somewhere else. Update it from the option
+      // just chosen rather than re-asking: enqueue() is optimistic, so a fresh
+      // /api/aisles would race the uncommitted pick, rebuild from the OLD
+      // generic name, and cache that under an unchanged key — pinning the stale
+      // aisle in place. The chosen record already knows where it sits.
+      if (aisleMap) {
+        const k = String(it.catalog_id);
+        // We just looked this item up successfully, whatever the answer was —
+        // so it is no longer one of the ones nobody got to ask about.
+        aisleUnasked.delete(k);
+        // No aisle for the chosen jar means we no longer know where this item
+        // is — the entry sitting there belongs to the generic match and would
+        // now be read as this product's exact location.
+        if (o.aisle_label) aisleMap[k] = { label: o.aisle_label, aisle: o.aisle, exact: true };
+        else delete aisleMap[k];
+      }
+      render();
+      showPrices(it, o.sku, o.name);
+    };
+    box.appendChild(row);
+  }
+}
+
+/** Which kind of 503: the owner switched it off, or the provider fell over.
+ *  One is a setting to change, the other is weather to wait out — telling the
+ *  user the wrong one sends them to fix something that is not broken. */
+async function why503(res, offMsg, failMsg) {
+  try {
+    const d = await res.json();
+    const code = d && d.detail && d.detail.code;
+    return code === 'lookup_disabled' ? offMsg : failMsg;
+  } catch (e) { return failMsg; }
+}
+
+/** "today" / "3 d ago" — a price with no age is a price presenting itself as
+ *  current, which it may well not be. */
+function agoLabel(iso) {
+  if (!iso) return '';
+  const d = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+  if (!isFinite(d) || d < 0) return '';
+  return d === 0 ? T().cmp_today : T().cmp_days(d);
+}
+
+async function showPrices(it, sku, name) {
+  pnote(T().cmp_searching);
+  let d;
+  try {
+    const res = await fetch('/api/prices?catalog_id=' + encodeURIComponent(it.catalog_id)
+      + (sku ? '&sku=' + encodeURIComponent(sku) : '')
+      + (name ? '&name=' + encodeURIComponent(name) : ''));
+    if (res.status === 503) { pnote(await why503(res, T().cmp_off, T().cmp_fail)); return; }
+    if (!res.ok) { pnote(T().cmp_fail); return; }
+    d = await res.json();
+  } catch (e) { pnote(T().cmp_fail); return; }
+
+  const quotes = d.quotes || [];
+  const alts = d.alternatives || [];
+  if (!quotes.length && !alts.length) { pnote(T().cmp_none); return; }
+  const box = $('sheet-prices');
+  box.innerHTML = '';
+  const h = document.createElement('div');
+  h.className = 'pnote'; h.textContent = T().cmp_at(quotes.length);
+  box.appendChild(h);
+  let anyApprox = false;
+  // A price you cannot act on is not a cheaper option. Out-of-stock quotes stay
+  // visible — "cheap here, but not today" is worth knowing — but they sort
+  // below every buyable one and cannot be picked, so the cheapest row on screen
+  // is always somewhere you can actually buy the thing.
+  const ordered = quotes.slice().sort((a, b) =>
+    (a.available === false) - (b.available === false) || a.amount - b.amount);
+  for (const q of ordered) {
+    if (!q.exact) anyApprox = true;
+    const oos = q.available === false;
+    const row = document.createElement('div');
+    row.className = 'prow' + (oos ? ' oos' : '');
+    row.innerHTML = '<span class="pn"></span><span class="pp"></span><span class="pu"></span>';
+    row.querySelector('.pn').textContent =
+      '🏬 ' + q.store + (q.aisle ? ' · ' + q.aisle : '') + (q.exact ? '' : ' ≈')
+      + (oos ? ' · ' + T().cmp_oos : '');
+    row.querySelector('.pp').textContent = fmtYen(q.amount);
+    row.querySelector('.pu').textContent =
+      [q.unit_price || '', agoLabel(q.fetched_at)].filter(Boolean).join(' · ');
+    // The number's own source, openable. A price you cannot check is a price you
+    // have to take on faith, and these are looked up rather than observed.
+    if (q.source_url) {
+      const a = document.createElement('a');
+      a.className = 'psrc'; a.href = q.source_url; a.target = '_blank';
+      a.rel = 'noopener'; a.textContent = '↗';
+      a.onclick = e => e.stopPropagation();
+      row.appendChild(a);
+    }
+    // Tapping a store pins it as where this item is bought — the mechanism the
+    // where-to-buy plan already runs on. Not offered for a store that has none.
+    if (!oos)
+      row.onclick = () => enqueue({ type:'edit', catalog_id: it.catalog_id, store: q.store });
+    box.appendChild(row);
+  }
+  // Shown BELOW the comparison and never sorted into it: these are what the
+  // shop has instead of the product you buy, not a cheaper version of it.
+  if (alts.length) {
+    const h2 = document.createElement('div');
+    h2.className = 'pnote'; h2.textContent = T().cmp_alt_head;
+    box.appendChild(h2);
+    for (const q of alts) {
+      const row = document.createElement('div');
+      row.className = 'prow oos';
+      row.innerHTML = '<span class="pn"></span><span class="pp"></span><span class="pu"></span>';
+      row.querySelector('.pn').textContent =
+        '🏬 ' + q.store + ' · ' + [q.brand, q.product].filter(Boolean).join(' ')
+        + (q.pack_size ? ` (${q.pack_size})` : '');
+      row.querySelector('.pp').textContent = fmtYen(q.amount);
+      row.querySelector('.pu').textContent = q.unit_price || '';
+      box.appendChild(row);
+    }
+  }
+  if (anyApprox || d.partial) {
+    const f = document.createElement('div');
+    f.className = 'pnote';
+    f.textContent = [anyApprox ? T().cmp_approx : '', d.partial ? T().cmp_fail : '']
+      .filter(Boolean).join(' · ');
+    box.appendChild(f);
+  }
+}
+
 function openSheet(it) {
   clearAddRowOnSave = false;
   editState = { it, category: it.category || 'other',
@@ -1407,6 +1755,11 @@ function openSheet(it) {
   $('sheet-qty').value = it.qty_note || '';
   $('sheet-note-input').value = it.note || '';
   $('sheet-budget').value = it.budget == null ? '' : String(it.budget);
+  // Prices are looked up on demand, never on open: opening the editor to change
+  // a quantity must not fire a network request describing what you are buying.
+  $('sheet-prices').innerHTML = '';
+  $('sheet-compare').textContent = T().compare;
+  $('sheet-compare').onclick = () => comparePrices(it);
   renderStoreOpts();
   renderCatOpts();
   $('sheet').style.display = 'flex';
@@ -1459,6 +1812,158 @@ function enqueue(fields) {
  * silently builds the where-bought history behind the plan. Expires after 6 h:
  * a stale selection would poison the history (review delta 8). */
 const AT_KEY = 'pc_at', AT_TTL = 6 * 3600 * 1000;
+/* ============ aisle view (Phase 6B) =========================================
+ *
+ * While standing in a store that can answer, the list regroups from category
+ * order into the order you actually walk it. The aisle labels come from the
+ * chain's own shelf data for THAT branch — the same lookup that prices the
+ * item — so "Aisle 14B · left · sec 11" is a real instruction.
+ *
+ * An item whose aisle is unknown goes to a group at the end and says so. It is
+ * never placed in a plausible aisle: being told the wrong one costs a lap of
+ * the shop, which is worse than being told nothing. An item matched by name
+ * rather than by the product you actually buy is marked, because the aisle is
+ * probably right and the certainty is not.
+ */
+const VIEW_KEY = 'pc_view';
+let aisleMap = null;      // catalog_id -> {label, aisle, exact}
+let aisleMsg = '';        // what to say above the list, if anything
+let aisleFor = null;      // which store+list aisleMap belongs to
+let aisleUnasked = new Set();  // items the lookup never got to ask about
+
+const viewMode = () => localStorage.getItem(VIEW_KEY) === 'aisle' ? 'aisle' : 'cat';
+
+/** Called after any state that arrived from the server. The aisle map is keyed
+ *  on the list, and the list changes under you — the other phone adds milk
+ *  while you are walking. Without this, that item sits in "Aisle unknown" for
+ *  the rest of the trip. loadAisles() no-ops when the key is unchanged, so this
+ *  costs nothing on the many state updates that are not list changes. */
+function syncAisles() {
+  if (viewMode() === 'aisle' && storeCanAisle()) loadAisles();
+}
+
+/** The store row for "I'm at…", or null. */
+function currentStoreRow() {
+  const name = currentStore();
+  if (!name) return null;
+  return (base.stores || []).find(s => s.name === name) || null;
+}
+
+/** Can this store answer where things are? Most cannot, and that is ordinary. */
+function storeCanAisle() {
+  const s = currentStoreRow();
+  return !!(s && s.chain_store_id);
+}
+
+/** Identity of "the aisle question currently on screen": which store, and which
+ *  items. Keyed on the LIST as well as the store, because adding something
+ *  while walking must fetch its aisle rather than leave it in "unknown". */
+function currentAisleKey() {
+  const s = currentStoreRow();
+  if (!s) return '';
+  const ids = view().map(i => i.catalog_id).sort();
+  // Picks belong in the key too: the OTHER phone choosing a specific jar moves
+  // where this item is, and the local picker's direct patch cannot know about
+  // it. Only the picks for items actually on the list matter.
+  const picks = ids.map(id => id + ':' + ((base.picks || {})[String(id)] || '')).join(',');
+  return s.id + '|' + picks;
+}
+
+async function loadAisles() {
+  const s = currentStoreRow();
+  if (!s || !s.chain_store_id) { aisleMap = null; return; }
+  const listKey = currentAisleKey();
+  if (aisleFor === listKey && aisleMap) return;
+  aisleMsg = T().aisle_loading(s.name); render();
+  // Two loads can overlap — change shops, or the other phone edits the list
+  // mid-request — and the older reply may land last. EVERY path out of here
+  // mutates shared state, failures included: an older 503 arriving after a
+  // newer success would wipe the current store's aisles and blame the wrong
+  // thing. So the guard belongs on all of them, not just on success.
+  const mine = () => listKey === currentAisleKey();
+  try {
+    const res = await fetch('/api/aisles?store_id=' + encodeURIComponent(s.id));
+    if (res.status === 503) {
+      const msg = await why503(res, T().aisle_off, T().aisle_fail);
+      if (!mine()) return;
+      aisleMap = null; aisleMsg = msg; render(); return;
+    }
+    if (!res.ok) {
+      if (!mine()) return;
+      aisleMap = null; aisleMsg = T().aisle_fail; render(); return;
+    }
+    const d = await res.json();
+    if (!mine()) return;
+    aisleMap = d.aisles || {};
+    aisleUnasked = new Set(d.unasked || []);
+    aisleFor = listKey;
+    // "no aisle for this" and "nobody could ask about this" look identical in
+    // the map. Only the second is a failure, and only it gets said out loud.
+    aisleMsg = d.partial ? T().aisle_partial
+             : (Object.keys(aisleMap).length ? '' : T().aisle_none);
+  } catch (e) {
+    if (!mine()) return;
+    aisleMap = null; aisleMsg = T().aisle_fail;
+  }
+  render();
+}
+
+/* Walking order, not alphabetical order. Aisles are strings like "2", "09B",
+ * "14B" — sorted as text, aisle 10 lands before aisle 2 and the one thing this
+ * view promises is wrong. Numbered aisles come first in numeric order (letter
+ * suffix breaking ties), then departments like Dairy, then unknown. */
+function aisleRank(raw) {
+  const m = /^(\d+)([A-Za-z]*)$/.exec((raw || '').trim());
+  if (m) return [0, parseInt(m[1], 10), m[2].toUpperCase()];
+  return [1, 0, (raw || '').toUpperCase()];
+}
+const rankCmp = (a, b) => {
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const x = a[i], y = b[i];
+    if (x === undefined) return -1;
+    if (y === undefined) return 1;
+    if (x < y) return -1;
+    if (x > y) return 1;
+  }
+  return 0;
+};
+
+/** Group key, heading and sort rank for one item, under the active view. */
+function groupOf(it) {
+  if (viewMode() === 'aisle' && aisleMap) {
+    const a = aisleMap[String(it.catalog_id)];
+    if (a) return { key: 'a:' + a.label, label: a.label, approx: !a.exact,
+                    rank: [0, ...aisleRank(a.aisle)] };
+    // Never asked is not the same as has no aisle, and gets its own group so it
+    // cannot be read as one.
+    if (aisleUnasked.has(String(it.catalog_id)))
+      return { key: 'zzy-unasked', label: T().aisle_unasked, approx: false, rank: [8] };
+    return { key: 'zzz-unknown', label: T().aisle_unknown, approx: false, rank: [9] };
+  }
+  return { key: 'c:' + (it.category || 'other'), label: catLabel(it.category),
+           approx: false, rank: [0] };
+}
+
+function renderViewToggle() {
+  const on = storeCanAisle();
+  $('viewtoggle').classList.toggle('on', on);
+  $('view-cat').textContent = T().view_cat;
+  $('view-aisle').textContent = T().view_aisle;
+  const m = viewMode();
+  $('view-cat').classList.toggle('sel', m === 'cat');
+  $('view-aisle').classList.toggle('sel', m === 'aisle');
+  const note = on && m === 'aisle' ? aisleMsg : '';
+  $('aislenote').textContent = note;
+  $('aislenote').classList.toggle('on', !!note);
+}
+
+$('view-cat').onclick = () => { localStorage.setItem(VIEW_KEY, 'cat'); render(); };
+$('view-aisle').onclick = () => {
+  localStorage.setItem(VIEW_KEY, 'aisle');
+  render();
+  loadAisles();
+};
+
 function currentStore() {
   try {
     const v = JSON.parse(localStorage.getItem(AT_KEY) || 'null');
@@ -1630,7 +2135,7 @@ async function flush() {
 
 async function resync() {
   const res = await fetch('/api/state');
-  if (res.ok) { base = await res.json(); saveBase(); render(); }
+  if (res.ok) { base = await res.json(); saveBase(); render(); syncAisles(); }
   loadCatalog();  // picks up new items + enrichment updates for candidates
 }
 
@@ -1641,7 +2146,7 @@ function connectWS() {
   ws = new WebSocket(`${proto}://${location.host}/ws`);
   ws.onopen = () => { wsDelay = 1000; setPill(); flush(); };
   ws.onmessage = ev => {
-    base = JSON.parse(ev.data); saveBase(); render(); setPill();
+    base = JSON.parse(ev.data); saveBase(); render(); setPill(); syncAisles();
   };
   ws.onclose = () => {
     setPill();
@@ -1752,6 +2257,10 @@ function boot() {
   connectWS();
   flush();
   loadCatalog();
+  // Resume an aisle walk across an app restart — the phone locks constantly
+  // mid-shop, and coming back to the category view every time would make the
+  // toggle useless exactly when it matters.
+  if (viewMode() === 'aisle') loadAisles();
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');
 }
 boot();
