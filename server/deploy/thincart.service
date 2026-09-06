@@ -31,6 +31,25 @@ Environment=THINCART_TZ=America/New_York
 # of 2026-07-17→28 proposed 12 away days until "princeton" was listed here.
 # Comma-separated, matched case-insensitively against summary + location.
 Environment=THINCART_HOME_PATTERNS=princeton
+
+# --- Phase 6: outbound lookups ------------------------------------------------
+# THINCART_LOOKUP decides how far this service may reach outside the tailnet:
+#   off    — no outbound calls at all (exactly the pre-Phase-6 behaviour)
+#   stores — only the OpenStreetMap store search; the query is a shop name and a
+#            town and says nothing about what the household buys
+#   all    — also product search, prices and aisles from a store's own catalogue
+Environment=THINCART_LOOKUP=all
+# The chain's public search key, lifted from their web app. NOT in the repo:
+# the repo is public, the key is theirs, and they can rotate it whenever they
+# like. Unset simply means no prices and no aisles — a supported state that
+# every screen already handles, since most stores have no price source at all.
+# Re-read it from the shop's JS bundle if prices start coming back empty.
+# The provider's own identifiers, overridable because they are theirs and can
+# change without notice. Defaults in code are what was verified 2026-09-06.
+#Environment=THINCART_NOMINATIM_URL=https://nominatim.openstreetmap.org/search
+#Environment=THINCART_WEGMANS_APP=QGPPR19V8V
+#Environment=THINCART_WEGMANS_INDEX=products
+Environment=THINCART_WEGMANS_KEY=
 # SECURITY: bind the Tailscale IP, not 0.0.0.0 — the LAN must never see this port.
 # If tailscale0 isn't up yet at boot, the bind fails and Restart retries until it is.
 ExecStart=/home/korety/miniconda3/bin/python3 -m uvicorn app:app --host 100.112.171.54 --port 8123 --no-access-log
