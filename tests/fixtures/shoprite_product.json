@@ -1,0 +1,18 @@
+{
+ "sku": "00856312002795",
+ "name": "Fairlife Chocolate 2% Reduced Fat Ultra-Filtered Milk, 52 fl oz",
+ "brand": "Fairlife",
+ "price": "$5.99",
+ "priceSource": "regular",
+ "productLocation": {
+  "aisle": "DAIRY DEPARTMENT",
+  "shelf": null,
+  "location": null,
+  "label": null,
+  "externalLocationUrl": null
+ },
+ "unitPrice": "$0.12/fl oz",
+ "available": true,
+ "defaultCategory": "Lactose Free Milk",
+ "wasPrice": null
+}

@@ -111,6 +111,12 @@ const quote = (store, amount, extra = {}) => ({
 
     first.click();                       // choose it -> price comparison
     await drain(); await drain(); await drain();
+    // The pick travels with its chain. A Wegmans sku, a Whole Foods ASIN and a
+    // ShopRite UPC are three namespaces; sent without its chain, the sku would
+    // be applied to every store and could never match at the other two.
+    const priced = b.calls.find(u => u.includes("/api/prices"));
+    check("the comparison names the sku AND whose sku it is",
+      /sku=44442/.test(priced) && /chain=wegmans/.test(priced), priced);
     const rows = b.rowText();
     check("the buyable store is listed first", /Wegmans/.test(rows[0]) && !/Cheap Mart/.test(rows[0]), rows);
     check("the cheaper one is marked out of stock", /not in stock/i.test(rows[1] || ""), rows);

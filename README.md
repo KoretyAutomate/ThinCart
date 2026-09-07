@@ -146,9 +146,11 @@ Adding by name with ＋ still works and is unchanged — a shop OSM has never
 heard of stays first class.
 
 **Link its prices.** A pinned store shows *Link prices*, which resolves it to
-the chain's own branch number (Wegmans Princeton = 93). Only Wegmans has an
-adapter; any other store answers plainly that it has none, and simply has no
-prices or aisles. That is the ordinary case.
+the chain's own branch number (Wegmans Princeton = 93, Whole Foods Princeton =
+10187, ShopRite Lawrenceville = 500). Three chains have an adapter — **Wegmans,
+Whole Foods and ShopRite** — and all three answer both the price and the shelf.
+Any other store answers plainly that it has none, and simply has no prices or
+aisles. That is the ordinary case.
 
 **Compare prices.** Long-press an item → *💲 Find product & compare prices*.
 It asks which product you actually buy — "milk" has no price, *Wegmans Organic
@@ -164,14 +166,18 @@ did not receive.
 
 **Walk the aisles.** While *I'm at ⟨store⟩* is set on a linked store, a
 **By category | By aisle** toggle appears above the list. Aisle order groups by
-that branch's own shelf data (`Aisle 14B · left · sec 11`; perishables come back
-as a department, `Dairy`). Anything whose aisle is unknown goes to a group at
-the end and says *Aisle unknown* — never into a plausible-looking aisle, because
-being sent to the wrong one costs a lap of the shop.
+that branch's own shelf data (`Aisle 14B · left · sec 11` at Wegmans, `Aisle 9 ·
+shelf 7` at ShopRite, `Aisle 7` at Whole Foods; perishables come back as a
+department, `Dairy`). Anything whose aisle is unknown goes to a group at the end
+and says *Aisle unknown* — never into a plausible-looking aisle, because being
+sent to the wrong one costs a lap of the shop.
 
-The key for the store catalogue is not in this repo — it is theirs and they can
-rotate it. Set `THINCART_WEGMANS_KEY` in the systemd unit; unset means no prices
-and no aisles, and nothing else changes.
+Wegmans' catalogue needs a key that is not in this repo — it is theirs and they
+can rotate it. Set `THINCART_WEGMANS_KEY` in the systemd unit; unset means no
+Wegmans prices or aisles, and nothing else changes. Whole Foods and ShopRite
+need no key; they need `curl_cffi` (in `server/requirements.txt`), which speaks
+to their sites the way a browser does. Every request either chain sees is the
+one its own site makes, and every answer is cached before it is asked again.
 
 ## Ops
 

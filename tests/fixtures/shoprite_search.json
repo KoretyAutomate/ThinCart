@@ -1,0 +1,120 @@
+{
+ "count": 3,
+ "total": 469,
+ "items": [
+  {
+   "productId": "00041190467242",
+   "sku": "00041190467242",
+   "name": "Bowl & Basket Chocolate Milk, half gallon",
+   "brand": "Bowl & Basket",
+   "price": "$3.49",
+   "priceNumeric": 3.49,
+   "pricePerUnit": "$6.98/gal",
+   "priceSource": "regular",
+   "available": true,
+   "unitOfSize": {
+    "abbreviation": "gal",
+    "type": "gallonUS",
+    "label": "Gallon",
+    "size": 0.5
+   },
+   "unitOfMeasure": {
+    "abbreviation": "gal",
+    "type": "gallonUS",
+    "label": "Gallon",
+    "size": 1.0
+   },
+   "defaultCategory": [
+    {
+     "categoryId": "05a0781c-bab2-45ea-a101-c1b9cc29f94f",
+     "retailerId": "520024",
+     "category": "Flavored Milk",
+     "categoryBreadcrumb": "Grocery/Dairy/Milk/Flavored Milk"
+    },
+    {
+     "categoryId": "5d5d8781-25d8-4cc5-a6ad-70fbe14300cb",
+     "retailerId": "224371",
+     "category": "Milk",
+     "categoryBreadcrumb": "Grocery/Featured Shops/Our Brands/Dairy/Milk"
+    }
+   ],
+   "tprPrice": []
+  },
+  {
+   "productId": "00041190467167",
+   "sku": "00041190467167",
+   "name": "Bowl & Basket 1% Low Fat Milk, one gallon",
+   "brand": "Bowl & Basket",
+   "price": "$4.59",
+   "priceNumeric": 4.59,
+   "pricePerUnit": "$4.59/gal",
+   "priceSource": "regular",
+   "available": true,
+   "unitOfSize": {
+    "abbreviation": "gal",
+    "type": "gallonUS",
+    "label": "Gallon",
+    "size": 1.0
+   },
+   "unitOfMeasure": {
+    "abbreviation": "gal",
+    "type": "gallonUS",
+    "label": "Gallon",
+    "size": 1.0
+   },
+   "defaultCategory": [
+    {
+     "categoryId": "337d9462-2ad0-4975-afa4-51eca02926d6",
+     "retailerId": "520020",
+     "category": "1% Milk",
+     "categoryBreadcrumb": "Grocery/Dairy/Milk/1% Milk"
+    },
+    {
+     "categoryId": "5d5d8781-25d8-4cc5-a6ad-70fbe14300cb",
+     "retailerId": "224371",
+     "category": "Milk",
+     "categoryBreadcrumb": "Grocery/Featured Shops/Our Brands/Dairy/Milk"
+    }
+   ],
+   "tprPrice": []
+  },
+  {
+   "productId": "00850044667703",
+   "sku": "00850044667703",
+   "name": "The Ryl Co. Watermelon Antioxidant Superblend Iced Tea with Benefits, 16 fl oz",
+   "brand": "The Ryl Co.",
+   "price": "$2.49",
+   "priceNumeric": 2.49,
+   "pricePerUnit": "$0.16/fl oz",
+   "priceSource": "regular",
+   "available": true,
+   "unitOfSize": {
+    "abbreviation": "fl oz",
+    "type": "fluidOunceUS",
+    "label": "Fluid Ounce",
+    "size": 16.0
+   },
+   "unitOfMeasure": {
+    "abbreviation": "fl oz",
+    "type": "fluidOunceUS",
+    "label": "Fluid Ounce",
+    "size": 1.0
+   },
+   "defaultCategory": [
+    {
+     "categoryId": "3532af6b-ac01-497e-bcf1-e9d8ce0bea3a",
+     "retailerId": "1139",
+     "category": "Iced Tea",
+     "categoryBreadcrumb": "Grocery/Beverages/Tea/Iced Tea"
+    },
+    {
+     "categoryId": "0b0d90f1-3569-4002-ba6e-2d47572960dc",
+     "retailerId": "222158",
+     "category": "New & Trending",
+     "categoryBreadcrumb": "Grocery/Featured Shops/New & Trending"
+    }
+   ],
+   "tprPrice": []
+  }
+ ]
+}

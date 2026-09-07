@@ -1,0 +1,93 @@
+{
+ "total": 8,
+ "items": [
+  {
+   "id": "6d88e0cd-eb56-4b69-bf3d-edccbd85f9b3",
+   "name": "ShopRite Corporate",
+   "retailerStoreId": "3000",
+   "addressLine1": "Store address line 1",
+   "city": "City",
+   "countyProvinceState": "New Jersey",
+   "postCode": "08818",
+   "type": "Corporate",
+   "status": "Active"
+  },
+  {
+   "id": "3b8fb4eb-5b12-453a-8edf-3676eeb7f23c",
+   "name": "ShopRite of Hillsborough",
+   "retailerStoreId": "447",
+   "addressLine1": "Rt 206 & Amwell Rd",
+   "city": "Hillsborough",
+   "countyProvinceState": "NJ",
+   "postCode": "08844",
+   "type": "Regular",
+   "status": "Active"
+  },
+  {
+   "id": "97fd2256-f23b-4ec9-a2ab-226f044ac4f0",
+   "name": "ShopRite of Lawrenceville",
+   "retailerStoreId": "500",
+   "addressLine1": "3373 Brunswick Pike",
+   "city": "Lawrenceville",
+   "countyProvinceState": "New Jersey",
+   "postCode": "08648",
+   "type": "Regular",
+   "status": "Active"
+  },
+  {
+   "id": "bdacadbd-63dc-4234-80b1-4cd354f4daf8",
+   "name": "ShopRite of Ewing",
+   "retailerStoreId": "514",
+   "addressLine1": "1750 North Olden Avenue",
+   "city": "Ewing",
+   "countyProvinceState": "NJ",
+   "postCode": "08638",
+   "type": "Regular",
+   "status": "Active"
+  },
+  {
+   "id": "af9046e3-a5bd-48e5-b6f6-2523c2e8d126",
+   "name": "ShopRite of Hamilton Square",
+   "retailerStoreId": "566",
+   "addressLine1": "1225 Rt 33 Hamilton Plaza",
+   "city": "Hamilton Township",
+   "countyProvinceState": "NJ",
+   "postCode": "08690",
+   "type": "Regular",
+   "status": "Active"
+  },
+  {
+   "id": "ddb9c9fb-e314-4f0d-a832-88027ebf01a6",
+   "name": "ShopRite of Montgomery, NJ",
+   "retailerStoreId": "617",
+   "addressLine1": "Rt 206 and Rt 518",
+   "city": "Montgomery Township",
+   "countyProvinceState": "NJ",
+   "postCode": "08558",
+   "type": "Regular",
+   "status": "Active"
+  },
+  {
+   "id": "243eb380-474b-4498-8d38-1948df539af1",
+   "name": "ShopRite of Montgomery, NY",
+   "retailerStoreId": "239",
+   "addressLine1": "99 Hawkins Dr",
+   "city": "Montgomery",
+   "countyProvinceState": "NY",
+   "postCode": "12549",
+   "type": "Regular",
+   "status": "Active"
+  },
+  {
+   "id": "cec5c88f-6c0b-46f5-a326-cb9ed68324b2",
+   "name": "ShopRite of Hamilton Market Place",
+   "retailerStoreId": "521",
+   "addressLine1": "130 Marketplace Blvd",
+   "city": "Hamilton Township",
+   "countyProvinceState": "NJ",
+   "postCode": "08691",
+   "type": "Regular",
+   "status": "Active"
+  }
+ ]
+}
