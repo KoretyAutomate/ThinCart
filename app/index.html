@@ -248,6 +248,14 @@
   .stores-note { color:var(--muted); font-size:.8rem; margin:20px 2px; }
   #buildline { margin-top:-8px; font-variant-numeric:tabular-nums; }
   #buildline.stale { color:var(--red); font-weight:600; }
+  #reload-btn { display:block; width:100%; margin:6px 0 4px; padding:11px;
+    background:#fff; color:var(--ink); border:1.5px solid #d4dcd4; border-radius:10px;
+    font-size:.92rem; font-weight:600; font-family:inherit; cursor:pointer; }
+  #reload-btn:active { background:#eef2ec; }
+  #reload-btn[disabled] { opacity:.55; }
+  #buildline.stale ~ #reload-btn { border-color:var(--red); color:var(--red); }
+  #reload-err { color:var(--red); font-size:.8rem; margin:2px 2px 20px; display:none; }
+  #reload-err.on { display:block; }
   #namedlg {
     position:fixed; inset:0; background:var(--bg); z-index:40; display:none;
     flex-direction:column; align-items:center; justify-content:center; gap:14px; padding:24px;
@@ -525,6 +533,8 @@
     <div id="storesearch-results"></div>
     <p class="stores-note" id="stores-note"></p>
     <p class="stores-note" id="buildline"></p>
+    <button id="reload-btn"></button>
+    <p id="reload-err"></p>
   </div>
 </div>
 
@@ -678,7 +688,10 @@ const STR = {
     link_prices:'Link prices', link_linked:s=>`💲 prices linked (store ${s})`,
     link_trying:'Linking…',
     build_page:b=>`app build ${b}`,
-    build_stale:(mine,srv)=>`⚠️ This phone is on build ${mine}; the server has ${srv}. Pull down / reopen to update.`,
+    build_stale:(mine,srv)=>`⚠️ This phone is on build ${mine}; the server has ${srv}. Tap ↻ below to update.`,
+    reload_btn:'↻ Reload the app',
+    reload_working:'↻ Fetching the current app…',
+    reload_fail:'Could not reach the server, so nothing was changed — you still have a working copy. Check that Tailscale is connected.',
     compare:'💲 Find product & compare prices',
     cmp_need_store:'Link a store to its prices first (Stores 🏬 → Link prices).',
     cmp_searching:'Searching the store catalogue…',
@@ -779,7 +792,10 @@ const STR = {
     link_prices:'価格を連携', link_linked:s=>`💲 価格連携済み（店舗 ${s}）`,
     link_trying:'連携中…',
     build_page:b=>`アプリ build ${b}`,
-    build_stale:(mine,srv)=>`⚠️ この端末は build ${mine}、サーバーは ${srv} です。再読み込みしてください。`,
+    build_stale:(mine,srv)=>`⚠️ この端末は build ${mine}、サーバーは ${srv} です。下の ↻ で更新してください。`,
+    reload_btn:'↻ アプリを再読み込み',
+    reload_working:'↻ 最新のアプリを取得中…',
+    reload_fail:'サーバーに接続できなかったため、何も変更していません — 手元のコピーはそのまま使えます。Tailscale の接続を確認してください。',
     compare:'💲 商品を選んで価格比較',
     cmp_need_store:'先に店舗と価格を連携してください（🏬 → 価格を連携）。',
     cmp_searching:'店舗の商品カタログを検索中…',
@@ -854,6 +870,7 @@ function applyLang() {
   $('manage-h').textContent = T().manage_h;
   $('stores-note').textContent = T().stores_note;
   showBuild();
+  $('reload-btn').textContent = T().reload_btn;
   $('newstore-name').placeholder = T().new_store_ph;
   $('storesearch-area').placeholder = T().area_ph;
 }
@@ -1191,6 +1208,78 @@ async function showBuild() {
     }
   } catch (e) { /* offline: the page's own stamp is still worth showing */ }
 }
+
+/* The button that makes a stale phone current, without Android's settings.
+ *
+ * Until now the only advice this page could give was "pull down / reopen", and
+ * neither does anything: a Capacitor WebView has no pull-to-refresh, and a
+ * reopen re-navigates to a URL the HTTP cache is still free to answer from its
+ * own store. A phone could therefore see the warning, do exactly as told, and
+ * stay stale — which is how a fix shipped on 2026-09-07 sat unseen on the
+ * handset it was written for.
+ *
+ * Two things stand between this page and the current one. The HTTP cache entry,
+ * bypassed by fetching with cache:'reload', which also rewrites it so the
+ * navigation a moment later is answered by the copy just fetched. And the
+ * service worker: one from before the no-cache fix answers /sw.js requests for
+ * its own replacement out of the very cache that is stale, so left alone it
+ * cannot update itself out of the deadlock.
+ *
+ * NOTHING IS DELETED HERE, and that is the second half of the safety property.
+ * An earlier draft cleared Cache Storage and unregistered the workers before
+ * reloading. It fetched the page first, so it could not strand a phone whose
+ * tailnet was already down — but connectivity dropping in the window between
+ * that fetch and the reload would have left no offline shell AND no worker to
+ * serve one, on a page whose no-cache headers make the reload ask the network
+ * again. Rare, and the app is used in shops on a phone radio, which is where
+ * rare happens.
+ *
+ * registration.update() gets the same result with no such window: it refetches
+ * sw.js past the cache, and the new worker POPULATES its cache in install and
+ * evicts the old ones in activate — so eviction is atomic with having something
+ * to evict to, and never runs at all if the install could not complete. If the
+ * update fails we stay on the old worker, which is an old app rather than no
+ * app. Strictly better than doing it from out here. */
+async function reloadApp() {
+  const btn = $('reload-btn'), err = $('reload-err');
+  if (btn.disabled) return;
+  btn.disabled = true;
+  btn.textContent = T().reload_working;
+  err.classList.remove('on');
+
+  try {
+    // cache:'reload' skips the freshness check and refreshes the stored entry,
+    // so the navigation below finds a current copy rather than repeating this.
+    const res = await fetch('/', { cache: 'reload' });
+    if (!res.ok) throw new Error('http ' + res.status);
+    await res.text();   // drain it, so the entry is fully written before we go
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = T().reload_btn;
+    err.textContent = T().reload_fail;
+    err.classList.add('on');
+    return;
+  }
+
+  // Only now, with a good copy in hand: hand the worker its own replacement.
+  try {
+    if (navigator.serviceWorker) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.update()));
+    }
+  } catch (e) { /* not fatal — the old worker still serves a working app */ }
+
+  window.hardReload();
+}
+
+/* The reload goes through a named seam for the same reason the APK launcher's
+ * navigation does: jsdom locks location.reload, so without one the branch that
+ * decides WHETHER to reload cannot be tested — and that branch is the whole
+ * safety property here. */
+function hardReload() { location.reload(); }
+window.hardReload = hardReload;
+window.reloadApp = reloadApp;
+$('reload-btn').onclick = reloadApp;
 
 /* ============ stores panel: where-to-buy plan + store management ============ */
 $('stores-btn').onclick = () => { $('stores-panel').style.display = 'flex'; renderStores(); };

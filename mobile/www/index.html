@@ -98,6 +98,7 @@
       <p class="current">Server: <b id="current-url"></b></p>
       <p class="err" id="settings-err"></p>
       <button id="open">Open ThinCart</button>
+      <button id="fresh" class="ghost">Force a fresh copy</button>
       <button id="change" class="ghost">Use a different server</button>
     </div>
   </section>
@@ -167,9 +168,32 @@ function openServer(url) {
   window.location.assign(url);
 }
 
+/* The address actually navigated to. `force` appends a value that has never
+ * been requested before — the one way to bypass a cache entry with certainty
+ * rather than by asking it nicely, because no partition of any cache has ever
+ * seen it. That is the hammer behind "Force a fresh copy", for a phone whose
+ * page is so old it predates the ↻ button inside the app itself.
+ *
+ * Not the default. Ordinary freshness is the service worker's job now: it
+ * revalidates the shell on every navigation it sees, which costs a 304 rather
+ * than the whole page, and it is registered on the server's own origin so no
+ * assumption about cache partitioning is involved.
+ *
+ * A draft in between had this page warm the shell with a cross-origin
+ * cache:"reload" fetch before handing over. It was wrong, and quietly: Chromium
+ * partitions the HTTP cache by top-level site, so a fetch made while the
+ * launcher is still on its own Capacitor origin refreshes a partition that the
+ * subsequent top-level navigation never reads. It would have looked like it
+ * worked and changed nothing. */
+function launchUrl(url, force) {
+  if (!force) return url;
+  return url + (url.indexOf("?") === -1 ? "?" : "&") + "fresh=" + Date.now();
+}
+
 window.normalizeServerUrl = normalizeServerUrl;
 window.probeServer = probeServer;
 window.openServer = openServer;
+window.launchUrl = launchUrl;
 
 /* ---- screens ---------------------------------------------------------- */
 
@@ -221,7 +245,7 @@ function cancelRefusal() {
  * both cases and is the signal that the handoff worked. */
 window.addEventListener("pagehide", cancelRefusal);
 
-function launch(url) {
+function launch(url, force) {
   try { sessionStorage.setItem(LAUNCH_KEY, "1"); } catch (e) { /* non-fatal */ }
   cancelRefusal();
   /* Deliberately does NOT name a cause. From in here the two ways this can go
@@ -238,7 +262,7 @@ function launch(url) {
       "it keeps landing here, or opens in your browser instead, check the " +
       "address matches the one you use in the browser.");
   }, HANDOFF_GRACE_MS);
-  window.openServer(url);
+  window.openServer(window.launchUrl(url, force));
 }
 
 function showSettings(msg) {
@@ -253,11 +277,11 @@ function showSetup(prefill, msg) {
   show("setup");
 }
 
-function tryLaunch(url) {
+function tryLaunch(url, force) {
   show("connecting");
   $("connecting-text").textContent = "Connecting to " + url.replace(/^https?:\/\//, "") + "…";
   return probeServer(url).then(function (ok) {
-    if (ok) { launch(url); return; }
+    if (ok) { launch(url, force); return; }
     showSettings("Can't reach that server. Check that Tailscale is connected on this phone.");
   });
 }
@@ -289,6 +313,14 @@ $("url").addEventListener("keydown", function (e) {
 $("open").addEventListener("click", function () {
   var saved = savedServer();
   if (saved) tryLaunch(saved); else showSetup("", "");
+});
+
+/* Reachable with Back, and the only control that still works when the page the
+ * server hands over is itself too old to contain its own ↻ button. Before this
+ * existed the only way out of that was Android's app-storage screen. */
+$("fresh").addEventListener("click", function () {
+  var saved = savedServer();
+  if (saved) tryLaunch(saved, true); else showSetup("", "");
 });
 
 $("change").addEventListener("click", function () {

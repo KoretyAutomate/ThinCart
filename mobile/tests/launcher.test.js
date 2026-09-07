@@ -33,7 +33,7 @@ const drain = () => new Promise(r => setTimeout(r, 0));
 /* Boot a fresh launcher. `saved` seeds localStorage (a previous install),
  * `launched` seeds sessionStorage (we came back with the Back button), and
  * `reachable` decides what the probe's fetch does. */
-function boot({ saved = null, launched = false, reachable = true } = {}) {
+function boot({ saved = null, launched = false, reachable = true, record = null } = {}) {
   const navigated = [];
   const dom = new JSDOM(html, {
     runScripts: "outside-only", url: "https://localhost/", pretendToBeVisual: true,
@@ -43,9 +43,11 @@ function boot({ saved = null, launched = false, reachable = true } = {}) {
   if (saved) w.localStorage.setItem("thincart.server", saved);
   if (launched) w.sessionStorage.setItem("thincart.launched", "1");
 
-  w.fetch = (url) => reachable
-    ? Promise.resolve({ type: "opaque" })
-    : Promise.reject(new TypeError("Failed to fetch"));
+  w.fetch = (url, opts) => {
+    if (record) record.push({ url, opts });
+    return reachable ? Promise.resolve({ type: "opaque" })
+                     : Promise.reject(new TypeError("Failed to fetch"));
+  };
 
   const script = html.split("<script>")[1].split("</script>")[0];
   w.eval(script);
@@ -168,7 +170,7 @@ for (const bad of BAD) {
     // probe's own timer was already created (and cleared) during eval.
     let handoffCb = null;
     b.w.setTimeout = (fn) => { handoffCb = fn; return 0; };
-    await drain(); await drain();
+    await drain(); await drain(); await drain();
     check("was on the connecting screen at handoff", b.visible() === "connecting", b.visible());
     check("scheduled a check", typeof handoffCb === "function");
     if (handoffCb) handoffCb();
@@ -186,19 +188,57 @@ for (const bad of BAD) {
     // back-forward cache, where the timer is paused, not dropped. Back within
     // four seconds would resume it and report a refusal that never happened.
     const b = boot({ saved: "https://spark.example.ts.net", reachable: true });
-    const TIMER_ID = 987654;
-    const cleared = [];
-    b.w.setTimeout = () => TIMER_ID;
+    // Unique ids per timer rather than one fixed value: the probe schedules its
+    // own abort timer and clears it, and a shared stub id made that tidy-up read
+    // as the refusal timer being cancelled. The refusal timer is the last issued.
+    // Offset well clear of jsdom's own counter: the probe's abort timer was
+    // scheduled with the REAL setTimeout before these stubs were installed, and
+    // its id (1) collided with a synthetic one, so its ordinary tidy-up looked
+    // like the refusal timer being cancelled.
+    const issued = [], cleared = [];
+    b.w.setTimeout = () => { issued.push(9000 + issued.length); return issued[issued.length - 1]; };
     b.w.clearTimeout = (id) => cleared.push(id);
-    await drain(); await drain();
+    await drain(); await drain(); await drain();
     check("navigated", b.navigated[0] === "https://spark.example.ts.net", b.navigated);
+    const TIMER_ID = issued[issued.length - 1];
     check("refusal timer not cancelled while still on the launcher",
-      !cleared.includes(TIMER_ID), cleared);
+      !cleared.includes(TIMER_ID), { TIMER_ID, issued, cleared });
     b.w.dispatchEvent(new b.w.Event("pagehide"));
     check("pagehide cancels the refusal timer", cleared.includes(TIMER_ID), cleared);
     check("no false refusal shown",
       b.w.document.getElementById("settings-err").textContent === "",
       b.w.document.getElementById("settings-err").textContent);
+  }
+
+  console.log("\n--- 11. Force a fresh copy: a cache-buster, and no double fetch ---");
+  {
+    /* The hammer for a page so old it predates the reload button inside the app.
+     * Before it existed the only way out was Android's app-storage screen. */
+    const calls = [];
+    const b = boot({ saved: "https://spark.example.ts.net", launched: true, reachable: true, record: calls });
+    await drain();
+    check("Back landed on the settings screen", b.visible() === "settings", b.visible());
+    b.w.document.getElementById("fresh").click();
+    await drain(); await drain(); await drain();
+    const target = b.navigated[0] || "";
+    check("navigated with a cache-buster", /^https:\/\/spark\.example\.ts\.net\?fresh=\d+$/.test(target), target);
+    // Only /health goes out from here. The page is fetched by the navigation
+    // itself, on the server's own origin — which is where the service worker
+    // lives, and the only cache partition that navigation ever reads.
+    check("the launcher fetches nothing but the probe",
+      calls.every(c => c.url.endsWith("/health")), calls.map(c => c.url));
+  }
+
+  console.log("\n--- 12. launchUrl: the buster attaches without corrupting the address ---");
+  {
+    const { w } = boot();
+    const plain = w.launchUrl("https://spark.example.ts.net", false);
+    check("not forced => untouched", plain === "https://spark.example.ts.net", plain);
+    const forced = w.launchUrl("https://spark.example.ts.net", true);
+    check("forced => ?fresh", /^https:\/\/spark\.example\.ts\.net\?fresh=\d+$/.test(forced), forced);
+    const withQuery = w.launchUrl("https://spark.example.ts.net/?a=1", true);
+    check("an existing query keeps its ? and gets &",
+      /^https:\/\/spark\.example\.ts\.net\/\?a=1&fresh=\d+$/.test(withQuery), withQuery);
   }
 
   console.log(`\n================ ${passed} passed, ${failed} failed ================`);

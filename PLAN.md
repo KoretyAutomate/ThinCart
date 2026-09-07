@@ -1288,3 +1288,146 @@ Pinned by tests, because a missing header regresses in total silence and leaves
 no trace anywhere else. The whole concern — the middleware, the stamp, the index
 route — moved into `server/shell.py` when app.py crossed the 600-line ceiling;
 it is one idea (serve the page, and never a stale copy) and reads better named.
+
+### 2026-09-07 (later still) — a way to actually reload
+
+The previous entry found why the phone kept showing the old app and fixed it at
+the server. The owner then reported the obvious follow-up: *"I still cannot
+reload the app. Why am I not seeing an update button like I do in OutfitAdvisor?"*
+
+Both halves of that have answers, and they are different answers.
+
+**Why there is no update button, and should not be.** The two apps are built
+opposite ways round. OutfitAdvisor ships its UI *inside* the APK (`webDir: www`,
+no navigation out), so a new UI means a new APK, and it needs the whole delivery
+channel it has: `server/updates.py`, `publish_apk.py`, a native `AppUpdatePlugin`
+and an "Install update" button. ThinCart's APK is a launcher — it probes the
+saved server and hands the WebView to the live page. There is nothing to
+install. That asymmetry is deliberate and is why changing the list UI here needs
+no APK at all.
+
+**Why reloading did not work.** There was no way to do it. `app/index.html` had
+no reload control of any kind — no button, no pull-to-refresh, no touch handlers
+— while the stale banner told the owner to "pull down / reopen". Neither gesture
+exists: a Capacitor WebView has no pull-to-refresh, and a reopen re-navigates to
+a URL the HTTP cache is still entitled to answer from its own store. So the
+banner could be right, the advice followed exactly, and the phone stay stale.
+The only remaining exit was Android's app-storage screen, which is what the
+owner had to use.
+
+Worse, the 2026-09-07 fix could not reach the handset by itself. `Cache-Control`
+binds only copies fetched *after* it shipped; an entry stored under the old
+rules keeps its heuristic freshness. `/sw.js` was cached the same way, so the v8
+worker that would have evicted the stale shell could not install — the old
+worker answered requests for its own replacement out of the very cache that was
+stale. A fix sitting behind the cache it was written to defeat.
+
+Three doors, so three keys:
+
+- **`reloadApp()` in the page** — a button that is *always* visible, not only
+  when staleness is detected (OutfitAdvisor learned that one the hard way: a
+  dismissible banner let a phone sit three versions behind). It fetches `/` with
+  `cache: 'reload'` to bypass the freshness check and rewrite the stored entry,
+  calls `registration.update()` so the worker fetches its own replacement, then
+  reloads.
+
+  **The safety property is that nothing is ever torn down, and it is what the
+  tests pin.** On a failed fetch nothing happens at all: no update, no reload,
+  and an error saying the copy in hand still works. On success the eviction is
+  done BY the new worker — populate in `install`, evict in `activate` — so it is
+  atomic with having somewhere to evict to and never runs if the install could
+  not complete. If the update itself fails we stay on the old worker, which is
+  an old app rather than no app.
+
+- **`fetch(e.request, {cache: 'no-cache'})` in the service worker** — the root
+  fix, and the one that makes the ordinary case need no button at all. The
+  worker was already "network-first", but a plain `fetch()` consults the HTTP
+  cache first, so a heuristically-fresh entry answered ahead of the network and
+  network-first was first in line behind a hit. `no-cache` revalidates: a
+  conditional request goes out on every navigation the worker sees, an unchanged
+  page comes back 304, and a dead zone still falls through to the cached shell.
+  The staleness lived here as much as in the missing response headers.
+
+- **"Force a fresh copy" on the launcher's settings screen** — navigates to
+  `/?fresh=<ms>`, an address never requested before, which is the one way past a
+  cache entry with certainty rather than by asking it nicely. Not the default:
+  it forfeits the 304 on every launch. This is the door that still opens when
+  the served page is so old it predates the ↻ button inside it — the case that
+  previously had no answer but Android's settings.
+
+`sw.js` went v8 → v9, revalidates as above, and now stores under a
+query-stripped key. The reads
+already used `ignoreSearch`; without the writes matching, every forced refresh
+would have left a permanent extra copy of the shell that nothing ever read.
+
+The reload goes through a named `hardReload()` seam for the same reason the
+launcher's navigation does — jsdom locks `location.reload`, and without a seam
+the branch deciding *whether* to reload cannot be tested, which is the entire
+safety property.
+
+Suites: **193 python** (+1: the cache-buster URL must still route to the stamped
+page, not to the static mount, which would serve the placeholder and tell that
+client it was stale forever), **71 web** (+42, `app/tests/reload.test.js` and
+`app/tests/sw.test.js`), **52 launcher** (+6). One existing launcher test needed
+correcting rather than re-baselining: it stubbed `setTimeout` with a single fixed
+id that collided with jsdom's own counter, so the probe's ordinary tidy-up read
+as the refusal timer being cancelled.
+
+**One [P1] from the gate, and it was right.** `sw.js` cached whatever the
+network returned, including a 4xx/5xx — those arrive on the success path,
+because an error *response* is a reply and not a failure. The reload button
+makes that reachable deliberately: it asks the server for the shell, and on a
+bad answer it reports that nothing was changed and keeps the copy in hand. That
+promise was false, because the worker had already overwritten the offline shell
+with the error page on the way past, and the next dead zone would have served
+it. Now only `res.ok` is stored, and the write is held open with `waitUntil` so
+it cannot be cut short by the worker being killed the moment the page has its
+bytes.
+
+The finding also exposed that **`sw.js` had never had a test of any kind** —
+this file is the one that held the staleness in place for weeks, and the gate
+was its first reader. `app/tests/sw.test.js` now drives it in a vm context with
+`self`, `caches` and `fetch` stubbed: good responses update the shell, error
+responses do not, a dead network falls back, three forced refreshes leave one
+entry rather than three, `/api` and `/ws` are never touched, and activate evicts
+every older cache. Web suite **67**.
+
+**A second [P1], also right, and it made the design simpler.** The first draft
+of `reloadApp()` cleared Cache Storage and unregistered the workers before
+reloading. Fetching the page first meant it could not strand a phone whose
+tailnet was already down — but connectivity dropping in the window between that
+fetch and the reload would have left no offline shell AND no worker to serve
+one, on a page whose own `no-cache` headers make the reload ask the network
+again. A window of milliseconds, on a phone radio, in a shop, with the app gone
+until signal returned.
+
+The fix was to stop doing it from the page at all. `registration.update()`
+refetches `sw.js` past the cache, and the new worker fills its cache in `install`
+and drops the old ones in `activate` — the eviction that was wanted, done where
+it cannot leave a gap. Fewer lines than the version it replaced. Both of the
+gate's findings were about the same thing from opposite ends: the offline copy
+is the thing that must survive.
+
+Suites at the end: **193 python**, **70 web**, **59 launcher**.
+
+**A third finding, [P2], and the most useful of the three.** Between the two
+drafts above, the launcher warmed the shell with a cross-origin `cache:"reload"`
+fetch before handing over. Chromium partitions the HTTP cache by top-level site:
+a fetch issued while the launcher is still on its own Capacitor origin refreshes
+a partition that the subsequent top-level navigation never reads. It would have
+looked like it worked and changed nothing — the worst shape of bug this project
+keeps meeting, and the same shape as the original: a fix that tests green next
+to the layer it was meant to fix.
+
+Removing it forced the better question — where does freshness actually belong? —
+and the answer was the service worker, which runs on the server's own origin and
+sees every navigation. One argument to `fetch()`, and the mechanism `shell.py`
+has described in prose since yesterday is finally closed in code: *"sw.js is
+network-first, but its fetch() goes through the very cache that is answering
+stale."* It did. Now it does not. The launcher keeps only the cache-buster, which
+needs no assumption about partitioning because no partition has ever seen the
+address.
+
+`sw.js` had never been tested, and all three findings were in or about it.
+
+Suites at the end: **193 python**, **71 web**, **52 launcher**.
