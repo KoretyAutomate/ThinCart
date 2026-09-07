@@ -1611,3 +1611,60 @@ Design consequences that follow from that, to hold to when building:
   ever launched, exactly as it means no request is made today.
 - `lookup.py` stays the only module that reaches outward, browser included.
 - Best-effort as always: the list and its sync never wait on any of this.
+
+### 2026-09-07 (evening, corrected) — Whole Foods DOES publish shelf location
+
+The owner: *"whole foods has aisle location information when selecting the
+store."* They were right and the entry above was wrong. Correcting it here
+rather than editing it away, because the way it was wrong is the useful part.
+
+**The mistake.** Every probe went at `wholefoodsmarket.com` without a store
+selected. In that state the site serves a delivery-oriented experience with no
+shelf data anywhere — which is exactly what was found, and was then written up
+as "Whole Foods does not publish it". The absence was real; the conclusion drawn
+from it was not. A negative result from one configuration was reported as a
+property of the chain.
+
+**What is actually there.** With a store selected the site serves a different
+tree, `/grocery/...`, and the product page carries:
+
+```html
+<div data-testid="aisle-location"> … Located in Dairy … </div>
+```
+
+Verified live: Organic Valley Whole Milk at Princeton (store **10187**) →
+`$5.99` and **"Located in Dairy"**. Department-level rather than Wegmans'
+`14B · left · sec 11`, but a real shelf location and the thing the owner saw.
+
+**Store selection is a cookie, and it can be built rather than negotiated.**
+`wfm_store_d8` is base64 of `{"id","name","tlc","path","state","geometry",…}`.
+Crafting it for Princeton and sending it with plain `httpx` returns the full
+server-rendered page — the response says `"storeName":"Princeton"` and
+`"storeId":"10187"`, so the cookie is honoured. **No browser is needed to read a
+price or an aisle.**
+
+| capability | route | browser needed |
+|---|---|---|
+| branch id | `/stores/<slug>` → `"storeCode"` | no |
+| store selection | crafted `wfm_store_d8` cookie | no |
+| price | `/grocery/product/<slug>` | no |
+| shelf location | same page, `data-testid="aisle-location"` | no |
+| free-text search | results render client-side; `/api/wwos/rsi/search` answers 200 with 0 hits even with the cookie | **yes** |
+
+**So the browser shrinks to one job: turning an item name into a product.**
+Everything after that is cheap HTTP. That suits the existing cache design —
+which product "milk" means at a given store is stable, so it is cached under the
+long product TTL and the browser is touched about once per item per store, not
+once per query. The aisle walk, which fires one lookup per item on the list,
+stays HTTP-only after the first pass.
+
+Playwright and a headless Chromium are installed on the box
+(`~/.cache/ms-playwright`, 111 MB) and were what found this: the discovery came
+from watching a real browser's network traffic, not from guessing endpoints.
+
+**The lesson, and it is the fourth time this session.** Every failure today has
+been the same one — checking the layer next to the one that matters. The stale
+shell (server tested, phone not), the reload button (behaviour tested, findability
+not), the delete (server tested, panel not), and now this (site probed, but not
+in the state the owner uses it in). The question to ask first is not "what does
+the API return" but "what is the owner actually looking at".
