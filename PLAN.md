@@ -1158,3 +1158,88 @@ Three of them shared one mechanical cause worth stating on its own: **the op
 queue is optimistic, so anything read back from the server immediately after an
 `enqueue()` is racing it.** Where the value is already known client-side, use
 it; where it is not, send it with the request. Never read it back.
+
+## 2026-09-07 — the week's TODOs, and the "done but not on the phone" problem
+
+From the 2026-09-06 weekly report. Its headline is the one that matters: *Claude
+Code reports features complete, the phone disagrees, and this has now happened
+twice.* That is a true description of the last two weeks and the cause is not
+carelessness about testing — the suites were green both times. It is that the
+suites covered a layer **next to** the one the phone runs.
+
+- The APK: the launcher's JavaScript was tested in jsdom; the bug was in
+  Capacitor's native navigation policy, which no jsdom test can reach.
+- Phase 6: the server was verified end to end against the real chain data;
+  `app/index.html` — the file the phones actually execute — had **no automated
+  tests of any kind**, and every bit of Phase 6's aisle grouping, price
+  rendering and error branching lives there.
+
+So the structural answer is `app/tests/`, a jsdom suite that loads the real
+served page, seeds real state, and drives what the phone would draw: 29 checks
+across the aisle view and the price sheet. It cannot press a button on a
+handset and does not pretend to. What it removes is the specific failure where
+the served page is broken and everything is still green.
+
+Every rule it pins was a review finding on the server that the client could
+silently undo — the server can separate a near match from an exact one, refuse
+to call an outage an absence, and stamp each quote with its age, and none of
+that reaches the shopper unless the page renders it that way.
+
+### The four TODOs
+
+**Icons (絵文字のバックフィル) — done, live.** 139 of 257 catalog rows had no
+icon and were *stranded*, not merely missed: `sweep()` only revisits rows with
+`llm_enriched_at IS NULL`, so anything enriched before per-item emoji existed
+was never looked at again, and the curated map does not carry specific
+real-world names ("Amys frozen pizza", "grass fed 2% milk", あさり).
+
+Fixed at the root with `catalog.backfill_emoji()` in the nightly sweeper.
+Emoji-ONLY by design: re-running `enrich()` would refill category, edibility and
+plants from the LLM and quietly overwrite a category set by hand in the item
+sheet, which is a worse outcome than a missing icon.
+
+The first attempt filled **zero**, which is the useful part of this entry. The
+obvious prompt — "a single emoji that best pictures this; null if none fits" —
+returned null for *everything*, Greek yogurt included: given an escape hatch and
+no encouragement, the model takes the hatch. Naming the fallback explicitly
+(yogurt → 🥛, paper → 🧻) and reserving null for gibberish turned it around.
+Measured against the live model before shipping, not after. 138 of 139 filled;
+the holdout is `cau`, correctly declined. **256/257 now have icons.**
+
+Gate finding on that fix, worth keeping: the backfill selected blank rows
+`LIMIT 30`, so a batch of names the LLM rightly refuses would be re-selected
+every run and starve everything behind it — a queue that looks busy and never
+moves. `item_catalog.emoji_tried_at` now records the ATTEMPT whether or not an
+icon came back, untried rows are served first, and a decline goes to the back to
+be retried only after every other row has had a turn (a later model, or an
+edited name, still gets another chance).
+
+**Store recommendation rules (推薦ルールの検証) — verified.** The rule was
+already correct; half of it had no test. Added: tie-break by recency (equal
+counts → where you last bought it), frequency outranking recency (three visits
+beat yesterday's one-off — otherwise a single unusual trip rewrites the regular
+answer), and a deleted store dropping out of the recommendation. The subtlety
+now pinned is that `recommended_stores` orders ASCENDING by (count, last) and
+lets dict overwrite pick the winner; inverting that ORDER BY silently inverts
+the answer. Note the live DB has 34 store-stamped purchases, all at one shop —
+so this rule has never actually been exercised in production.
+
+**Travel-day detection (旅行日検出の自動化) — code complete, blocked on one
+browser step.** Verified rather than assumed: `~/.config/thincart/google_oauth.json`
+holds `client_id`/`client_secret`/`calendar_ids` and **no refresh_token**, so
+`is_linked()` is false and the 6-hourly sweeper idles — no calendar lines in the
+journal for seven days. `--authorize` was run far enough to confirm it prints a
+valid Google URL with PKCE, so the credentials are good and the flow is not
+broken; it needs a Google sign-in nobody but the owner can do. The app already
+says so in the Travel panel. The sweeper re-checks `is_linked()` every cycle, so
+authorising takes effect within 6 h with no restart.
+
+**Phone verification (実機確認) — see above,** plus a short checklist handed to
+the owner so the check is two minutes rather than open-ended.
+
+### Corrected in passing
+
+Nightly backups looked dead — `~/backups/shopping-list/` stops in July. They are
+fine: the timer is enabled and active, ran 3 h before this was written, and
+writes to `~/backups/thincart/`, which holds 28 dailies including today. The
+July directory is the pre-rename path. Checked rather than reported.

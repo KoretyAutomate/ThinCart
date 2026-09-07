@@ -66,3 +66,58 @@ def test_state_includes_emoji_field():
     banana = next(i for i in st["items"] if i["name"] == "Banana")
     assert banana["emoji"] == "🍌"
     conn.close()
+
+
+def test_backfill_stamps_a_decline_so_it_cannot_starve_the_queue():
+    """The backfill picks rows with no icon, LIMIT 30. If a batch is all
+    gibberish the LLM rightly refuses, re-selecting those same rows every run
+    would starve every row behind them forever — the queue would look busy and
+    make no progress. So an ATTEMPT is recorded whether or not it produced an
+    icon, untried rows are served first, and a decline goes to the back to be
+    retried only once everything else has had a turn.
+    """
+    import asyncio
+
+    import catalog
+
+    conn = db.connect()
+    lock = asyncio.Lock()
+    for name in ("zzz-gibberish-a", "zzz-gibberish-b", "zzz-fillable"):
+        conn.execute(
+            "INSERT OR IGNORE INTO item_catalog(canonical_name, display_name, llm_enriched_at) "
+            "VALUES(?,?,'2020-01-01T00:00:00+00:00')",
+            (db.canonical(name), name),
+        )
+    conn.commit()
+
+    async def never_answers(*_a, **_k):
+        return {"emoji": None}
+
+    original = catalog.llm.chat_json
+    try:
+        catalog.llm.chat_json = never_answers
+        asyncio.run(catalog.backfill_emoji(conn, lock, limit=2))
+    finally:
+        catalog.llm.chat_json = original
+
+    tried = {
+        r["display_name"]
+        for r in conn.execute(
+            "SELECT display_name FROM item_catalog WHERE emoji_tried_at IS NOT NULL"
+        )
+    }
+    assert len(tried) == 2, tried          # both declines recorded as attempts
+    assert all(
+        r["emoji"] in (None, "")
+        for r in conn.execute("SELECT emoji FROM item_catalog WHERE display_name LIKE 'zzz-%'")
+    )
+
+    # The next batch must move on rather than re-ask the same two.
+    nxt = [
+        r["display_name"]
+        for r in conn.execute(
+            "SELECT display_name FROM item_catalog WHERE (emoji IS NULL OR emoji='') "
+            "ORDER BY emoji_tried_at IS NOT NULL, emoji_tried_at LIMIT 2"
+        )
+    ]
+    assert not (set(nxt) & tried), (nxt, tried)
