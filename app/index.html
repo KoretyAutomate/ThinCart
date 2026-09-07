@@ -1864,7 +1864,7 @@ function renderProductChoice(it, opts, picked) {
         else delete aisleMap[k];
       }
       render();
-      showPrices(it, o.sku, o.name);
+      showPrices(it, o.sku, o.name, o.source);
     };
     box.appendChild(row);
   }
@@ -1890,13 +1890,18 @@ function agoLabel(iso) {
   return d === 0 ? T().cmp_today : T().cmp_days(d);
 }
 
-async function showPrices(it, sku, name) {
+/* `chain` says whose sku this is. A Wegmans sku, a Whole Foods ASIN and a
+ * ShopRite UPC are three namespaces: sent without its chain, a just-picked
+ * ASIN could never match at ShopRite and that store's quote would be filed
+ * under "what they have instead" even where a pick already exists there. */
+async function showPrices(it, sku, name, chain) {
   pnote(T().cmp_searching);
   let d;
   try {
     const res = await fetch('/api/prices?catalog_id=' + encodeURIComponent(it.catalog_id)
       + (sku ? '&sku=' + encodeURIComponent(sku) : '')
-      + (name ? '&name=' + encodeURIComponent(name) : ''));
+      + (name ? '&name=' + encodeURIComponent(name) : '')
+      + (sku && chain ? '&chain=' + encodeURIComponent(chain) : ''));
     if (res.status === 503) { pnote(await why503(res, T().cmp_off, T().cmp_fail)); return; }
     if (!res.ok) { pnote(T().cmp_fail); return; }
     d = await res.json();

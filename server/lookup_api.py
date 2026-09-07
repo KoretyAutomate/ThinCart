@@ -31,11 +31,11 @@ from lookup import (
     cache_put,
     enabled,
     parse_store_results,
-    wegmans_products,
-    wegmans_products_many,
-    wegmans_store_number,
+    products,
+    products_many,
+    resolve_branch,
 )
-from wegmans import aisle_label, wegmans_slug
+from chains import aisle_label, detect
 
 router = APIRouter()
 
@@ -55,7 +55,7 @@ def _db() -> sqlite3.Connection:
 
 def _store_row(store_id: int) -> dict | None:
     r = _db().execute(
-        "SELECT id, name, brand, address, chain, chain_store_id FROM stores WHERE id=?", (store_id,)
+        "SELECT id, name, brand, address, lat, lon, chain, chain_store_id FROM stores WHERE id=?", (store_id,)
     ).fetchone()
     return dict(r) if r else None
 
@@ -97,14 +97,14 @@ def _best(recs: list[dict], sku: str | None) -> tuple[dict | None, bool]:
 @router.get("/api/stores/link")
 async def store_link(store_id: int) -> dict:
     """Resolve a pinned store to the chain's own branch number, so its prices
-    and aisles can be asked for. Only Wegmans has an adapter; every other store
-    is answered honestly rather than approximately."""
+    and aisles can be asked for. Three chains have an adapter; every other
+    store is answered honestly rather than approximately."""
     _require("stores")
     store = _store_row(store_id)
     if not store:
         raise HTTPException(404, "no such store")
-    haystack = f"{store['name']} {store['brand']}".lower()
-    if "wegmans" not in haystack:
+    chain = detect(store["name"], store["brand"])
+    if not chain:
         return {"chain": "", "chain_store_id": "", "reason": "no price adapter for this store"}
     # Reaching the chain is a content lookup, not a store search: THINCART_LOOKUP
     # =stores promises OpenStreetMap and nothing else, and linking prices would
@@ -112,13 +112,10 @@ async def store_link(store_id: int) -> dict:
     if not enabled("price"):
         return {"chain": "", "chain_store_id": "",
                 "reason": f"price lookups are off (THINCART_LOOKUP={lookup.MODE})"}
-    slug = wegmans_slug(store["address"] or "")
-    if not slug:
-        return {"chain": "", "chain_store_id": "", "reason": "could not read a town from the address"}
-    num = await wegmans_store_number(slug)
-    if not num:
-        return {"chain": "", "chain_store_id": "", "reason": f"no Wegmans branch page for '{slug}'"}
-    return {"chain": "wegmans", "chain_store_id": num, "slug": slug}
+    branch, reason = await resolve_branch(chain, store)
+    if not branch:
+        return {"chain": "", "chain_store_id": "", "reason": reason}
+    return {"chain": chain, "chain_store_id": branch}
 
 
 @router.get("/api/products/search")
@@ -137,7 +134,8 @@ async def products_search(catalog_id: int, store_id: int) -> dict:
     # seen or compared, which defeats remembering it at all.
     pick = _pick_for(catalog_id, store["chain"])
     term = (pick["name"] if pick else "") or row["display_name"]
-    recs = await wegmans_products(term, store["chain_store_id"])
+    recs = await products(store["chain"], term, store["chain_store_id"],
+                          prefer_sku=pick["sku"] if pick else None)
     if recs is None:
         raise HTTPException(503, {"code": UNAVAILABLE})
     # The label the aisle view would render for each option. Carrying it here
@@ -155,6 +153,7 @@ async def prices(
     catalog_id: int,
     sku: str = Query("", max_length=40),
     name: str = Query("", max_length=200),
+    chain: str = Query("", max_length=30),
 ) -> dict:
     """What the picked product costs at each store that can say.
 
@@ -164,6 +163,13 @@ async def prices(
     still has to FIND that product, and searching a store's catalogue for the
     generic "sunflower butter" may not return the exact jar in its top few hits,
     leaving an approximate quote where an exact one exists.
+
+    `chain` says whose sku it is. A Wegmans sku, a Whole Foods ASIN and a
+    ShopRite UPC are three namespaces; applied to every store, a just-picked
+    ASIN could never match at ShopRite and its quote would be demoted to an
+    alternative even where the household has already picked there. So the
+    supplied product is used at its own chain, and every other store is asked
+    about ITS remembered pick — or, before one, the item's own name.
     """
     _require("price")
     row = _db().execute("SELECT display_name FROM item_catalog WHERE id=?", (catalog_id,)).fetchone()
@@ -179,11 +185,13 @@ async def prices(
     failed = False
     for store in _priced_stores():
         pick = _pick_for(catalog_id, store["chain"])
-        want = sku or (pick["sku"] if pick else None)
-        term = name or (pick["name"] if pick else row["display_name"])
+        mine = bool(sku) and (chain == store["chain"] or not chain)
+        want = (sku if mine else "") or (pick["sku"] if pick else None)
+        term = (name if mine else "") or (pick["name"] if pick else row["display_name"])
         # A price may be served from cache, but only a price-fresh one: the same
         # record is happily reused for months to answer "which aisle".
-        recs = await wegmans_products(term, store["chain_store_id"], max_age=TTL["price"])
+        recs = await products(store["chain"], term, store["chain_store_id"],
+                              max_age=TTL["price"], prefer_sku=want)
         if recs is None:
             failed = True
             continue
@@ -229,8 +237,14 @@ async def aisles(store_id: int) -> dict:
     for r in rows:
         p = picks.get(r["catalog_id"])
         terms[r["catalog_id"]] = p["name"] if p else r["display_name"]
-    got, complete = await wegmans_products_many(
-        list(dict.fromkeys(terms.values())), store["chain_store_id"]
+    # EVERY pick under a term, not the last one written: two items can share a
+    # search term and mean different jars, and each has to find its shelf.
+    prefer: dict[str, list[str]] = {}
+    for cid, p in picks.items():
+        if p:
+            prefer.setdefault(terms[cid], []).append(p["sku"])
+    got, complete = await products_many(
+        store["chain"], list(dict.fromkeys(terms.values())), store["chain_store_id"], prefer
     )
     if not got and not complete:
         raise HTTPException(503, {"code": UNAVAILABLE})

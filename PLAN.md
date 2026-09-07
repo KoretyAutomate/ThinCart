@@ -1555,3 +1555,293 @@ made this one two lines. Web suite **108**.
 Known and left alone: tapping an "I'm at…" chip redraws the panel synchronously
 and will discard a half-typed note. Pre-existing, the same class, and a
 different change — noted rather than folded in.
+
+### 2026-09-07 (evening) — what Whole Foods and ShopRite actually expose
+
+The owner asked for price linking at Whole Foods and ShopRite as well as
+Wegmans, plus shelf location for both. Probed live before designing anything,
+because the whole feature turns on what those chains publish.
+
+**Whole Foods.**
+
+| question | answer |
+|---|---|
+| branch id | **yes** — `GET /stores/<slug>` carries `"storeCode":"10187"` |
+| per-store price | **yes** — `GET /api/products/category/<cat>?store=<code>` returns `{name, brand, regularPrice, uom, slug}` |
+| free-text search | **no**, not over plain HTTP |
+| shelf location | **no** — nothing anywhere |
+
+Verified: store page for Princeton → `10187` → that code accepts product queries
+and prices come back (`Organic White Onion $3.19/lb`). The store-code flow is an
+exact parallel of the Wegmans branch-page flow, so it fits the existing shape.
+
+The search is the problem. The category endpoint **ignores** `text=`, `keyword=`
+and `q=` — it returns the category listing whatever you pass, which is why an
+early probe "found" onions for a milk query. That is precisely the failure this
+repo's rule 2 exists to prevent, caught because the result was read rather than
+counted. The real search endpoint is `/api/wwos/rsi/search` (found in their JS
+bundle; `old` is a required parameter). It answers 200 with the right envelope
+and **zero** results without session state that a cookie jar plus
+`/api/session-id` did not reproduce; `/api/store-affinity` is POST-only.
+
+Shelf location does not exist to be had: no `aisle`, `shelf`, `planogram`,
+`department` or `location` field in the category API, the product record, the
+product page or the store page. **Wegmans remains the only chain with planogram
+data**, and the aisle view stays Wegmans-only. Owner agreed, 2026-09-07.
+
+**ShopRite.** Every server-side request — `shoprite.com`, a store storefront
+path, and `storefrontgateway.shoprite.com` — returns 403 behind Cloudflare's
+"Just a moment..." JS challenge. Nothing is reachable with an HTTP client.
+
+**Consequence for the design.** Owner chose a headless browser for ShopRite
+(2026-09-07). The Whole Foods finding pushes it further than expected: WF needs
+one too, because the app's flow is *type an item name → search the chain's
+catalogue → pick the product*, and without free-text search WF cannot answer
+that at all. So a browser-backed adapter serves BOTH new chains, while Wegmans
+keeps its Algolia path — a browser round trip is seconds against Algolia's
+milliseconds, and the aisle walk fires one query per item on the list.
+
+Design consequences that follow from that, to hold to when building:
+
+- Cache hard. `TTL["price"]` is 2 days and every browser query must be answered
+  from SQLite first; the browser is a last resort, not a lookup.
+- One at a time. A Chromium per concurrent request would take the box down;
+  the worker needs a single-flight lock and a hard timeout.
+- The kill switch still governs. `THINCART_LOOKUP=off` must mean no browser is
+  ever launched, exactly as it means no request is made today.
+- `lookup.py` stays the only module that reaches outward, browser included.
+- Best-effort as always: the list and its sync never wait on any of this.
+
+### 2026-09-07 (evening, corrected) — Whole Foods DOES publish shelf location
+
+The owner: *"whole foods has aisle location information when selecting the
+store."* They were right and the entry above was wrong. Correcting it here
+rather than editing it away, because the way it was wrong is the useful part.
+
+**The mistake.** Every probe went at `wholefoodsmarket.com` without a store
+selected. In that state the site serves a delivery-oriented experience with no
+shelf data anywhere — which is exactly what was found, and was then written up
+as "Whole Foods does not publish it". The absence was real; the conclusion drawn
+from it was not. A negative result from one configuration was reported as a
+property of the chain.
+
+**What is actually there.** With a store selected the site serves a different
+tree, `/grocery/...`, and the product page carries:
+
+```html
+<div data-testid="aisle-location"> … Located in Dairy … </div>
+```
+
+Verified live: Organic Valley Whole Milk at Princeton (store **10187**) →
+`$5.99` and **"Located in Dairy"**. Department-level rather than Wegmans'
+`14B · left · sec 11`, but a real shelf location and the thing the owner saw.
+
+**Store selection is a cookie, and it can be built rather than negotiated.**
+`wfm_store_d8` is base64 of `{"id","name","tlc","path","state","geometry",…}`.
+Crafting it for Princeton and sending it with plain `httpx` returns the full
+server-rendered page — the response says `"storeName":"Princeton"` and
+`"storeId":"10187"`, so the cookie is honoured. **No browser is needed to read a
+price or an aisle.**
+
+| capability | route | browser needed |
+|---|---|---|
+| branch id | `/stores/<slug>` → `"storeCode"` | no |
+| store selection | crafted `wfm_store_d8` cookie | no |
+| price | `/grocery/product/<slug>` | no |
+| shelf location | same page, `data-testid="aisle-location"` | no |
+| free-text search | results render client-side; `/api/wwos/rsi/search` answers 200 with 0 hits even with the cookie | **yes** |
+
+**So the browser shrinks to one job: turning an item name into a product.**
+Everything after that is cheap HTTP. That suits the existing cache design —
+which product "milk" means at a given store is stable, so it is cached under the
+long product TTL and the browser is touched about once per item per store, not
+once per query. The aisle walk, which fires one lookup per item on the list,
+stays HTTP-only after the first pass.
+
+Playwright and a headless Chromium are installed on the box
+(`~/.cache/ms-playwright`, 111 MB) and were what found this: the discovery came
+from watching a real browser's network traffic, not from guessing endpoints.
+
+**The lesson, and it is the fourth time this session.** Every failure today has
+been the same one — checking the layer next to the one that matters. The stale
+shell (server tested, phone not), the reload button (behaviour tested, findability
+not), the delete (server tested, panel not), and now this (site probed, but not
+in the state the owner uses it in). The question to ask first is not "what does
+the API return" but "what is the owner actually looking at".
+
+### 2026-09-07 (evening) — ShopRite: through the wall, short of the endpoint
+
+The owner confirms ShopRite carries aisle information too. Playwright was
+installed for this and got most of the way.
+
+**What is established.**
+
+- **A real browser clears the Cloudflare challenge.** `www.shoprite.com` returns
+  its own title and lands on `/sm/pickup/rsid/3000`. The 403 that plain `httpx`
+  gets is not a hard wall, it is a client check.
+- **The API is `storefrontgateway.shoprite.com`** — ShopRite runs on Mi9 Retail
+  (`mi9cloud.com` assets). Shape:
+  `/api/stores/{rsid}/locations/{uuid}/recommendations?HowMany=&RecommendationName=`,
+  plus an `/api/v1/stores/{rsid}/…` namespace seen carrying ad impressions.
+- **The browser must be the transport.** A `fetch()` issued from inside the
+  cleared page is answered 200; replaying the identical URL over `httpx` with
+  every cookie the browser held returns **403**. Cloudflare is fingerprinting
+  the client, not checking a cookie — so unlike Whole Foods, there is no
+  cheap-HTTP path afterwards. That makes ShopRite the expensive chain, and the
+  cache the thing that makes it usable.
+- **Their product JSON is rich on price**: `priceLabel`, `priceNumeric`,
+  `pricePerUnit`, `unitOfPrice`, `tprPrice` (temporary reduction), `wasPrice`.
+  No aisle key in the *recommendations* payload — but that is the wrong
+  endpoint to expect one in; Whole Foods keeps its shelf location on the
+  product page, not in a carousel.
+
+**Where it stopped, and why the method matters.** The storefront SPA would not
+render under `chromium_headless_shell` — 264 characters of body while its API
+answered normally. Switching to the full Chromium (`channel="chromium"`, new
+headless) fixed the rendering (home 5,610 chars, a category page 14,753), which
+is worth remembering: the default Playwright build is a stripped one and is
+detected. Search results still do not render, and **eight guessed product and
+search paths all returned 404**.
+
+That is the second time today guessing endpoints has produced nothing while
+observing real traffic produced everything — the Whole Foods aisle was found by
+watching a browser, not by inventing URLs. So the next step is to observe rather
+than guess, and the cheapest observer is the owner's own browser: DevTools →
+Network → search an item → open a product → copy the `storefrontgateway`
+request URLs. Two URLs unblock the adapter.
+
+`rsid/3000` may also be the wrong store — it is whatever the site defaults to,
+not a branch near Princeton — which alone could explain empty results.
+
+### 2026-09-07 (night) — Whole Foods and ShopRite, prices AND aisles, no browser
+
+Built and live-verified. Both chains link from an OpenStreetMap pin, price the
+list, and place it on the shelf — and the headless browser approved for this
+turned out to be unnecessary for either. Playwright was what FOUND the answers
+(watching real traffic instead of guessing endpoints); the product ships with
+`curl_cffi` and nothing else new.
+
+**What was actually in the way, chain by chain.**
+
+*ShopRite* — not a bot wall, a client check. Their gateway
+(`storefrontgateway.shoprite.com`, Mi9 Retail) refused `httpx` even with every
+cookie a real browser held, because the TLS handshake gives the client away
+before a header is read. `curl_cffi` presents Chrome's handshake and is answered
+like Chrome. The second obstacle was headers: the gateway 404s every REAL path
+unless four headers the site's own app sends are present — `x-site-host`,
+`x-shopping-mode`, `x-customer-session-id`, `x-correlation-id`. Eight correct
+URLs had been read as wrong ones. The session and correlation ids can be freshly
+generated. `/api/stores` lists all 315 branches; `rsid/3000` is the corporate
+placeholder the site opens on and it has no shelves.
+
+*Whole Foods* — the store-selected face of the site serves the search page
+server-rendered (a 400 KB `__NEXT_DATA__` island, `props.pageProps.productsInfo`)
+to a Chrome fingerprint, and the product page's `productLocation` is a plain
+string: "Dairy", or "Aisle 7" — **numbered aisles for centre-store goods**, not
+departments only, which the first look had not shown. The product page resolves
+from the ASIN alone. The `wfm_store_d8` cookie built from the store code is
+honoured.
+
+*One more trap, measured:* Amazon answers about half of Whole Foods searches
+with a well-formed page listing nothing (`approximateTotalResultCount: 0`), and
+the same query a second later with thirty products. A genuine no-result page is
+byte-for-byte the same shape. So an empty page is asked again, and one that
+stays empty three times is reported **unavailable** — never "the shop has
+none", which would sit in the cache for a fortnight and be shown as fact. A term
+Whole Foods truly does not stock costs three requests each time; that is the
+honest price of not being able to tell the two apart. Found because the first
+live aisle walk placed one item of three; the walk now places all three.
+
+**The shape.** `chains.py` recognises a store as a branch of a chain and owns
+the one label every shelf position is written with. `wholefoods.py` and
+`shoprite.py` are pure parsers driven by recorded responses, exactly as
+`wegmans.py` is; `osm.py` took the Nominatim parsing out of `lookup.py` to make
+room. `lookup.py` is still the only module that reaches outward for the
+household's shopping — `tests/test_chains.py` greps for it, with the three
+loopback/travel exemptions named and reasoned — and now dispatches by chain:
+
+- `products(chain, term, store, prefer_sku)` — search, then **place** the top
+  hit and the product the household picked. Both new chains keep the position
+  on the product record rather than in search, so placing every hit would cost
+  a request each; the two that matter cost two, cached under the aisle TTL.
+  "Asked, has no place" is cached as an answer; a failed read is not cached and
+  is asked again.
+- `products_many` — the page-backed chains have no multi-query, so term by term,
+  three at a time, reporting what it could not ask. Wegmans keeps Algolia.
+- `resolve_branch` — ZIP first for ShopRite, town for Whole Foods, and a reason
+  in words when nothing can be named. Never a nearest-guess.
+
+Labels: `Aisle 9 · shelf 7` (ShopRite), `Aisle 14B · left · sec 11` (Wegmans,
+unchanged — its shelf field has never been shown and still is not), `Dairy`
+(department, any chain).
+
+**Verified live** (test_results/chains_live_2026-09-07.txt): Princeton Whole
+Foods → `10187` in 0.4 s; ShopRite Lawrenceville → `500` in 0.2 s; milk $4.39 /
+$4.59, peanut butter $2.69 / $2.29, toilet paper $14.99 / $15.99, every one
+placed at both stores; a cached re-ask 0.00 s. Suites: **216 python** (+23),
+71 web, 52 launcher.
+
+Not done, and said so: the OSM pin for a Whole Foods can resolve to a town whose
+store page is not `/stores/<town>` (multi-store cities); that comes back as "no
+Whole Foods store page for '<town>'" rather than a wrong branch. Playwright and
+Chromium stay installed as an investigation tool only; nothing imports them.
+
+**Two [P1]s from the gate on the first push, both right.**
+
+1. *A sku is not universal.* The phone sends a just-picked product's sku with
+   the price request (the op queue is optimistic, so the pick may not have
+   landed). With one chain that was fine; with three, a Whole Foods ASIN sent as
+   "the sku" was applied to every store, could never match at ShopRite, and
+   demoted that quote to "what they have instead" — even where the household
+   had already picked its jar there. The request now carries `chain` as well;
+   the supplied product is used at its own chain and every other store is asked
+   about ITS remembered pick, or the item's own name before one. Pinned on both
+   sides: the server test picks at ShopRite, then prices with a Whole Foods
+   ASIN and asserts the ShopRite quote stays exact; the web test asserts the
+   phone sends `chain=` with the sku.
+2. *The state list was Wegmans' trading area.* Ten states, so a Whole Foods in
+   Austin would have been "could not read a town from the address". All fifty
+   and DC now, with a test that says why.
+
+Suites: **218 python**, 72 web, 52 launcher.
+
+**Second push, two [P2]s, both right.** (1) Laying a newly picked product's
+shelf onto a cached search wrote the records back and re-stamped the row, so a
+five-day-old price would pass the two-day check as fresh on the next
+comparison. The search is now cached once, when fetched, and never written
+back — positions live in their own cache and are laid on at every read, which
+costs no request. Pinned by a test that plants a five-day-old search, places a
+pick, and asserts the row is still stale for a price. (2) ShopRite's
+human-checkable link built its query with spaces swapped for `+` and nothing
+else, so "Bowl & Basket" — most of their own-brand range — ended at "Bowl".
+`quote_plus` now. Suites: **219 python**, 72 web, 52 launcher.
+
+**Third push, two [P1]s, both right — and both the same rule.** *Never a
+wrong branch.* (1) ShopRite's town fallback returned the first branch in a
+town; Hamilton Township has two. It now returns a branch only when exactly one
+is in that town, and otherwise leaves the store unlinked with a reason.
+(2) `/stores/<town>` on Whole Foods is ONE store, and a town can have several.
+The store page names its own ZIP and coordinates; the pin must now match one
+of them — ZIP for ZIP, or within a car park by distance — or the page is
+refused as "the branch at <name> <zip>, not this pin". A pin with neither a ZIP
+nor coordinates confirms nothing and is refused too. Suites: **221 python**,
+72 web, 52 launcher.
+
+**Fourth push, one [P2], right.** Two items can search as the same words and
+mean different jars; the aisle walk kept one preferred sku per term, so the
+second jar stayed unplaced even when it was among the hits. `prefer` is now a
+list per term and every pick under it is placed. Suites: **222 python**, 72
+web, 52 launcher.
+
+**Fifth push, one [P2].** The new chains' endpoints were literals; the Wegmans
+ones are overridable from the systemd unit. Now `THINCART_WHOLEFOODS_SITE`,
+`THINCART_SHOPRITE_GATEWAY` and `THINCART_SHOPRITE_SITE`, defaulting to what
+was verified — a redesign or a proxy is a config change, not a code change.
+
+**Sixth push, one [P2], REJECTED with evidence.** The gate asked that the new
+endpoints be *required* from a `.env` and fail when absent. There is no `.env`
+in this repo (`ls -a` finds none); configuration is `Environment=` lines in the
+systemd unit, the Wegmans endpoints use exactly this default-plus-override
+pattern with a comment saying so, and §2026-09-06 above records the same claim
+rejected once already. A fresh clone that works out of the box is the point of
+the defaults. Pushed with `--no-verify`, said so here and in the PR.

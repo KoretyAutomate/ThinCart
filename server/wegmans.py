@@ -17,19 +17,19 @@ nothing about the other.
 import re
 from datetime import UTC, datetime
 
+from chains import address_town_state, aisle_label
+
+# aisle_label moved to chains.py on 2026-09-07 when it became every chain's
+# label rather than this one's; it stays reachable here under its old name.
+__all__ = ["aisle_label", "parse_store_number", "parse_wegmans_hits", "wegmans_slug"]
+
 
 def now_iso() -> str:
     """Local copy rather than an import from lookup.py: this module stays free
     of that one so the dependency runs one way only, policy -> parsing."""
     return datetime.now(UTC).isoformat()
 
-US_STATES = {
-    "new york": "ny", "pennsylvania": "pa", "new jersey": "nj", "virginia": "va",
-    "maryland": "md", "massachusetts": "ma", "delaware": "de", "north carolina": "nc",
-    "connecticut": "ct", "district of columbia": "dc",
-}
-
-PRODUCT_URL = "https://www.wegmans.com/shop/product/{sku}"
+PRODUCT_URL ="https://www.wegmans.com/shop/product/{sku}"
 
 
 def parse_wegmans_hits(hits: list[dict], stamp: str | None = None) -> list[dict]:
@@ -80,24 +80,6 @@ def parse_wegmans_hits(hits: list[dict], stamp: str | None = None) -> list[dict]
         )
     return out
 
-def aisle_label(rec: dict) -> str:
-    """"Aisle 14B · left · sec 11" — a findable instruction rather than a bare
-    number. Empty when there is no aisle, which callers must render as unknown
-    rather than as a plausible blank."""
-    if not rec.get("aisle"):
-        return ""
-    # The field is not always a number: perishables come back as a department
-    # ("Dairy", "Produce"). "Aisle Dairy" reads as a mistake, so the word is
-    # only added where it is actually an aisle.
-    head = rec["aisle"]
-    parts = [f"Aisle {head}" if head[:1].isdigit() else head]
-    side = {"L": "left", "R": "right"}.get((rec.get("aisle_side") or "").upper())
-    if side:
-        parts.append(side)
-    if rec.get("section"):
-        parts.append(f"sec {rec['section']}")
-    return " · ".join(parts)
-
 def parse_store_number(html: str) -> str:
     """The chain's own branch number, off its store page. That number is what
     the product index is keyed by; the OSM id that pins the store is a different
@@ -110,18 +92,5 @@ def wegmans_slug(address: str) -> str:
     -> 'princeton-nj'. Empty when the address does not parse — never a guessed
     slug, which would resolve to some other town's branch and mis-price
     everything with no visible sign of it."""
-    parts = [p.strip() for p in address.split(",")]
-    state = idx = None
-    for i, p in enumerate(parts):
-        if p.lower() in US_STATES:
-            state, idx = US_STATES[p.lower()], i
-            break
-    if state is None or idx is None:
-        return ""
-    for j in range(idx - 1, -1, -1):
-        if parts[j].lower().endswith("county"):
-            continue
-        town = re.sub(r"[^a-z0-9]+", "-", parts[j].lower()).strip("-")
-        if town:
-            return f"{town}-{state}"
-    return ""
+    town, state = address_town_state(address)
+    return f"{town}-{state}" if town else ""

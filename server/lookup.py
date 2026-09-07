@@ -5,7 +5,8 @@ Until Phase 6 this app made none at all: everything lived on the tailnet and the
 only non-local dependency was vLLM on 127.0.0.1. Store search, price comparison
 and aisle hints change that, and the household's shopping content is what
 travels. Concentrating every outbound call here is what makes that reviewable —
-an `httpx` call anywhere else in this repo is a review failure, not a style nit.
+an `httpx` or `curl_cffi` call anywhere else in this repo is a review failure,
+not a style nit, and tests/test_chains.py greps for exactly that.
 
 Three rules hold everywhere below, and the tests enforce them:
 
@@ -28,13 +29,21 @@ import json
 import logging
 import os
 import sqlite3
+import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import quote
 
 import httpx
+from curl_cffi.requests import AsyncSession
 from fastapi import HTTPException
 
-from wegmans import parse_store_number, parse_wegmans_hits
+import osm
+import shoprite
+import wholefoods
+from chains import close as chains_close
+from chains import postcode as chains_postcode
+from wegmans import parse_store_number, parse_wegmans_hits, wegmans_slug
 
 log = logging.getLogger("thincart.lookup")
 
@@ -88,12 +97,10 @@ WEGMANS_STORE_URL = os.environ.get(
     "THINCART_WEGMANS_STORE_URL", "https://www.wegmans.com/stores/{slug}"
 ).strip()
 
-# OSM classes that are somewhere you buy groceries. Used to rank, not to filter:
-# a shop tagged oddly must still be findable, it just sorts below the obvious.
-GROCERY_TYPES = {
-    "supermarket", "convenience", "grocery", "greengrocer", "butcher",
-    "bakery", "deli", "farm", "seafood", "health_food", "wholesale",
-}
+# Re-exported: lookup_api.py and the tests reach the OSM parser through this
+# module, and the parsing moved out (osm.py) rather than the callers.
+GROCERY_TYPES = osm.GROCERY_TYPES
+parse_store_results = osm.parse_store_results
 
 _conn: sqlite3.Connection | None = None
 _nominatim_lock = asyncio.Lock()
@@ -182,57 +189,6 @@ async def _nominatim(params: dict[str, str]) -> list[dict] | None:
         finally:
             _nominatim_last = asyncio.get_running_loop().time()
     return data if isinstance(data, list) else None
-
-
-def _town(addr: dict) -> str:
-    """The most town-like field Nominatim gave us, or ''."""
-    for k in ("city", "town", "village", "municipality", "suburb", "hamlet"):
-        if addr.get(k):
-            return str(addr[k]).strip()
-    return ""
-
-
-def parse_store_results(raw: list[dict], stamp: str | None = None) -> list[dict]:
-    """Nominatim jsonv2 -> our shape. Pure, so the tests can drive it from a
-    recorded fixture with no network. Anything without an osm_id is dropped:
-    the whole point of this feature is an identity we can pin a store to."""
-    stamp = stamp or now_iso()
-    out = []
-    for r in raw:
-        osm_id = r.get("osm_id")
-        osm_type = r.get("osm_type")
-        if osm_id is None or not osm_type:
-            continue
-        name = (r.get("name") or "").strip() or (r.get("display_name") or "").split(",")[0].strip()
-        if not name:
-            continue
-        addr = (r.get("display_name") or "").strip()
-        # Drop the leading name from the address line; it is already the title.
-        if addr.startswith(name + ","):
-            addr = addr[len(name) + 1 :].strip()
-        out.append(
-            {
-                "osm_id": f"{osm_type}/{osm_id}",
-                "name": name,
-                "address": addr,
-                "lat": float(r["lat"]) if r.get("lat") else None,
-                "lon": float(r["lon"]) if r.get("lon") else None,
-                "brand": (r.get("extratags") or {}).get("brand", "") or "",
-                # Nominatim already knows the town (addressdetails=1). It is what
-                # tells two branches of one chain apart, and guessing it out of
-                # the display string is guesswork this does not have to do.
-                "town": _town(r.get("address") or {}),
-                "kind": r.get("type") or "",
-                "source": "openstreetmap",
-                # Stamped at parse time and carried through the cache, so a
-                # store identity can always say when it was learned. The module
-                # contract is source AND fetched_at on every record; this was
-                # the one place that only had the first half.
-                "fetched_at": stamp,
-            }
-        )
-    out.sort(key=lambda d: (d["kind"] not in GROCERY_TYPES, d["name"]))
-    return out
 
 
 # --- Wegmans adapter ---------------------------------------------------------
@@ -385,3 +341,259 @@ async def wegmans_products_many(
         cache_put("product", f"{store_number}|{term.strip().lower()}|5", parsed)
         found[term] = parsed
     return found, True
+
+
+# --- Whole Foods and ShopRite: Chrome-shaped HTTP ----------------------------
+#
+# Both sit behind a client check: the URL a browser is served is refused to
+# httpx, cookies and all, because the TLS handshake gives the client away.
+# curl_cffi presents Chrome's handshake — no browser, no challenge to solve, and
+# the request is otherwise the one their own site makes (PLAN.md §2026-09-07).
+
+
+async def _chrome_get(url: str, *, headers: dict | None = None, cookies: dict | None = None,
+                      params: dict | None = None, timeout: int = 25) -> tuple[int, str] | None:
+    """(status, body), or None when the request itself failed."""
+    try:
+        async with AsyncSession(impersonate="chrome") as s:
+            r = await s.get(url, headers=headers or {}, cookies=cookies or {},
+                            params=params, timeout=timeout)
+            return r.status_code, r.text
+    except Exception as e:
+        log.warning("request failed (%s): %s", url.split("?")[0][:90], e)
+        return None
+
+
+async def wholefoods_store(slug: str) -> dict | None:
+    """The branch behind /stores/<slug>. Cached under the slug AND the code,
+    so the cookie that selects the store can be rebuilt from the code alone."""
+    cached = cache_get("chain", f"wholefoods:{slug}")
+    if cached:
+        return cached
+    got = await _chrome_get(wholefoods.STORE_URL.format(slug=slug), headers={"accept": "text/html"})
+    if got is None or got[0] != 200:
+        return None
+    store = wholefoods.parse_store(got[1])
+    if not store:
+        # 200 but no code: a failure to read, not a branch that does not exist.
+        log.warning("whole foods store page for %s parsed no store code", slug)
+        return None
+    cache_put("chain", f"wholefoods:{slug}", store)
+    cache_put("chain", f"wholefoods:code:{store['code']}", store)
+    return store
+
+
+def _wf_cookies(store_code: str) -> dict[str, str]:
+    st = cache_get("chain", f"wholefoods:code:{store_code}") or {}
+    return {"wfm_store_d8": wholefoods.store_cookie(
+        store_code, st.get("folder", ""), st.get("name", ""), st.get("state", ""))}
+
+
+async def _wf_search(term: str, store_code: str) -> list[dict] | None:
+    """Measured 2026-09-07: Amazon answers about half of these with a well-formed
+    page listing nothing, and the same query a second later with thirty
+    products — and a genuine no-result page is the same shape. So an empty page
+    is asked again, and one that stays empty is UNAVAILABLE, never "the shop
+    has none", which would be cached for a fortnight and shown as fact."""
+    for attempt in range(3):
+        got = await _chrome_get(wholefoods.SEARCH_URL.format(term=quote(term.strip())),
+                                headers={"accept": "text/html"}, cookies=_wf_cookies(store_code))
+        if got is None or got[0] != 200:
+            return None
+        recs = wholefoods.parse_search(got[1], store_code)
+        if recs:
+            return recs
+        if recs is None:
+            return None
+        await asyncio.sleep(0.5 * (attempt + 1))
+    log.info("whole foods search for %r at %s came back empty three times", term, store_code)
+    return None
+
+
+async def _wf_location(store_code: str, sku: str) -> dict | None:
+    got = await _chrome_get(wholefoods.PRODUCT_URL.format(asin=sku),
+                            headers={"accept": "text/html"}, cookies=_wf_cookies(store_code))
+    if got is None or got[0] != 200:
+        return None
+    loc = wholefoods.parse_location(got[1])
+    return None if loc is None else ({"aisle": loc} if loc else {})
+
+
+_SR_SESSION = str(uuid.uuid4())
+
+
+def _sr_headers() -> dict[str, str]:
+    return shoprite.headers(_SR_SESSION, str(uuid.uuid4()))
+
+
+async def shoprite_stores() -> dict | None:
+    """Every branch, trimmed to what find_branch reads. One request a month."""
+    cached = cache_get("chain", "shoprite:stores")
+    if cached:
+        return cached
+    got = await _chrome_get(f"{shoprite.GATEWAY}/api/stores", headers=_sr_headers())
+    if got is None or got[0] != 200:
+        return None
+    try:
+        items = json.loads(got[1]).get("items") or []
+    except ValueError:
+        return None
+    keep = ("id", "name", "retailerStoreId", "addressLine1", "city", "countyProvinceState", "postCode", "type")
+    trimmed = {"items": [{k: s.get(k) for k in keep} for s in items]}
+    if not trimmed["items"]:
+        return None
+    cache_put("chain", "shoprite:stores", trimmed)
+    return trimmed
+
+
+async def _sr_search(term: str, rsid: str, limit: int) -> list[dict] | None:
+    got = await _chrome_get(f"{shoprite.GATEWAY}/api/stores/{rsid}/search", headers=_sr_headers(),
+                            params={"q": term.strip(), "take": limit, "skip": 0})
+    if got is None or got[0] != 200:
+        return None
+    try:
+        return shoprite.parse_search(json.loads(got[1]), rsid)
+    except ValueError:
+        return None
+
+
+async def _sr_location(rsid: str, sku: str) -> dict | None:
+    got = await _chrome_get(f"{shoprite.GATEWAY}/api/stores/{rsid}/products/{sku}", headers=_sr_headers())
+    if got is None or got[0] != 200:
+        return None
+    try:
+        return shoprite.parse_location(json.loads(got[1]))
+    except ValueError:
+        return None
+
+
+_LOCATE = {"wholefoods": _wf_location, "shoprite": _sr_location}
+
+
+async def _place(chain: str, store: str, recs: list[dict], prefer: list[str]) -> bool:
+    """Fill the shelf position on the top hit and on every product the household
+    picked that is among the hits — `prefer` is a list because two items can
+    share a search term and mean different jars. Both chains keep the position
+    on the product record, so placing every hit would cost a request each;
+    these few cost a few, cached for the aisle TTL. "Asked, has no place" is
+    cached as an empty dict; a failed read is not cached, so it is asked again
+    — an answer about the shop versus a failure to ask. True when a record
+    changed."""
+    targets = [r for r in recs[:1] if r["sku"]]
+    targets += [r for r in recs if r["sku"] in prefer and r not in targets]
+    changed = False
+    for rec in targets:
+        if rec.get("aisle"):
+            continue
+        key = f"{chain}:{store}|{rec['sku']}"
+        loc = cache_get("aisle", key)
+        if loc is None:
+            loc = await _LOCATE[chain](store, rec["sku"])
+            if loc is None:
+                continue
+            cache_put("aisle", key, loc)
+        new = (loc.get("aisle", ""), loc.get("shelf", ""))
+        if new != (rec.get("aisle", ""), rec.get("shelf", "")):
+            rec["aisle"], rec["shelf"] = new
+            changed = True
+    return changed
+
+
+async def _chain_products(chain: str, term: str, store: str, limit: int,
+                          max_age: timedelta | None, prefer: list[str]) -> list[dict] | None:
+    """Search-then-place. The search is cached once, when fetched, and never
+    written back: positions live in their own cache and are laid on at every
+    read, which costs nothing — writing placed records back would re-stamp the
+    row, and a fortnight-old price would pass the two-day check as fresh."""
+    key = f"{chain}:{store}|{term.strip().lower()}|{limit}"
+    recs = cache_get("product", key, max_age)
+    if recs is None:
+        fetched = await (_wf_search(term, store) if chain == "wholefoods" else _sr_search(term, store, limit))
+        if fetched is None:
+            return None
+        recs = fetched[:limit]
+        cache_put("product", key, recs)
+    await _place(chain, store, recs, prefer)
+    return recs
+
+
+# --- dispatch: the one place that knows which chain answers how ----------------
+
+
+async def products(chain: str, term: str, store: str, limit: int = 8, max_age: timedelta | None = None,
+                   prefer_sku: str | list[str] | None = None) -> list[dict] | None:
+    """Products matching `term` at ONE store, in our shape. None = the lookup
+    failed; [] = it genuinely found nothing. `prefer_sku` names the product(s)
+    the household picked, so their shelf positions are fetched even when they
+    are not the top hit."""
+    if chain == "wegmans":
+        return await wegmans_products(term, store, limit, max_age)
+    if chain in _LOCATE:
+        prefer = [prefer_sku] if isinstance(prefer_sku, str) else list(prefer_sku or [])
+        return await _chain_products(chain, term, store, limit, max_age, [s for s in prefer if s])
+    return None
+
+
+async def products_many(chain: str, terms: list[str], store: str,
+                        prefer: dict[str, list[str]] | None = None) -> tuple[dict[str, list[dict]], bool]:
+    """({term: records}, complete) — see wegmans_products_many for why
+    `complete` exists. The two page-backed chains have no multi-query, so this
+    asks term by term, a few at a time, and reports any it could not ask.
+    `prefer` maps a term to EVERY sku picked under it: two items can share a
+    search term and mean different jars, and each must find its shelf."""
+    if chain == "wegmans":
+        return await wegmans_products_many(terms, store)
+    if chain not in _LOCATE:
+        return {}, False
+    sem = asyncio.Semaphore(3)
+
+    async def one(t: str) -> tuple[str, list[dict] | None]:
+        async with sem:
+            return t, await products(chain, t, store, limit=5, prefer_sku=(prefer or {}).get(t))
+
+    found: dict[str, list[dict]] = {}
+    complete = True
+    for t, recs in await asyncio.gather(*(one(t) for t in dict.fromkeys(terms))):
+        if recs is None:
+            complete = False
+        else:
+            found[t] = recs
+    return found, complete
+
+
+async def resolve_branch(chain: str, pin: dict) -> tuple[str, str]:
+    """(chain_store_id, reason) for a pinned store — `pin` carries its OSM
+    address and coordinates. The id is "" when the branch could not be named,
+    and the reason says why in words the owner can act on — never a
+    nearest-guess, which mis-prices everything with no visible sign."""
+    address = pin.get("address") or ""
+    if chain == "wegmans":
+        slug = wegmans_slug(address)
+        if not slug:
+            return "", "could not read a town from the address"
+        num = await wegmans_store_number(slug)
+        return (num, "") if num else ("", f"no Wegmans branch page for '{slug}'")
+    if chain == "wholefoods":
+        slug = wholefoods.wholefoods_slug(address)
+        if not slug:
+            return "", "could not read a town from the address"
+        store = await wholefoods_store(slug)
+        if not store:
+            return "", f"no Whole Foods store page for '{slug}'"
+        # /stores/<town> is ONE store, and a town can have several. The page
+        # names its own ZIP and coordinates; the pin must match one of them,
+        # or the page is some other branch and its prices would be too.
+        zipc = chains_postcode(address)
+        same = (bool(zipc) and store.get("postcode") == zipc) or chains_close(
+            pin.get("lat"), pin.get("lon"), store.get("lat"), store.get("lon"))
+        if not same:
+            where = f"{store.get('name') or slug} {store.get('postcode') or ''}".strip()
+            return "", f"the Whole Foods page for '{slug}' is the branch at {where}, not this pin"
+        return store["code"], ""
+    if chain == "shoprite":
+        stores = await shoprite_stores()
+        if stores is None:
+            return "", "could not read ShopRite's store list"
+        branch = shoprite.find_branch(stores, address)
+        return (branch["rsid"], "") if branch else ("", "no ShopRite branch at that address")
+    return "", "no price adapter for this store"
