@@ -41,9 +41,7 @@ from fastapi import HTTPException
 import osm
 import shoprite
 import wholefoods
-from chains import close as chains_close
-from chains import postcode as chains_postcode
-from wegmans import parse_store_number, parse_wegmans_hits, wegmans_slug
+from wegmans import parse_store_number, parse_wegmans_hits
 
 log = logging.getLogger("thincart.lookup")
 
@@ -559,41 +557,3 @@ async def products_many(chain: str, terms: list[str], store: str,
         else:
             found[t] = recs
     return found, complete
-
-
-async def resolve_branch(chain: str, pin: dict) -> tuple[str, str]:
-    """(chain_store_id, reason) for a pinned store — `pin` carries its OSM
-    address and coordinates. The id is "" when the branch could not be named,
-    and the reason says why in words the owner can act on — never a
-    nearest-guess, which mis-prices everything with no visible sign."""
-    address = pin.get("address") or ""
-    if chain == "wegmans":
-        slug = wegmans_slug(address)
-        if not slug:
-            return "", "could not read a town from the address"
-        num = await wegmans_store_number(slug)
-        return (num, "") if num else ("", f"no Wegmans branch page for '{slug}'")
-    if chain == "wholefoods":
-        slug = wholefoods.wholefoods_slug(address)
-        if not slug:
-            return "", "could not read a town from the address"
-        store = await wholefoods_store(slug)
-        if not store:
-            return "", f"no Whole Foods store page for '{slug}'"
-        # /stores/<town> is ONE store, and a town can have several. The page
-        # names its own ZIP and coordinates; the pin must match one of them,
-        # or the page is some other branch and its prices would be too.
-        zipc = chains_postcode(address)
-        same = (bool(zipc) and store.get("postcode") == zipc) or chains_close(
-            pin.get("lat"), pin.get("lon"), store.get("lat"), store.get("lon"))
-        if not same:
-            where = f"{store.get('name') or slug} {store.get('postcode') or ''}".strip()
-            return "", f"the Whole Foods page for '{slug}' is the branch at {where}, not this pin"
-        return store["code"], ""
-    if chain == "shoprite":
-        stores = await shoprite_stores()
-        if stores is None:
-            return "", "could not read ShopRite's store list"
-        branch = shoprite.find_branch(stores, address)
-        return (branch["rsid"], "") if branch else ("", "no ShopRite branch at that address")
-    return "", "no price adapter for this store"

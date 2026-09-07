@@ -214,7 +214,8 @@ def test_shoprite_product_places_the_item():
 def test_shoprite_branch_is_found_by_zip_then_town_and_never_guessed():
     stores = json.loads((FIX / "shoprite_stores.json").read_text())
     by_zip = shoprite.find_branch(stores, "3373 Brunswick Pike, Lawrenceville, Mercer County, New Jersey, 08648, USA")
-    assert by_zip == {"rsid": "500", "name": "ShopRite of Lawrenceville"}
+    assert by_zip and (by_zip["rsid"], by_zip["name"]) == ("500", "ShopRite of Lawrenceville")
+    assert by_zip["address"].startswith("3373 Brunswick Pike, Lawrenceville")
     by_town = shoprite.find_branch(stores, "1 Main St, Ewing, Mercer County, New Jersey, USA")
     assert by_town and by_town["rsid"] == "514"
     # Two Montgomerys: the state decides, and the wrong one is never returned.
@@ -292,6 +293,44 @@ def test_a_wholefoods_town_page_for_another_branch_is_refused(monkeypatch):
     sid = store_id("Whole Foods Far Pin", store_osm_id="way/4", store_lat=40.35, store_lon=-74.66,
                    store_address="Somewhere, Princeton, Mercer County, New Jersey, USA",
                    store_brand="Whole Foods Market")
+    assert client.get("/api/stores/link", params={"store_id": sid}).json()["chain_store_id"] == ""
+
+
+def test_the_town_in_a_typed_name_is_the_clue_when_osm_has_nothing():
+    assert chains.town_from_name("Whole Foods Montgomery", "wholefoods") == "montgomery"
+    assert chains.town_from_name("Whole Foods Market Princeton, NJ", "wholefoods") == "princeton"
+    assert chains.town_from_name("Whole Foods Princeton, New Jersey", "wholefoods") == "princeton"
+    assert chains.town_from_name("Whole Foods New York", "wholefoods") == "new-york"    # a town, not a state suffix
+    assert chains.town_from_name("ShopRite of Ewing", "shoprite") == "ewing"
+    assert chains.town_from_name("Shop Rite Hamilton Township", "shoprite") == "hamilton-township"
+    assert chains.town_from_name("Whole Foods", "wholefoods") == ""
+
+
+def test_a_store_osm_never_heard_of_links_through_the_chains_own_directory(monkeypatch):
+    """The Montgomery Whole Foods opened after the map was last drawn: no pin,
+    no address, just the name the household typed. The chain's own store page
+    knows it, and hands back the address and coordinates that pin the row."""
+    page = (FIX / "wholefoods_store.html").read_text()
+    _stub_chrome(monkeypatch, {"/stores/princeton": (200, page)})
+    sid = store_id("Whole Foods Princeton", store_brand="")           # by name only
+    d = client.get("/api/stores/link", params={"store_id": sid}).json()
+    assert d["chain"] == "wholefoods" and d["chain_store_id"] == "10187"
+    assert d["address"].startswith("Princeton, NJ 08540") and abs(d["lat"] - 40.3081) < 0.01
+    # /stores/<town> is one store in a town that may have several, and nobody
+    # pointed at this one: the phone must put it in front of the person first.
+    assert d["confirm"] == d["address"]
+
+
+def test_a_shoprite_typed_by_name_links_only_when_the_town_is_unambiguous(monkeypatch):
+    _stub_chrome(monkeypatch, {"/api/stores": (200, (FIX / "shoprite_stores.json").read_text())})
+    sid = store_id("ShopRite of Ewing")
+    d = client.get("/api/stores/link", params={"store_id": sid}).json()
+    assert d["chain_store_id"] == "514" and "Ewing" in d["address"] and "Ewing" in d["confirm"]
+    sid = store_id("ShopRite Hamilton Township")
+    d = client.get("/api/stores/link", params={"store_id": sid}).json()
+    assert d["chain_store_id"] == "" and "no single ShopRite" in d["reason"]
+    # "Montgomery" exists in NJ and NY; a bare name cannot say which, so neither.
+    sid = store_id("ShopRite of Montgomery")
     assert client.get("/api/stores/link", params={"store_id": sid}).json()["chain_store_id"] == ""
 
 

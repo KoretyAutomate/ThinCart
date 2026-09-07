@@ -33,8 +33,8 @@ from lookup import (
     parse_store_results,
     products,
     products_many,
-    resolve_branch,
 )
+from branches import resolve_branch
 from chains import aisle_label, detect
 
 router = APIRouter()
@@ -112,10 +112,14 @@ async def store_link(store_id: int) -> dict:
     if not enabled("price"):
         return {"chain": "", "chain_store_id": "",
                 "reason": f"price lookups are off (THINCART_LOOKUP={lookup.MODE})"}
-    branch, reason = await resolve_branch(chain, store)
-    if not branch:
-        return {"chain": "", "chain_store_id": "", "reason": reason}
-    return {"chain": chain, "chain_store_id": branch}
+    found = await resolve_branch(chain, store)
+    if not found["chain_store_id"]:
+        return {"chain": "", "chain_store_id": "", "reason": found["reason"]}
+    # For a store OSM has never heard of, the chain's own directory supplied
+    # the address and coordinates; they ride along so the phone can pin the row
+    # by them, and the store stops being a bare name.
+    extra = {k: found[k] for k in ("address", "lat", "lon", "confirm") if found.get(k) is not None}
+    return {"chain": chain, "chain_store_id": found["chain_store_id"], **extra}
 
 
 @router.get("/api/products/search")
