@@ -237,6 +237,85 @@ async def sweep(conn, write_lock) -> int:
     return done
 
 
+EMOJI_BATCH = 30
+
+
+def emoji_prompt(display_name: str) -> str:
+    """Ask for the CLOSEST icon, not a perfect one.
+
+    The obvious phrasing — "a single emoji that best pictures this; null if none
+    fits" — was tried against the live model and returned null for everything,
+    Greek yogurt included: given an escape hatch and no encouragement, it takes
+    the hatch. Naming the fallback explicitly (yogurt -> 🥛, paper -> 🧻) and
+    reserving null for gibberish turns that around; measured 8/9 on a sample of
+    the real backlog, with "cau" correctly declining.
+    """
+    return (
+        "Pick the single best emoji to picture this grocery item on a shopping list.\n"
+        f'Item: "{display_name}"\n'
+        "Choose the closest fit even if it is not exact — a category emoji is much "
+        "better than nothing (yogurt -> 🥛, shampoo -> 🧴, paper -> 🧻, clams -> 🦪).\n"
+        "Use null ONLY if the text is gibberish.\n"
+        'Reply ONLY JSON: {"emoji": "<one emoji>"}'
+    )
+
+
+async def backfill_emoji(conn, write_lock, limit: int = EMOJI_BATCH) -> int:
+    """Give an icon to rows that are enriched but have none.
+
+    These exist in numbers — 139 of 257 on the live DB — and they were stranded
+    rather than merely missed. `sweep()` only looks at `llm_enriched_at IS NULL`,
+    so anything enriched BEFORE per-item emoji existed is never revisited, and
+    the curated map does not cover specific real-world names ("Amys frozen
+    pizza", "grass fed 2% milk", あさり). Those items would have shown a bare
+    category icon forever.
+
+    Emoji-ONLY, deliberately. Re-running `enrich()` would refill category,
+    is_edible and plants_json from the LLM, silently overwriting a category the
+    household set by hand in the item sheet — a heavier price than a missing
+    icon. This writes one column and can clobber nothing.
+    """
+    # Never-tried rows first, then the least recently tried. A row the LLM
+    # declines is not retried until everything else has had a turn, so a batch of
+    # permanently unfillable names (a typo, a private label nothing pictures)
+    # cannot starve the rest — and a later model, or an edited name, still gets
+    # another chance eventually.
+    rows = conn.execute(
+        "SELECT id, canonical_name, display_name FROM item_catalog "
+        "WHERE (emoji IS NULL OR emoji = '') "
+        "ORDER BY emoji_tried_at IS NOT NULL, emoji_tried_at LIMIT ?",
+        (limit,),
+    ).fetchall()
+    done = 0
+    for row in rows:
+        # The curated map first: free, instant, and offline. Only what it misses
+        # costs an LLM call.
+        icon = emoji.lookup(row["canonical_name"])
+        if not icon:
+            res = await llm.chat_json(emoji_prompt(row["display_name"]), max_tokens=40)
+            cand = res.get("emoji") if isinstance(res, dict) else None
+            icon = cand.strip() if isinstance(cand, str) and emoji.is_emoji(cand) else None
+        # Stamped whether or not an icon came back: "asked and got nothing" is
+        # what keeps the queue moving. No icon is a fine answer; a wrong one is not.
+        now = datetime.now(UTC).isoformat(timespec="seconds")
+        async with write_lock:
+            if icon:
+                conn.execute(
+                    "UPDATE item_catalog SET emoji=?, emoji_tried_at=? WHERE id=?",
+                    (icon, now, row["id"]),
+                )
+            else:
+                conn.execute(
+                    "UPDATE item_catalog SET emoji_tried_at=? WHERE id=?", (now, row["id"])
+                )
+            conn.commit()
+        if icon:
+            done += 1
+    if rows:
+        log.info("emoji backfill: %d/%d", done, len(rows))
+    return done
+
+
 def weekly_plants(conn, now=None, window_days: int = 7) -> list[str]:
     """Distinct canonical plants across purchases in the trailing window.
 

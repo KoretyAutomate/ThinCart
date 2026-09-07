@@ -406,7 +406,12 @@ async def enrich_sweeper() -> None:
     """Nightly sweep for rows the add-time task missed (LLM was down, etc.)."""
     while True:
         try:
-            if await catalog.sweep(conn, write_lock):
+            changed = await catalog.sweep(conn, write_lock)
+            # Icons for rows enriched before per-item emoji existed. Batched, so a
+            # long backlog is drained over several nights rather than in one burst
+            # of LLM calls on a box that has other work.
+            changed += await catalog.backfill_emoji(conn, write_lock)
+            if changed:
                 await broadcast_state()
         except Exception:
             log.exception("enrichment sweep failed")

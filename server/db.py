@@ -158,6 +158,10 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
         # and no aisles, which is the normal case and must read as such.
         "ALTER TABLE stores ADD COLUMN chain TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE stores ADD COLUMN chain_store_id TEXT NOT NULL DEFAULT ''",
+        # When the emoji backfill last ASKED about this row, whatever the answer.
+        # Without it the backfill re-selects the same unfillable rows every run
+        # (gibberish names the LLM rightly declines) and never reaches the rest.
+        "ALTER TABLE item_catalog ADD COLUMN emoji_tried_at TEXT",
     ):
         with contextlib.suppress(sqlite3.OperationalError):
             conn.execute(ddl)

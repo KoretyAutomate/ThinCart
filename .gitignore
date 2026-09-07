@@ -24,4 +24,7 @@ test_results/
 # these are install/build output. mobile/android/.gitignore (the Capacitor
 # template's) already covers the generated assets and Gradle output inside it.
 mobile/node_modules/
+# app/ gained a jsdom suite (2026-09-07) — the served page is what the phones
+# run, and it had no tests until then. Its deps are install output, not source.
+app/node_modules/
 *.apk

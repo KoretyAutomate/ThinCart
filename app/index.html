@@ -1369,6 +1369,8 @@ async function searchStores() {
   }
 }
 
+window.openSheet = it => openSheet(it);
+
 function render() {
   renderTray();
   // live-refresh the open stores panel, but never yank a notes textarea
@@ -1744,6 +1746,11 @@ async function showPrices(it, sku, name) {
   }
 }
 
+/* Exposed for the tests in app/tests/. The page runs under "use strict", so a
+ * declaration stays in its own scope and the item editor is otherwise only
+ * reachable through a 0.6 s long-press — simulating that gesture would test
+ * jsdom's pointer emulation more than it tests this app. Same seam, and the
+ * same reason, as openServer() in the APK launcher. */
 function openSheet(it) {
   clearAddRowOnSave = false;
   editState = { it, category: it.category || 'other',

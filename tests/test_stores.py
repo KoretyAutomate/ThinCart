@@ -123,6 +123,73 @@ def test_history_recommendation_prefers_most_frequent():
     assert it["store"] == "B-Mart" and it["store_source"] == "history"
 
 
+def test_history_tie_breaks_on_the_most_recent_shop():
+    """The other half of the documented rule — "tie: most recently" — which
+    nothing exercised until now. It is the case that actually happens: two shops
+    you use about equally, and the useful answer is where you last bought it,
+    not whichever store row was created first.
+
+    The recommendation leans on a subtlety worth pinning: `recommended_stores`
+    orders ASCENDING by (count, last) and lets dict overwrite pick the winner,
+    so the final row for a catalog_id is the most frequent and, among equals,
+    the most recent. A change to that ORDER BY silently inverts the answer.
+    """
+    for store in ("Old-Mart", "New-Mart"):
+        iid = add("tie-item")
+        op(type="checkoff", item_id=iid, store=store)
+
+    # Equal counts (1 each). Force Old-Mart's purchase to be the older one so
+    # recency, not insertion order, is what decides.
+    old_id = appmod.conn.execute("SELECT id FROM stores WHERE canonical_name=?",
+                                 (db.canonical("Old-Mart"),)).fetchone()["id"]
+    appmod.conn.execute(
+        """UPDATE purchase_events SET bought_at='2020-01-01T00:00:00+00:00'
+           WHERE store_id=? AND catalog_id=(SELECT id FROM item_catalog WHERE canonical_name=?)""",
+        (old_id, db.canonical("tie-item")),
+    )
+    appmod.conn.commit()
+
+    rec = db.recommended_stores(appmod.conn)
+    cid = appmod.conn.execute("SELECT id FROM item_catalog WHERE canonical_name=?",
+                              (db.canonical("tie-item"),)).fetchone()["id"]
+    sid, source = rec[cid]
+    name = appmod.conn.execute("SELECT name FROM stores WHERE id=?", (sid,)).fetchone()["name"]
+    assert (name, source) == ("New-Mart", "history")
+
+
+def test_frequency_outranks_recency():
+    """Recency only breaks a TIE. A shop used three times beats one visited
+    yesterday — otherwise a single unusual trip would rewrite the regular
+    answer, which is the opposite of what purchase history is for."""
+    for store in ("Regular", "Regular", "Regular"):
+        iid = add("freq-beats-recent")
+        op(type="checkoff", item_id=iid, store=store)
+    iid = add("freq-beats-recent")
+    op(type="checkoff", item_id=iid, store="One-Off")   # most recent, count 1
+
+    rec = db.recommended_stores(appmod.conn)
+    cid = appmod.conn.execute("SELECT id FROM item_catalog WHERE canonical_name=?",
+                              (db.canonical("freq-beats-recent"),)).fetchone()["id"]
+    name = appmod.conn.execute("SELECT name FROM stores WHERE id=?",
+                               (rec[cid][0],)).fetchone()["name"]
+    assert name == "Regular"
+
+
+def test_a_deleted_store_stops_being_recommended():
+    """Deleting a store nulls its purchase references (Phase 5 review delta 7).
+    The recommendation must follow — a suggestion naming a shop the household
+    has removed is worse than no suggestion."""
+    iid = add("gone-item")
+    op(type="checkoff", item_id=iid, store="Doomed Mart")
+    sid = next(s["id"] for s in state()["stores"] if s["name"] == "Doomed Mart")
+    add("gone-item")
+    assert items()["gone-item"]["store"] == "Doomed Mart"
+
+    op(type="store_delete", store_id=sid)
+    it = items()["gone-item"]
+    assert it["store"] is None and it["store_source"] is None
+
+
 def test_edit_survives_vanished_item_via_catalog_id():
     """Spouse checks the item off while the edit sheet is open — catalog-level
     criteria must still land (their whole point is surviving checkoffs)."""
