@@ -1668,3 +1668,47 @@ shell (server tested, phone not), the reload button (behaviour tested, findabili
 not), the delete (server tested, panel not), and now this (site probed, but not
 in the state the owner uses it in). The question to ask first is not "what does
 the API return" but "what is the owner actually looking at".
+
+### 2026-09-07 (evening) — ShopRite: through the wall, short of the endpoint
+
+The owner confirms ShopRite carries aisle information too. Playwright was
+installed for this and got most of the way.
+
+**What is established.**
+
+- **A real browser clears the Cloudflare challenge.** `www.shoprite.com` returns
+  its own title and lands on `/sm/pickup/rsid/3000`. The 403 that plain `httpx`
+  gets is not a hard wall, it is a client check.
+- **The API is `storefrontgateway.shoprite.com`** — ShopRite runs on Mi9 Retail
+  (`mi9cloud.com` assets). Shape:
+  `/api/stores/{rsid}/locations/{uuid}/recommendations?HowMany=&RecommendationName=`,
+  plus an `/api/v1/stores/{rsid}/…` namespace seen carrying ad impressions.
+- **The browser must be the transport.** A `fetch()` issued from inside the
+  cleared page is answered 200; replaying the identical URL over `httpx` with
+  every cookie the browser held returns **403**. Cloudflare is fingerprinting
+  the client, not checking a cookie — so unlike Whole Foods, there is no
+  cheap-HTTP path afterwards. That makes ShopRite the expensive chain, and the
+  cache the thing that makes it usable.
+- **Their product JSON is rich on price**: `priceLabel`, `priceNumeric`,
+  `pricePerUnit`, `unitOfPrice`, `tprPrice` (temporary reduction), `wasPrice`.
+  No aisle key in the *recommendations* payload — but that is the wrong
+  endpoint to expect one in; Whole Foods keeps its shelf location on the
+  product page, not in a carousel.
+
+**Where it stopped, and why the method matters.** The storefront SPA would not
+render under `chromium_headless_shell` — 264 characters of body while its API
+answered normally. Switching to the full Chromium (`channel="chromium"`, new
+headless) fixed the rendering (home 5,610 chars, a category page 14,753), which
+is worth remembering: the default Playwright build is a stripped one and is
+detected. Search results still do not render, and **eight guessed product and
+search paths all returned 404**.
+
+That is the second time today guessing endpoints has produced nothing while
+observing real traffic produced everything — the Whole Foods aisle was found by
+watching a browser, not by inventing URLs. So the next step is to observe rather
+than guess, and the cheapest observer is the owner's own browser: DevTools →
+Network → search an item → open a product → copy the `storefrontgateway`
+request URLs. Two URLs unblock the adapter.
+
+`rsid/3000` may also be the wrong store — it is whatever the site defaults to,
+not a branch near Princeton — which alone could explain empty results.
