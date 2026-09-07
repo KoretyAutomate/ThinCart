@@ -1431,3 +1431,30 @@ address.
 `sw.js` had never been tested, and all three findings were in or about it.
 
 Suites at the end: **193 python**, **71 web**, **52 launcher**.
+
+### 2026-09-07 (evening) — ⚙️ Settings, and the reload moved into it
+
+The reload button worked; the owner could not find it. *"I don't see it."* It
+had shipped at the foot of the Stores panel, below the store rows, the add-store
+row, the store search and its results — visible only after scrolling to the
+bottom of a panel opened for an unrelated reason.
+
+That is a placement bug of a specific kind: the control answers "the app is
+showing me the wrong thing", so it has to live where someone would look while
+thinking exactly that. Nobody thinking it opens 🏬.
+
+So there is now a **⚙️ Settings panel**, built like every other panel in this
+file, holding the version block that was buried: the build line, the ↻ button,
+its error line, and one sentence saying what reloading does and does not touch
+(the list and anything queued offline are untouched — the question anyone would
+have before pressing it). `showBuild()` re-runs when the panel opens, so the
+comparison is made when it is read rather than whenever the language was last
+applied.
+
+Nothing about the reload mechanism changed, and no APK is needed: the launcher
+is untouched and this is all in the served page. Web suite **81**.
+
+The general lesson, and the second time this session has produced it: a feature
+verified only at the layer below the one the owner touches is not verified. The
+suite proved the button fetched, updated the worker and reloaded, in the right
+order, under failure. None of that says anyone can find it.
