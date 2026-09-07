@@ -1326,6 +1326,50 @@ $('set-close').onclick = () => $('set-panel').style.display = 'none';
 $('stores-btn').onclick = () => { $('stores-panel').style.display = 'flex'; renderStores(); };
 $('stores-close').onclick = () => $('stores-panel').style.display = 'none';
 
+/* A price link is a network round trip to the chain, and the panel can be
+ * rebuilt under it at any moment — by the other phone, or by any op of our own.
+ * So both the in-flight state and the reason a link failed live OUT here, keyed
+ * by store id, and renderStores() draws them: a rebuild redraws the same thing
+ * instead of silently discarding it.
+ *
+ * Before this, the handler wrote its result into the `lk` element it had
+ * captured in a closure. If the row had been rebuilt in the meantime that node
+ * was detached, so a failure reason was written somewhere nobody could see it,
+ * and the fresh button came back enabled — the same lookup could be fired
+ * twice. The panel's own guard used to hide this by suppressing the rebuild
+ * while the button held focus, but the handler's first act is to disable the
+ * button, and a disabled element is not focusable, so the protection was
+ * already gone before the request was even sent. State that must survive a
+ * repaint does not belong in the DOM being repainted. */
+const linking = new Set();      // store ids with a lookup in flight
+const linkFail = new Map();     // store id -> why the last attempt found nothing
+/* store id -> the branch number a lookup just returned, held until the server
+ * confirms it. enqueue() is optimistic: it returns the moment the op is on the
+ * queue, and base.stores still shows no link until the upsert round-trips. Drop
+ * the pending flag on that alone and the Link button comes straight back,
+ * enabled, offering to run the same lookup again — and offline, where the op may
+ * sit queued for hours, it would offer that every time the panel is drawn. */
+const linkOpt = new Map();
+
+/* The ONE way to redraw an already-open Stores panel. Everything routes through
+ * here so the typing guard cannot be sidestepped.
+ *
+ * It protects a half-typed note, the new-store name and the store search from
+ * being rebuilt under the user's fingers. It deliberately does NOT protect a
+ * focused button: tapping one focuses it on Android, and treating that as
+ * "someone is typing here" suppressed every redraw from the tap onward — which
+ * is why a deleted store stayed on screen and delete looked broken.
+ *
+ * A redraw skipped here is not a redraw lost. Everything the panel shows lives
+ * outside it — base, linking, linkFail, linkOpt — so the next render paints the
+ * same truth. That is the point of keeping it out of the DOM. */
+function refreshStores() {
+  const focused = document.activeElement;
+  const typing = focused && $('stores-panel').contains(focused)
+    && (focused.tagName === 'TEXTAREA' || focused.tagName === 'INPUT');
+  if ($('stores-panel').style.display === 'flex' && !typing) renderStores();
+}
+
 function renderStores() {
   // "I'm at…" selector
   const at = $('at-chips'); at.innerHTML = '';
@@ -1407,25 +1451,46 @@ function renderStores() {
     // asked rather than offering the button and failing silently.
     const lk = document.createElement('div');
     lk.className = 'addr';
-    if (s.chain_store_id) {
-      lk.textContent = T().link_linked(s.chain_store_id);
+    const linked = s.chain_store_id || linkOpt.get(s.id);
+    if (linked) {
+      lk.textContent = T().link_linked(linked);
+      if (s.chain_store_id) linkOpt.delete(s.id);   // the server has it; ours is spent
+    } else if (linking.has(s.id)) {
+      // No button at all while the lookup is out, so a rebuild cannot hand back
+      // a fresh enabled one and let the same request go twice.
+      lk.textContent = T().link_trying;
     } else {
       const b = document.createElement('button');
       b.className = 'linkbtn'; b.textContent = T().link_prices;
       b.onclick = async () => {
-        b.disabled = true; b.textContent = T().link_trying;
+        linking.add(s.id); linkFail.delete(s.id);
+        refreshStores();
         try {
           const res = await fetch('/api/stores/link?store_id=' + encodeURIComponent(s.id));
           const d = res.ok ? await res.json() : {};
           if (d.chain_store_id) {
+            // Before enqueue(), which renders — the row should draw as linked
+            // on that pass rather than flickering back to an offer to link.
+            linkOpt.set(s.id, d.chain_store_id);
             enqueue({ type:'store_upsert', store_name: s.name,
                       store_chain: d.chain, store_chain_id: d.chain_store_id });
           } else {
-            lk.textContent = '— ' + (d.reason || T().osm_fail);
+            linkFail.set(s.id, d.reason || T().osm_fail);
           }
-        } catch (e) { lk.textContent = '— ' + T().osm_fail; }
+        } catch (e) { linkFail.set(s.id, T().osm_fail); }
+        linking.delete(s.id);
+        refreshStores();
       };
       lk.appendChild(b);
+      // The reason sits BESIDE the button rather than replacing it: most of
+      // these are "this branch isn't in their index", which is worth saying and
+      // worth being able to try again after, without reopening the panel.
+      const why = linkFail.get(s.id);
+      if (why) {
+        const sp = document.createElement('span');
+        sp.textContent = ' — ' + why;
+        lk.appendChild(sp);
+      }
     }
     meta.push(lk);
     let anchor = div.querySelector('.srhead');
@@ -1536,10 +1601,7 @@ window.openSheet = it => openSheet(it);
 
 function render() {
   renderTray();
-  // live-refresh the open stores panel, but never yank a notes textarea
-  // out from under the user's fingers mid-typing
-  if ($('stores-panel').style.display === 'flex'
-      && !$('stores-panel').contains(document.activeElement)) renderStores();
+  refreshStores();
   if (base.plants)
     $('plants').textContent = `🌱 ${base.plants.count}/${base.plants.target}`;
   // detected days nobody has ruled on yet — they are already bending the
