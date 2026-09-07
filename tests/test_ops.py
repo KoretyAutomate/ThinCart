@@ -456,3 +456,28 @@ def test_an_up_to_date_page_costs_a_304_not_a_download():
     again = client.get("/", headers={"If-None-Match": etag})
     assert again.status_code == 304
     assert again.headers.get("cache-control") == "no-cache"
+
+
+def test_the_launchers_cache_buster_still_gets_the_real_page():
+    """The APK's "Force a fresh copy" navigates to /?fresh=<ms>.
+
+    That address has never been requested before, which is the point — it is the
+    one way past a cache entry with certainty rather than by asking it nicely,
+    and it is the only route back for a phone whose page is too old to contain
+    the in-app reload button. It is worth nothing if the query string routes
+    somewhere else: FastAPI would hand an unmatched path to the static mount,
+    which serves app/index.html verbatim, placeholder and all, and that client
+    would then be told it was out of date forever.
+    """
+    import hashlib
+
+    expected = hashlib.sha256(
+        (Path(__file__).parent.parent / "app" / "index.html").read_bytes()
+    ).hexdigest()[:8]
+
+    r = client.get("/?fresh=1757260800000")
+    assert r.status_code == 200
+    assert f"const BUILD = '{expected}'" in r.text
+    assert "__BUILD__" not in r.text
+    # The query does not change the path, so the freshness rule must still bind.
+    assert r.headers.get("cache-control") == "no-cache", r.headers
