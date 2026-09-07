@@ -1845,3 +1845,43 @@ systemd unit, the Wegmans endpoints use exactly this default-plus-override
 pattern with a comment saying so, and §2026-09-06 above records the same claim
 rejected once already. A fresh clone that works out of the box is the point of
 the defaults. Pushed with `--no-verify`, said so here and in the PR.
+
+### 2026-09-07 (late) — "montgomery wholefoods (new one) is not showing up"
+
+Not us: OpenStreetMap. Nominatim has no Whole Foods in Montgomery Township at
+all — the store opened after the map was last drawn — so the 🏬 → 🔍 pin search
+had nothing to return. Whole Foods itself knows it: `/stores/montgomery` is
+code **10738**, "Montgomery NJ", Skillman 08558, and a product page under that
+code prices and places (Lactaid $4.99, Dairy).
+
+So a store added **by name** — which the app has always allowed — can now be
+linked through the chain's own directory. The town in the typed name is the
+clue (`chains.town_from_name`: "Whole Foods Montgomery" → `montgomery`,
+"ShopRite of Ewing" → `ewing`), the chain's store page or list supplies the
+identity, and its address and coordinates come back with the link so the phone
+writes them onto the row: the bare name becomes a pin. When there IS an OSM
+pin the ZIP-or-distance check from the previous entry still applies.
+
+Same rule as ever, never a wrong branch: a bare "ShopRite of Montgomery" is
+refused, because there is one in NJ and one in NY and a name cannot say which.
+Getting that right needed "Montgomery Township" and "Montgomery" to read as one
+town — compared raw, the NJ row's suffix hid it and the name resolved to New
+York. Pinned by tests, and the ShopRite by-town match now runs across every
+state and must be unique.
+
+`branches.py` took `resolve_branch` out of `lookup.py`, which had reached 619
+lines. No network of its own; the judgement about when a chain's answer counts
+as THIS store lives there.
+
+**Gate, first push: two findings, both right.** (1) A bare "Whole Foods
+Chicago" would have taken whichever branch `/stores/chicago` is, and there is
+no directory to prove uniqueness against. So a name-only link is never pinned
+unseen: the chain's answer comes back as `confirm` ("Skillman, NJ 08558") and
+the phone puts it in front of the person before writing anything. "No" is an
+answer, not a failure, and the button comes back pointing at the map. ShopRite
+gets the same confirmation for consistency even where the town is unique.
+(2) "Whole Foods Princeton, New Jersey" produced `princeton-new-jersey`; full
+state names strip now too, and "Whole Foods New York" stays a town. Also found
+on the way: the link handler held its reply in a `const`, so replacing a
+declined answer threw and read as "could not reach OpenStreetMap". Suites:
+**225 python**, 113 web, 52 launcher.

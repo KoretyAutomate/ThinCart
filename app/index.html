@@ -708,6 +708,8 @@ const STR = {
     aisle_unasked:'⏳ Not looked up (try again)',
     link_prices:'Link prices', link_linked:s=>`💲 prices linked (store ${s})`,
     link_trying:'Linking…',
+    link_confirm:w=>`The chain lists this branch:\n${w}\n\nIs that the one you mean?`,
+    link_declined:'not linked — pick the store on the map (🔍) to name the exact branch',
     build_page:b=>`app build ${b}`,
     build_stale:(mine,srv)=>`⚠️ This phone is on build ${mine}; the server has ${srv}. Tap ↻ below to update.`,
     settings:'⚙️ Settings',
@@ -815,6 +817,8 @@ const STR = {
     aisle_unasked:'⏳ 未取得（再試行してください）',
     link_prices:'価格を連携', link_linked:s=>`💲 価格連携済み（店舗 ${s}）`,
     link_trying:'連携中…',
+    link_confirm:w=>`チェーン側の店舗情報:\n${w}\n\nこの店舗で合っていますか？`,
+    link_declined:'未連携 — 地図（🔍）で店舗を選ぶと正確な店舗を指定できます',
     build_page:b=>`アプリ build ${b}`,
     build_stale:(mine,srv)=>`⚠️ この端末は build ${mine}、サーバーは ${srv} です。下の ↻ で更新してください。`,
     settings:'⚙️ 設定',
@@ -1467,13 +1471,25 @@ function renderStores() {
         refreshStores();
         try {
           const res = await fetch('/api/stores/link?store_id=' + encodeURIComponent(s.id));
-          const d = res.ok ? await res.json() : {};
+          let d = res.ok ? await res.json() : {};
+          // A store added by name — OpenStreetMap had never heard of it — was
+          // never pointed at, and a town can hold more than one branch. The
+          // chain found one; the person says whether it is theirs before it
+          // is pinned. Declining is not a failure, it is an answer.
+          if (d.chain_store_id && d.confirm && !confirm(T().link_confirm(d.confirm))) {
+            d = { chain: '', chain_store_id: '', reason: T().link_declined };
+          }
           if (d.chain_store_id) {
             // Before enqueue(), which renders — the row should draw as linked
             // on that pass rather than flickering back to an offer to link.
             linkOpt.set(s.id, d.chain_store_id);
+            // A store added by name because OpenStreetMap had never heard of
+            // it comes back with the chain's own address and coordinates;
+            // writing them onto the row is what pins it.
+            const pin = (d.address && !s.address) ? { store_address: d.address } : {};
+            if (pin.store_address && d.lat != null && d.lon != null) { pin.store_lat = d.lat; pin.store_lon = d.lon; }
             enqueue({ type:'store_upsert', store_name: s.name,
-                      store_chain: d.chain, store_chain_id: d.chain_store_id });
+                      store_chain: d.chain, store_chain_id: d.chain_store_id, ...pin });
           } else {
             linkFail.set(s.id, d.reason || T().osm_fail);
           }

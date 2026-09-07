@@ -106,6 +106,25 @@ def address_town_state(address: str) -> tuple[str, str]:
     return "", ""
 
 
+def town_from_name(name: str, chain: str) -> str:
+    """'Whole Foods Montgomery' -> 'montgomery'; 'ShopRite of Ewing, NJ' -> 'ewing'.
+
+    For a store OpenStreetMap has never heard of — a branch that opened last
+    month — the name the household typed is the only clue to which branch it
+    is, and the chain's own directory is what can turn a town into a branch.
+    Empty when nothing but the chain's name is left.
+    """
+    s = name.lower()
+    for needle in sorted(CHAINS[chain].needles, key=len, reverse=True) if chain in CHAINS else ():
+        s = s.replace(needle, " ")
+    s = re.sub(r"\b(market|store|supermarket|of|the|at|in)\b", " ", s)
+    # "Princeton, New Jersey" and "Princeton NJ" both mean Princeton.
+    states = "|".join(sorted(list(US_STATES) + list(US_STATES.values()), key=len, reverse=True))
+    s = re.sub(r"[\s,]+(" + states + r")\.?\s*$", " ", s.strip())
+    s = re.sub(r"[^a-z0-9]+", "-", s).strip("-")
+    return s
+
+
 def close(lat1: float | None, lon1: float | None, lat2: float | None, lon2: float | None,
           km: float = 1.5) -> bool:
     """Whether two points are the same shop, give or take a car park. False when

@@ -229,10 +229,17 @@ async function boot(stores, { linkReply = null } = {}) {
     b.linkBtn().click();
     await settle();
     resolve({ ok: true, status: 200,
-              json: async () => ({ chain: "wegmans", chain_store_id: "93" }) });
+              json: async () => ({ chain: "wegmans", chain_store_id: "93",
+                                   address: "Princeton, NJ 08540", lat: 40.31, lon: -74.67 }) });
     await settle();
 
     check("the row reads as linked straight away", /93/.test(b.linkText()), b.linkText());
+    // A store added by name — OpenStreetMap had never heard of it — has no
+    // address of its own. The chain's directory supplied one with the link, and
+    // the upsert must carry it: that is what turns a bare name into a pin.
+    const up = b.sent.find(o => o.type === "store_upsert" && o.store_chain_id === "93");
+    check("the chain's address and coordinates ride along on the upsert",
+      up && up.store_address === "Princeton, NJ 08540" && up.store_lat === 40.31, up);
     check("with nothing to press again", !b.linkBtn(), b.linkText());
 
     // The server has still not caught up — the op is queued, not applied.
@@ -246,6 +253,27 @@ async function boot(stores, { linkReply = null } = {}) {
     b.push([linkedRow]);
     await settle();
     check("the server's own value takes over", /93/.test(b.linkText()), b.linkText());
+  }
+
+  console.log("\n--- 8b. a branch the chain found is confirmed before it is pinned --");
+  {
+    /* A store added by name was never pointed at, and a town can hold more
+     * than one branch. The chain's answer is put in front of the person; "no"
+     * is an answer, not a failure, and nothing is written. */
+    let resolve;
+    const linkReply = { promise: new Promise(r => { resolve = r; }) };
+    const b = await boot([store(1, "Whole Foods Montgomery")], { linkReply });
+    const asked = [];
+    b.w.confirm = (msg) => { asked.push(msg); return false; };
+    b.linkBtn().click();
+    await settle();
+    resolve({ ok: true, status: 200, json: async () => ({ chain: "wholefoods", chain_store_id: "10738",
+              address: "Skillman, NJ 08558", confirm: "Skillman, NJ 08558", lat: 40.4, lon: -74.65 }) });
+    await settle();
+    check("the person was asked, with the branch the chain named",
+      asked.length === 1 && /Skillman, NJ 08558/.test(asked[0]), asked);
+    check("declined: nothing was written", !b.sent.some(o => o.type === "store_upsert" && o.store_chain_id), b.sent);
+    check("and the button is back, with a way forward", !!b.linkBtn() && /map/.test(b.linkText()), b.linkText());
   }
 
   console.log("\n--- 9. a link completing mid-sentence does not eat the note -------");

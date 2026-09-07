@@ -125,32 +125,48 @@ def parse_location(payload: dict) -> dict | None:
     return out
 
 
-def find_branch(stores: dict, address: str) -> dict | None:
-    """The branch at an OpenStreetMap address: {"rsid", "name"}, or None.
+def find_branch(stores: dict, address: str, town: str = "") -> dict | None:
+    """The branch at an OpenStreetMap address — or, for a store OSM has never
+    heard of, the branch in the `town` the household typed: {"rsid", "name",
+    "address"}, or None.
 
     ZIP first — the one key two branches never share — then town and state,
     and only when exactly ONE branch is in that town: Hamilton Township has
-    two, and the first of them is not an answer. The corporate row is skipped:
-    it is where the site opens, it has an address, and it has no shelves. Never
-    a nearest-guess; a wrong branch mis-prices everything with no visible sign.
+    two, and the first of them is not an answer. A bare town is matched across
+    every state, so "Montgomery" (NJ and NY) is ambiguous and refused. The
+    corporate row is skipped: it is where the site opens, it has an address,
+    and it has no shelves. Never a nearest-guess; a wrong branch mis-prices
+    everything with no visible sign.
     """
     rows = [s for s in stores.get("items") or [] if (s.get("type") or "") != "Corporate"
             and s.get("retailerStoreId")]
+    def branch(s: dict) -> dict:
+        addr = ", ".join(str(s.get(k) or "") for k in ("addressLine1", "city", "countyProvinceState", "postCode")
+                         if s.get(k))
+        return {"rsid": str(s["retailerStoreId"]), "name": s.get("name") or "", "address": addr}
+
     zipc = postcode(address)
     if zipc:
         for s in rows:
             if str(s.get("postCode") or "")[:5] == zipc:
-                return {"rsid": str(s["retailerStoreId"]), "name": s.get("name") or ""}
-    town, state = address_town_state(address)
+                return branch(s)
+    state = ""
+    if address:
+        town, state = address_town_state(address)
     if not town:
         return None
     # The list writes the state both ways ("New Jersey" on some rows, "NJ" on
     # others), so either spelling of ours has to match either of theirs.
-    spellings = {state, {v: k for k, v in US_STATES.items()}.get(state, state)}
+    spellings = {state, {v: k for k, v in US_STATES.items()}.get(state, state)} if state else None
+    # "Montgomery Township" and "Montgomery" are one town to a person typing
+    # a name; comparing them raw made "ShopRite of Montgomery" resolve to the
+    # New York one because the New Jersey row carried the suffix.
+    strip = re.compile(r"-(township|twp)$")
+    want = strip.sub("", town)
     in_town = []
     for s in rows:
-        city = re.sub(r"[^a-z0-9]+", "-", str(s.get("city") or "").lower()).strip("-")
+        city = strip.sub("", re.sub(r"[^a-z0-9]+", "-", str(s.get("city") or "").lower()).strip("-"))
         st = str(s.get("countyProvinceState") or "").lower().strip()
-        if city == town and st in spellings:
-            in_town.append({"rsid": str(s["retailerStoreId"]), "name": s.get("name") or ""})
+        if city == want and (spellings is None or st in spellings):
+            in_town.append(branch(s))
     return in_town[0] if len(in_town) == 1 else None
