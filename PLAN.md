@@ -1555,3 +1555,59 @@ made this one two lines. Web suite **108**.
 Known and left alone: tapping an "I'm at…" chip redraws the panel synchronously
 and will discard a half-typed note. Pre-existing, the same class, and a
 different change — noted rather than folded in.
+
+### 2026-09-07 (evening) — what Whole Foods and ShopRite actually expose
+
+The owner asked for price linking at Whole Foods and ShopRite as well as
+Wegmans, plus shelf location for both. Probed live before designing anything,
+because the whole feature turns on what those chains publish.
+
+**Whole Foods.**
+
+| question | answer |
+|---|---|
+| branch id | **yes** — `GET /stores/<slug>` carries `"storeCode":"10187"` |
+| per-store price | **yes** — `GET /api/products/category/<cat>?store=<code>` returns `{name, brand, regularPrice, uom, slug}` |
+| free-text search | **no**, not over plain HTTP |
+| shelf location | **no** — nothing anywhere |
+
+Verified: store page for Princeton → `10187` → that code accepts product queries
+and prices come back (`Organic White Onion $3.19/lb`). The store-code flow is an
+exact parallel of the Wegmans branch-page flow, so it fits the existing shape.
+
+The search is the problem. The category endpoint **ignores** `text=`, `keyword=`
+and `q=` — it returns the category listing whatever you pass, which is why an
+early probe "found" onions for a milk query. That is precisely the failure this
+repo's rule 2 exists to prevent, caught because the result was read rather than
+counted. The real search endpoint is `/api/wwos/rsi/search` (found in their JS
+bundle; `old` is a required parameter). It answers 200 with the right envelope
+and **zero** results without session state that a cookie jar plus
+`/api/session-id` did not reproduce; `/api/store-affinity` is POST-only.
+
+Shelf location does not exist to be had: no `aisle`, `shelf`, `planogram`,
+`department` or `location` field in the category API, the product record, the
+product page or the store page. **Wegmans remains the only chain with planogram
+data**, and the aisle view stays Wegmans-only. Owner agreed, 2026-09-07.
+
+**ShopRite.** Every server-side request — `shoprite.com`, a store storefront
+path, and `storefrontgateway.shoprite.com` — returns 403 behind Cloudflare's
+"Just a moment..." JS challenge. Nothing is reachable with an HTTP client.
+
+**Consequence for the design.** Owner chose a headless browser for ShopRite
+(2026-09-07). The Whole Foods finding pushes it further than expected: WF needs
+one too, because the app's flow is *type an item name → search the chain's
+catalogue → pick the product*, and without free-text search WF cannot answer
+that at all. So a browser-backed adapter serves BOTH new chains, while Wegmans
+keeps its Algolia path — a browser round trip is seconds against Algolia's
+milliseconds, and the aisle walk fires one query per item on the list.
+
+Design consequences that follow from that, to hold to when building:
+
+- Cache hard. `TTL["price"]` is 2 days and every browser query must be answered
+  from SQLite first; the browser is a last resort, not a lookup.
+- One at a time. A Chromium per concurrent request would take the box down;
+  the worker needs a single-flight lock and a hard timeout.
+- The kill switch still governs. `THINCART_LOOKUP=off` must mean no browser is
+  ever launched, exactly as it means no request is made today.
+- `lookup.py` stays the only module that reaches outward, browser included.
+- Best-effort as always: the list and its sync never wait on any of this.
