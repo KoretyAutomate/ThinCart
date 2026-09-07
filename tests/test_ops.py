@@ -401,3 +401,58 @@ def test_cycles_endpoint_full_list():
     row = [c for c in client.get("/api/cycles").json()["cycles"] if c["name"] == "cyc_overdue"][0]
     assert row["on_list"] and not row["due"]
     op(type="remove", item_id=iid)
+
+
+def test_the_shell_is_never_served_stale():
+    """No Cache-Control means HEURISTIC freshness — roughly a tenth of the age
+    since Last-Modified — so a phone can hold yesterday's page for hours. That
+    is what made "I deployed it" and "I can see it" disagree for weeks, and the
+    service worker does not rescue it: sw.js is network-first, but its fetch()
+    goes through the same HTTP cache that is answering stale.
+
+    'no-cache' means revalidate, not do-not-store; with the ETag already sent, a
+    current phone gets a 304 and a few bytes.
+    """
+    for path in ("/", "/sw.js", "/manifest.json"):
+        r = client.get(path)
+        assert r.status_code == 200, path
+        assert r.headers.get("cache-control") == "no-cache", (path, r.headers.get("cache-control"))
+        assert r.headers.get("etag"), path      # revalidation needs something to compare
+
+    # Icons are left cacheable on purpose: they are named by content and change
+    # about never, and making every one of them revalidate would cost a round
+    # trip per item for no benefit.
+    assert client.get("/icon-192.png").headers.get("cache-control") is None
+
+
+def test_the_build_stamp_is_derived_from_the_page_itself():
+    """A stamp someone has to remember to bump reports "current" the one time it
+    is forgotten — exactly when the check matters. So it is the content hash of
+    the file, computed here independently of the server's own function, and the
+    served page carries that same value rather than a literal placeholder."""
+    import hashlib
+
+    page_path = Path(__file__).parent.parent / "app" / "index.html"
+    expected = hashlib.sha256(page_path.read_bytes()).hexdigest()[:8]
+
+    d = client.get("/health").json()
+    assert d["ok"] is True
+    assert d["build"] == expected, (d["build"], expected)
+
+    # Both entry points. /index.html left to the static mount would serve the
+    # source untouched and tell that client it is stale forever.
+    for path in ("/", "/index.html"):
+        served = client.get(path).text
+        assert f"const BUILD = '{expected}'" in served, path
+        assert "__BUILD__" not in served, path    # the placeholder never reaches a phone
+
+
+def test_an_up_to_date_page_costs_a_304_not_a_download():
+    """no-cache means revalidate, not re-download. Without an ETag on the
+    injected page every load would ship ~90 KB over a phone connection."""
+    first = client.get("/")
+    etag = first.headers.get("etag")
+    assert etag, first.headers
+    again = client.get("/", headers={"If-None-Match": etag})
+    assert again.status_code == 304
+    assert again.headers.get("cache-control") == "no-cache"
