@@ -246,6 +246,8 @@
   .prow .pu { color:var(--muted); font-size:.76rem; white-space:nowrap; }
   .pnote { padding:9px 11px; color:var(--muted); font-size:.79rem; }
   .stores-note { color:var(--muted); font-size:.8rem; margin:20px 2px; }
+  #buildline { margin-top:-8px; font-variant-numeric:tabular-nums; }
+  #buildline.stale { color:var(--red); font-weight:600; }
   #namedlg {
     position:fixed; inset:0; background:var(--bg); z-index:40; display:none;
     flex-direction:column; align-items:center; justify-content:center; gap:14px; padding:24px;
@@ -522,6 +524,7 @@
     </div>
     <div id="storesearch-results"></div>
     <p class="stores-note" id="stores-note"></p>
+    <p class="stores-note" id="buildline"></p>
   </div>
 </div>
 
@@ -547,6 +550,12 @@ const uuid = () => {
   const h = [...b].map(x => x.toString(16).padStart(2, '0')).join('');
   return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;
 };
+/* Stamped by the server as this page is served: the content hash of the file it
+ * came from. Derived, never hand-written — a constant someone must remember to
+ * bump reports "current" the one time it is forgotten, which is precisely when
+ * the check is needed. A phone holding an old shell is holding an old hash. */
+const BUILD = '__BUILD__';
+
 const LS = { name:'pc_name', queue:'pc_queue', base:'pc_base' };
 
 let base  = JSON.parse(localStorage.getItem(LS.base)  || '{"revision":0,"items":[]}');
@@ -668,6 +677,8 @@ const STR = {
     aisle_unasked:'⏳ Not looked up (try again)',
     link_prices:'Link prices', link_linked:s=>`💲 prices linked (store ${s})`,
     link_trying:'Linking…',
+    build_page:b=>`app build ${b}`,
+    build_stale:(mine,srv)=>`⚠️ This phone is on build ${mine}; the server has ${srv}. Pull down / reopen to update.`,
     compare:'💲 Find product & compare prices',
     cmp_need_store:'Link a store to its prices first (Stores 🏬 → Link prices).',
     cmp_searching:'Searching the store catalogue…',
@@ -767,6 +778,8 @@ const STR = {
     aisle_unasked:'⏳ 未取得（再試行してください）',
     link_prices:'価格を連携', link_linked:s=>`💲 価格連携済み（店舗 ${s}）`,
     link_trying:'連携中…',
+    build_page:b=>`アプリ build ${b}`,
+    build_stale:(mine,srv)=>`⚠️ この端末は build ${mine}、サーバーは ${srv} です。再読み込みしてください。`,
     compare:'💲 商品を選んで価格比較',
     cmp_need_store:'先に店舗と価格を連携してください（🏬 → 価格を連携）。',
     cmp_searching:'店舗の商品カタログを検索中…',
@@ -840,6 +853,7 @@ function applyLang() {
   $('plan-h').textContent = T().plan_h;
   $('manage-h').textContent = T().manage_h;
   $('stores-note').textContent = T().stores_note;
+  showBuild();
   $('newstore-name').placeholder = T().new_store_ph;
   $('storesearch-area').placeholder = T().area_ph;
 }
@@ -1157,6 +1171,25 @@ async function openTrips() {
     box.appendChild(h);
     rows.forEach(t => box.appendChild(mk(t)));
   }
+}
+
+/* This page's version, beside the one the server is serving. They differ only
+ * when the phone is holding an older shell — the failure that made "I shipped
+ * it" and "I can see it" disagree for weeks, with nothing on screen to say so.
+ * Now it says so, and says what to do about it. */
+async function showBuild() {
+  const el = $('buildline');
+  if (!el) return;
+  el.textContent = T().build_page(BUILD);
+  try {
+    const res = await fetch('/health', { cache: 'no-store' });
+    if (!res.ok) return;
+    const d = await res.json();
+    if (d.build && d.build !== BUILD) {
+      el.textContent = T().build_stale(BUILD, d.build);
+      el.classList.add('stale');
+    }
+  } catch (e) { /* offline: the page's own stamp is still worth showing */ }
 }
 
 /* ============ stores panel: where-to-buy plan + store management ============ */

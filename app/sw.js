@@ -1,7 +1,9 @@
 /* ThinCart service worker — app-shell cache ONLY.
  * The offline op queue lives in page JS (localStorage), NOT here:
  * Background Sync is unsupported on iOS, so the page owns queue flushing. */
-const CACHE = 'thincart-shell-v7';
+/* Bumped v7 -> v8 on 2026-09-07 with the no-cache headers: any shell already
+ * sitting in Cache Storage from before that fix is evicted on activate. */
+const CACHE = 'thincart-shell-v8';
 const SHELL = ['/', '/manifest.json', '/icon-192.png', '/icon-512.png'];
 
 self.addEventListener('install', e => {

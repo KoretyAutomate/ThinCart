@@ -1243,3 +1243,48 @@ Nightly backups looked dead — `~/backups/shopping-list/` stops in July. They a
 fine: the timer is enabled and active, ran 3 h before this was written, and
 writes to `~/backups/thincart/`, which holds 28 dailies including today. The
 July directory is the pre-rename path. Checked rather than reported.
+
+### 2026-09-07 (later) — why the phone kept showing the old app
+
+The owner asked why updates were not appearing. Cause found, and it is almost
+certainly the whole of the recurring "reported done, phone disagrees" complaint
+rather than a coincidence alongside it.
+
+**`/`, `/sw.js` and `/manifest.json` were served with no `Cache-Control` at
+all.** Absent that header an HTTP cache falls back to HEURISTIC freshness —
+conventionally about a tenth of the age since `Last-Modified` — so a WebView can
+serve yesterday's page for hours without asking. The service worker does not
+rescue it: `sw.js` is deliberately network-first, but its `fetch()` goes through
+the very cache that is answering stale. So the deploy was real, the tests were
+honest, and the phone was reading a copy from before any of it.
+
+Fixed at the source: a middleware sets `Cache-Control: no-cache` on those three
+paths. `no-cache` means *revalidate*, not *do not store*; with the ETag
+FileResponse already sends, an up-to-date phone gets a 304 and a few bytes.
+Icons are left cacheable on purpose — named by content, changed about never, and
+making each revalidate would cost a round trip per item for nothing. The service
+worker's cache name went v7 → v8 so any shell already sitting in Cache Storage
+from before the fix is evicted on activate.
+
+**And made visible.** `/health` reports the stamp of the page the SERVER holds,
+the page carries the stamp of the file IT came from, and the Stores panel shows
+both — turning red with "this phone is on X, the server has Y" when they differ.
+The thing that made this last for weeks was not the caching; it was that a stale
+shell looked exactly like a working one. Now it announces itself.
+
+The stamp is the file's content hash, **injected as the page is served**, not a
+constant in the source. The gate caught the first version, which was a
+hand-maintained `const BUILD = '2026-09-07a'`: the one time a bump is forgotten,
+a stale phone and the server report the same value and the warning confidently
+declares an outdated client current — precisely when the check is needed. A hash
+cannot be forgotten, because changing the file is changing the hash. Serving via
+substitution costs an ETag, so it is set to that same hash and a current phone
+still pays only a 304. `/index.html` is routed through the same handler, since
+left to the static mount it would serve the placeholder untouched and tell that
+client it was stale forever — a warning that is always wrong is worse than none,
+because you learn to ignore it.
+
+Pinned by tests, because a missing header regresses in total silence and leaves
+no trace anywhere else. The whole concern — the middleware, the stamp, the index
+route — moved into `server/shell.py` when app.py crossed the 600-line ceiling;
+it is one idea (serve the page, and never a stale copy) and reads better named.

@@ -24,7 +24,6 @@ from datetime import datetime, timedelta, UTC
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 import away
@@ -32,6 +31,7 @@ import catalog
 import cycles
 import db
 import ideas
+import shell
 import lookup
 import lookup_api
 from ops import Op
@@ -40,6 +40,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("thincart")
 
 APP_DIR = Path(__file__).parent.parent / "app"
+# Replaced with build_id() as the page is served; the literal never reaches a phone.
+BUILD_PLACEHOLDER = "__BUILD__"
 
 app = FastAPI(title="ThinCart", version="0.1")
 
@@ -556,7 +558,16 @@ async def get_history(limit: int = 100):
 
 @app.get("/health")
 async def health():
-    return {"ok": True, "revision": db.get_revision(conn), "clients": len(sockets)}
+    # `build` is the served page's own fingerprint. "Is my phone running what the
+    # server has?" was previously unanswerable without reading source, which is
+    # how a stale shell went unnoticed for weeks; the app prints the same string
+    # in the Stores panel, so the two can be compared in five seconds.
+    return {
+        "ok": True,
+        "revision": db.get_revision(conn),
+        "clients": len(sockets),
+        "build": shell.build_id(),
+    }
 
 
 @app.websocket("/ws")
@@ -577,11 +588,12 @@ away.bind(away.Context(conn=conn, write_lock=write_lock, broadcast=broadcast_sta
 app.include_router(away.router)
 app.include_router(ideas.router)
 app.include_router(lookup_api.router)
+app.include_router(shell.router)
+# Registered here rather than declared in shell.py: middleware attaches to the
+# app, and the app is assembled in this file.
+app.middleware("http")(shell.no_stale_shell)
 
 
-@app.get("/")
-async def index():
-    return FileResponse(APP_DIR / "index.html")
 
 
 app.mount("/", StaticFiles(directory=APP_DIR), name="static")
