@@ -82,15 +82,43 @@ function boot({ lang = "en", pageOk = true } = {}) {
   return { w, fetches, deleted, unregistered, updated, reloads,
            btn: w.document.getElementById("reload-btn"),
            err: w.document.getElementById("reload-err"),
-           line: w.document.getElementById("buildline") };
+           line: w.document.getElementById("buildline"),
+           panel: w.document.getElementById("set-panel"),
+           gear: w.document.getElementById("set-btn") };
 }
 
 (async () => {
+  console.log("\n--- 0. it is somewhere the owner would actually look --------------");
+  {
+    /* It first shipped at the foot of the Stores panel, below the store rows
+     * and the search results, and the owner — who had asked for it — could not
+     * find it: "I don't see it." A control for "the app is showing me the wrong
+     * thing" has to be where you would look while thinking that, so it has its
+     * own panel behind the gear in the top bar. */
+    const b = boot();
+    await drain();
+    check("there is a settings button in the top bar", !!b.gear);
+    check("it sits in the header, beside the other top-bar buttons",
+      b.gear && b.gear.parentElement.tagName === "HEADER", b.gear && b.gear.parentElement.tagName);
+    check("the panel starts closed", b.panel.style.display !== "flex", b.panel.style.display);
+    b.gear.click();
+    await drain();
+    check("the gear opens it", b.panel.style.display === "flex", b.panel.style.display);
+    check("the reload control is inside that panel", b.panel.contains(b.btn));
+    check("so is the build line it refers to", b.panel.contains(b.line));
+    check("and it is no longer buried in the Stores panel",
+      !b.w.document.getElementById("stores-panel").contains(b.btn));
+    b.w.document.getElementById("set-close").click();
+    check("✕ closes it", b.panel.style.display === "none", b.panel.style.display);
+  }
+
   console.log("\n--- 1. the control is on the page, in both languages ------------");
   {
     const b = boot({ lang: "en" });
     await drain();
     check("button is present", !!b.btn);
+    check("the panel is titled in English", /Settings/.test(b.w.document.getElementById("set-h1").textContent),
+      b.w.document.getElementById("set-h1").textContent);
     check("labelled in English", /Reload the app/.test(b.btn.textContent), b.btn.textContent);
     check("carries the ↻ the stale banner points at", /↻/.test(b.btn.textContent), b.btn.textContent);
   }
@@ -98,6 +126,8 @@ function boot({ lang = "en", pageOk = true } = {}) {
     const b = boot({ lang: "ja" });
     await drain();
     check("labelled in Japanese", /再読み込み/.test(b.btn.textContent), b.btn.textContent);
+    check("the panel is titled in Japanese", /設定/.test(b.w.document.getElementById("set-h1").textContent),
+      b.w.document.getElementById("set-h1").textContent);
     check("Japanese label carries ↻ too", /↻/.test(b.btn.textContent), b.btn.textContent);
   }
 
