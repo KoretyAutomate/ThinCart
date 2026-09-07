@@ -1458,3 +1458,100 @@ The general lesson, and the second time this session has produced it: a feature
 verified only at the layer below the one the owner touches is not verified. The
 suite proved the button fetched, updated the worker and reloaded, in the right
 order, under failure. None of that says anyone can find it.
+
+### 2026-09-07 (evening) — "I somehow cannot delete the stores"
+
+Not the server, and not the op. `apply_store_delete` is correct and covered,
+the op left the queue, the row left the database, the new state came back. The
+**panel never redrew**, so the store stayed on screen and delete looked broken.
+
+`render()` live-refreshes the open Stores panel behind a guard, so it cannot
+rebuild the DOM under someone typing a note. The guard was:
+
+```js
+!$('stores-panel').contains(document.activeElement)
+```
+
+On Android, tapping a `<button>` focuses it. So from the moment Delete was
+tapped, that button held focus and **every** later render was suppressed — the
+one from `enqueue()`, the one after `resync()`, and every WebSocket frame after
+that. The row only disappeared when focus moved: closing and reopening the panel
+rebuilt it from scratch, which is why it read as intermittent rather than
+broken.
+
+The guard protects typed text, so it should test for typed text:
+
+```js
+focused.tagName === 'TEXTAREA' || focused.tagName === 'INPUT'
+```
+
+Notes, the new-store field and the store search are all protected exactly as
+before; buttons no longer freeze the panel. One occurrence in the file, checked
+rather than assumed.
+
+`app/tests/store_delete.test.js` drives the real paths — a click on the real
+Delete button, a WebSocket frame for the other phone's change — because the bug
+lived in precisely the wiring a convenient stub would have skipped. Verified to
+fail without the fix: 3 of its 13 checks go red, including "the row is gone from
+the panel". Web suite **94**.
+
+**Third time this session, same shape.** The stale shell, the unfindable reload
+button, and now this: each was correct at the layer that had tests and wrong at
+the layer the phone touches. `app/tests/` exists for that reason and is the
+right place for the next one too.
+
+**A [P2] from the gate on the same diff, and a framing I do not accept.** It
+reported that narrowing the guard *introduced* a defect in the price-link
+button: `renderStores()` can now run while `/api/stores/link` is in flight,
+detaching the `lk` element the handler captured, so a failure reason is written
+where nobody can see it and the rebuilt button comes back enabled and re-fireable.
+
+The mechanism is real. "Introduced" is very probably wrong: the handler's first
+act is `b.disabled = true`, a disabled element is not focusable, and Chromium
+moves focus off it — so by the time the request was even sent, the old
+focus-based guard had already stopped protecting anything. jsdom does not model
+disable-blurring, so this could not be settled here, and the defect is real
+under either reading. Fixed rather than argued.
+
+The fix is the general one: **state that must survive a repaint does not belong
+in the DOM being repainted.** `linking` (a Set of store ids) and `linkFail` (id →
+reason) live beside the panel and `renderStores()` draws them. While a lookup is
+out there is no button at all, so no rebuild can hand back a fresh one and let
+the same request go twice. The reason now sits beside the button instead of
+replacing it — most are "this branch isn't in their index", worth saying and
+worth being able to retry without reopening the panel.
+
+Pinned by two more sections in `app/tests/stores_panel.test.js` (renamed from
+`store_delete.test.js`, since it now covers the panel's refresh generally): a
+link held open across a rebuild keeps saying it is running, offers nothing to
+press twice, and still shows its answer afterwards. Verified against the
+pre-fix file: 5 of the 20 checks go red. Web suite **101**.
+
+**A further [P2] on the same button, and this one had no argument against it.**
+On success the pending flag was cleared as soon as the upsert was *queued*.
+`enqueue()` is optimistic — it returns the moment the op is on the queue, and
+`base.stores` shows no link until the round trip completes — so the Link button
+came straight back, enabled, offering to run the same lookup again. Offline,
+where an op can sit queued for hours, it would offer that on every draw.
+
+`linkOpt` (store id → the branch number the lookup returned) now holds the
+answer until the server's own value appears, at which point the local one is
+dropped. The row reads as linked from the instant the lookup succeeds, which is
+also what someone would expect to see. Web suite **106**.
+
+**And a [P1] on the fix to the fix.** The link handler's own `renderStores()`
+calls walked straight past the typing guard: start writing a note while the
+lookup is out — which is exactly when you would, since it is slow — and the
+answer arriving rebuilt the field and took the text with it. The guard had just
+been repaired and was being bypassed three lines away.
+
+There is now **one** way to redraw an open panel, `refreshStores()`, and every
+redraw that is not the panel opening goes through it. A redraw it skips is not a
+redraw lost: everything the panel shows — `base`, `linking`, `linkFail`,
+`linkOpt` — lives outside the DOM, so the next render paints the same truth.
+That is what keeping state out of the DOM buys, and it is why the earlier fix
+made this one two lines. Web suite **108**.
+
+Known and left alone: tapping an "I'm at…" chip redraws the panel synchronously
+and will discard a half-typed note. Pre-existing, the same class, and a
+different change — noted rather than folded in.
