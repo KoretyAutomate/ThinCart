@@ -32,6 +32,7 @@ import cycles
 import db
 import ideas
 import shell
+import updates
 import lookup
 import lookup_api
 from ops import Op
@@ -54,9 +55,8 @@ def now_iso() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
-# Feature modules own their own endpoints; they borrow the shared connection and
-# broadcast through bind() rather than importing app, which would be circular.
-# Routers are included at the bottom, after broadcast_state exists.
+# Feature modules own their endpoints and borrow the shared connection through
+# bind() rather than importing app (circular); routers are included at the bottom.
 ideas.bind(conn)
 lookup.bind(conn)
 
@@ -589,6 +589,7 @@ app.include_router(away.router)
 app.include_router(ideas.router)
 app.include_router(lookup_api.router)
 app.include_router(shell.router)
+app.include_router(updates.router)
 # Registered here rather than declared in shell.py: middleware attaches to the
 # app, and the app is assembled in this file.
 app.middleware("http")(shell.no_stale_shell)

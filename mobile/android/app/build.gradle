@@ -8,8 +8,11 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         // 2 / 1.1: allowNavigation fix — 1.0 could never leave the launcher.
-        versionCode 2
-        versionName "1.1"
+        // The in-app updater compares versionCode: a build that forgets to raise
+        // it is invisible to every phone. publish_apk.py reads the value back out
+        // of the built APK, so what is published is what was built.
+        versionCode 3
+        versionName "1.2"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

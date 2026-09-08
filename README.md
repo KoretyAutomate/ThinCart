@@ -185,6 +185,14 @@ need no key; they need `curl_cffi` (in `server/requirements.txt`), which speaks
 to their sites the way a browser does. Every request either chain sees is the
 one its own site makes, and every answer is cached before it is asked again.
 
+**Updating the Android app.** After a merge that touches `mobile/`, CI builds
+the APK; publish it with `server/publish_latest_apk.sh` on the DGX. Every
+phone is then offered it on its next cold start — *Install* downloads it from
+the DGX, checks the checksum and opens the system installer; nothing on the
+phone is lost, because every build is signed with the same key. The launcher's
+settings screen (Back from the list) shows the installed build and has *Check
+for an update*.
+
 ## Ops
 
 ```bash

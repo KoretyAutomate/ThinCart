@@ -50,4 +50,8 @@
          fine is what the WebView's geolocation actually requests. -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <!-- In-app updates: the launcher downloads the next build from the DGX and
+         hands it to the system installer. Android still asks the person, once,
+         to allow installs from this app. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 </manifest>
