@@ -1,0 +1,21 @@
+{
+ "osm_type": "way",
+ "osm_id": 1463768562,
+ "name": "",
+ "display_name": "1200, State Road, Montgomery Township, Somerset County, New Jersey, 08558, United States",
+ "lat": "40.4022070",
+ "lon": "-74.6526553",
+ "type": "construction",
+ "category": "building",
+ "address": {
+  "house_number": "1200",
+  "road": "State Road",
+  "town": "Montgomery Township",
+  "county": "Somerset County",
+  "state": "New Jersey",
+  "ISO3166-2-lvl4": "US-NJ",
+  "postcode": "08558",
+  "country": "United States",
+  "country_code": "us"
+ }
+}

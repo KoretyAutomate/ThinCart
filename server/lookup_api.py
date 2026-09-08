@@ -34,7 +34,7 @@ from lookup import (
     products,
     products_many,
 )
-from branches import resolve_branch
+from branches import resolve_branch, store_from_link
 from chains import aisle_label, detect
 
 router = APIRouter()
@@ -120,6 +120,16 @@ async def store_link(store_id: int) -> dict:
     # by them, and the store stops being a bare name.
     extra = {k: found[k] for k in ("address", "lat", "lon", "confirm") if found.get(k) is not None}
     return {"chain": chain, "chain_store_id": found["chain_store_id"], **extra}
+
+
+@router.get("/api/stores/from_link")
+async def stores_from_link(url: str = Query(..., min_length=8, max_length=800)) -> dict:
+    """A pasted Google Maps pin or a chain's store page -> one store hit in the
+    same shape the OpenStreetMap search returns, with the chain link already
+    resolved where the chain could be reached. For the shop the map has never
+    heard of. {"result": None, "reason"} when the link says nothing usable."""
+    _require("stores")
+    return await store_from_link(url, price_ok=enabled("price"))
 
 
 @router.get("/api/products/search")

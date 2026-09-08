@@ -1885,3 +1885,58 @@ state names strip now too, and "Whole Foods New York" stays a town. Also found
 on the way: the link handler held its reply in a `const`, so replacing a
 declined answer threw and read as "could not reach OpenStreetMap". Suites:
 **225 python**, 113 web, 52 launcher.
+
+### 2026-09-07 (night) — a pasted link, GPS "I'm at…", whose aisles, and long-press
+
+Four things from the owner after the Montgomery store linked.
+
+**"Can we build this for users by dropping a Google Maps link or the store
+link when the store is not found?"** Yes. 🏬 has a third box, 📎: paste a
+Google Maps place link (long form, `maps?q=lat,lon`, or a `maps.app.goo.gl`
+short link, which is followed first), or a chain's own store page
+(`wholefoodsmarket.com/stores/<slug>`, `wegmans.com/stores/<slug>`, a
+`shoprite.com/…/rsid/<n>/…` URL). `links.py` reads the shape — pure, tested
+against the forms people actually paste; the pin's own `!3d…!4d…` wins over
+the `@lat,lon` viewport centre — and `branches.store_from_link` turns it into
+one hit in the OpenStreetMap-result shape, with the chain link already
+resolved: a store page IS the branch; a pin is reverse-geocoded (Nominatim
+`/reverse`, same rate limit) and the chain's page for that town is accepted
+only if its own ZIP or coordinates match the pin. The map says "Montgomery
+Township", the chain says "montgomery" — both spellings are tried, and a page
+that answers is still checked against the pin, so trying more cannot pick a
+wrong branch. One card, one tap, and the row is pinned AND priced.
+
+**"Use GPS and give best guess, while the user can either confirm or change."**
+When no store is set, the phone's position is compared with the pinned stores
+and the nearest within 300 m is OFFERED — "📍 Are you at Whole Foods Market?
+Yes / Not here" — never set silently, because a wrong "I'm at" stamps every
+check-off with the wrong shop and re-sorts the list for the wrong aisles. "Not
+here" is remembered for the session. The APK now declares location
+permissions; the WebView asks the person once, on first use. **New APK
+needed** for that one thing; everything else here is the served page.
+
+**"I can't see which store [the aisle view] is for."** The note above the list
+now always starts with `🏬 aisles at <store>`. A list sorted for the wrong shop
+reads exactly like one sorted right, so the store is named, always.
+
+**"Edit functionality is not working on the app even when I long press."**
+Android's WebView (and Chrome) turns a held touch into a long-press gesture at
+about 500 ms and *cancels the pointer stream* when it does — so the 600 ms
+timer that opens the editor was disarmed a hair before it could fire, and the
+editor was unreachable from the phone that matters. The same gesture announces
+itself as a `contextmenu` event, which is the reliable signal on Chromium; the
+editor now opens from that, and the timer stays for iOS, which fires no
+contextmenu on touch. Cannot be proven in jsdom; verified on the phone.
+
+**"Whatever item I add somehow shows as Wegmans."** Not a bug in the code but
+in what the data says: 34 purchases are stamped Wegmans and *none* are stamped
+Whole Foods (the live table, read-only), so the "usual store" rule — explicit
+pin first, else the store bought at most often — answers Wegmans for every
+item that has ever been bought there. Nine items also carry an explicit Wegmans
+pin, which is set by tapping a row in the price comparison or in the editor.
+With the editor reachable again the pin can be changed per item; and once
+check-offs happen with "I'm at Whole Foods" set (which GPS now offers), the
+history follows. If "most recent wins" is wanted instead of "most often", that
+is a one-line rule change, deliberately not made without asking.
+
+Suites: **238 python**, 133 web, 52 launcher.
