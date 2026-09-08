@@ -465,6 +465,13 @@
     <button id="reload-btn"></button>
     <p id="reload-err"></p>
     <p class="set-note" id="set-note"></p>
+
+    <h3 id="gps-h"></h3>
+    <button id="gps-test"></button>
+    <p class="set-note" id="gps-out"></p>
+
+    <h3 id="diag-h"></h3>
+    <p class="set-note" id="diag-out"></p>
   </div>
 </div>
 
@@ -739,6 +746,15 @@ const STR = {
     build_page:b=>`app build ${b}`,
     build_stale:(mine,srv)=>`⚠️ This phone is on build ${mine}; the server has ${srv}. Tap ↻ below to update.`,
     settings:'⚙️ Settings',
+    gps_h:'Location',
+    gps_test:'📍 Check what the phone can see',
+    gps_reading:'Reading…',
+    gps_denied:'Location refused, or unavailable. Android → Settings → Apps → ThinCart → Permissions → Location.',
+    gps_none:'No pinned store has coordinates yet, so nothing can be matched.',
+    gps_far:(n,km)=>`Read your position. Nearest pinned store: ${n}, ${km} km away — too far to offer (within 300 m it asks).`,
+    gps_near:(n,m)=>`Read your position. ${n} is ${m} m away — you'd be asked about this one.`,
+    diag_h:'Last touch on an item',
+    diag_none:'Nothing yet — press and hold an item on the list, then come back here.',
     ver_h:'App version',
     set_note:'Reloading fetches the current app from the server. Your list, and anything you added while offline, are untouched.',
     reload_btn:'↻ Reload the app',
@@ -855,6 +871,15 @@ const STR = {
     build_page:b=>`アプリ build ${b}`,
     build_stale:(mine,srv)=>`⚠️ この端末は build ${mine}、サーバーは ${srv} です。下の ↻ で更新してください。`,
     settings:'⚙️ 設定',
+    gps_h:'位置情報',
+    gps_test:'📍 現在地が読めるか確認',
+    gps_reading:'取得中…',
+    gps_denied:'位置情報が拒否されたか、取得できません。Android の設定 → アプリ → ThinCart → 権限 → 位置情報 を確認してください。',
+    gps_none:'座標を持つ登録店舗がまだありません。照合できません。',
+    gps_far:(n,km)=>`現在地を取得しました。最寄りの登録店舗は ${n}（${km} km）— 遠いので提案しません（300 m 以内で確認します）。`,
+    gps_near:(n,m)=>`現在地を取得しました。${n} まで ${m} m — この店舗について確認が出ます。`,
+    diag_h:'直近の操作',
+    diag_none:'まだありません。リストの品目を長押ししてから、ここに戻ってください。',
     ver_h:'アプリのバージョン',
     set_note:'再読み込みすると、サーバーから最新のアプリを取得します。買い物リストと、オフライン中に追加した内容はそのまま残ります。',
     reload_btn:'↻ アプリを再読み込み',
@@ -937,6 +962,9 @@ function applyLang() {
   $('set-h1').textContent = T().settings;
   $('ver-h').textContent = T().ver_h;
   $('set-note').textContent = T().set_note;
+  $('gps-h').textContent = T().gps_h;
+  $('gps-test').textContent = T().gps_test;
+  $('diag-h').textContent = T().diag_h;
   $('reload-btn').textContent = T().reload_btn;
   $('newstore-name').placeholder = T().new_store_ph;
   $('storesearch-area').placeholder = T().area_ph;
@@ -1357,7 +1385,33 @@ $('reload-btn').onclick = reloadApp;
  *
  * showBuild() re-runs on open so the comparison is made when it is read, not
  * whenever the language was last applied. */
-$('set-btn').onclick = () => { $('set-panel').style.display = 'flex'; showBuild(); };
+$('set-btn').onclick = () => {
+  $('set-panel').style.display = 'flex';
+  showBuild();
+  $('diag-out').textContent = gestureLog.length ? gestureLog.join('  →  ') : T().diag_none;
+};
+
+/* Standing at home, "no store offered" and "location never read" look
+ * identical — and the second is the one worth knowing about. This says which,
+ * by naming the nearest pinned store and how far away it is. */
+$('gps-test').onclick = () => {
+  const out = $('gps-out');
+  if (!navigator.geolocation) { out.textContent = T().gps_denied; return; }
+  out.textContent = T().gps_reading;
+  navigator.geolocation.getCurrentPosition(pos => {
+    const pinned = (base.stores || []).filter(s => s.lat != null && s.lon != null);
+    if (!pinned.length) { out.textContent = T().gps_none; return; }
+    let best = null, bestKm = Infinity;
+    for (const s of pinned) {
+      const km = kmBetween(pos.coords.latitude, pos.coords.longitude, s.lat, s.lon);
+      if (km < bestKm) { best = s; bestKm = km; }
+    }
+    out.textContent = bestKm <= GPS_RADIUS_KM
+      ? T().gps_near(best.name, Math.round(bestKm * 1000))
+      : T().gps_far(best.name, bestKm.toFixed(1));
+  }, () => { out.textContent = T().gps_denied; },
+  { timeout: 10000, maximumAge: 0 });
+};
 $('set-close').onclick = () => $('set-panel').style.display = 'none';
 
 /* ============ stores panel: where-to-buy plan + store management ============ */
@@ -1768,11 +1822,18 @@ function attachGestures(li, it) {
    * long-press unreachable on real phones, so only distance cancels it).
    * Swipe right = ✓ bought (purchase event) · swipe left = 🚫 skip (no event,
    * re-suggested tomorrow) — same server ops as tap / sheet, different gesture. */
-  let timer = null, longFired = false, armed = false, sx = 0, sy = 0;
-  let swiping = false, dx = 0;
+  let timer = null, longFired = false, armed = false, sx = 0, sy = 0, downAt = 0;
+  let swiping = false, dx = 0, travel = 0, lastMoveAt = 0, lastX = 0, lastY = 0;
   const row = li.querySelector('.row'), under = li.querySelector('.under');
   const THRESH = () => Math.max(72, li.offsetWidth * 0.28);
   const disarm = () => { clearTimeout(timer); armed = false; };
+  /* One way in, whichever signal arrives first. Two attempts at this bug were
+   * spent guessing WHICH signal Android sends, so it now accepts all of them
+   * and records what actually happened (gtrace, shown in ⚙️). */
+  const fireLong = (why) => {
+    if (longFired || swiping || !armed) return;
+    longFired = true; disarm(); gtrace('OPEN:' + why); openSheet(it);
+  };
   const springBack = () => {
     row.style.transition = 'transform .15s';
     row.style.transform = '';
@@ -1780,13 +1841,22 @@ function attachGestures(li, it) {
     setTimeout(() => row.style.transition = '', 160);
   };
   li.addEventListener('pointerdown', e => {
-    armed = true; longFired = false; swiping = false; dx = 0;
-    sx = e.clientX; sy = e.clientY;
-    timer = setTimeout(() => { longFired = true; openSheet(it); }, 600);
+    armed = true; longFired = false; swiping = false; dx = 0; travel = 0;
+    sx = lastX = e.clientX; sy = lastY = e.clientY; downAt = lastMoveAt = Date.now();
+    gestureLog = ['down'];
+    timer = setTimeout(() => fireLong('timer'), 600);
   });
   li.addEventListener('pointermove', e => {
     dx = e.clientX - sx;
     const dy = e.clientY - sy;
+    /* Travel from the PREVIOUS point, not displacement from the first one:
+     * a scroll that creeps a pixel at a time never grows its displacement by
+     * enough to notice, and a finger moving back toward where it started
+     * shrinks it. Both are movement, and both must count. */
+    const step = Math.hypot(e.clientX - lastX, e.clientY - lastY);
+    travel += step;
+    if (step >= 1) lastMoveAt = Date.now();       // travelling, not jittering in place
+    lastX = e.clientX; lastY = e.clientY;
     if (!swiping) {
       if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) && !longFired) {
         swiping = true; disarm();
@@ -1802,18 +1872,30 @@ function attachGestures(li, it) {
       under.style.opacity = Math.min(Math.abs(dx) / THRESH(), 1);
     }
   });
-  li.addEventListener('pointercancel', () => { disarm(); if (swiping) springBack(); swiping = false; });
-  /* Android's WebView (and Chrome) turns a held touch into a long-press
-   * gesture at about 500 ms and CANCELS the pointer stream when it does — so
-   * the 600 ms timer above was disarmed a hair before it could fire, and the
-   * editor was unreachable from the phone that matters. The same gesture
-   * announces itself as a contextmenu event, which is the reliable signal on
-   * Chromium; the timer stays for iOS, which fires no contextmenu on touch. */
+  /* A STILL finger whose pointer stream is cancelled is the platform taking the
+   * gesture over for its own long-press — the moment the editor should open on
+   * a WebView that raises no contextmenu.
+   *
+   * A scroll cancels the stream too (rows are touch-action: pan-y), so the
+   * discriminator is STILLNESS, not merely elapsed time: pause half a second
+   * and then begin to scroll, and the pan can cancel before the movement
+   * passes the swipe threshold. Time alone reads that as a hold. So the finger
+   * must have been travelling nowhere for a quarter-second before the cancel,
+   * and have drifted less than a fingertip's jitter in total. */
+  li.addEventListener('pointercancel', () => {
+    const now = Date.now(), held = now - downAt, still = now - lastMoveAt;
+    gtrace('cancel@' + held + 'ms/' + Math.round(travel) + 'px/still' + still + 'ms');
+    if (armed && !swiping && travel < 8 && held >= 350 && still >= 250) { fireLong('cancel'); return; }
+    disarm(); if (swiping) springBack(); swiping = false;
+  });
+  /* Chromium announces the same gesture as a contextmenu; iOS fires none. */
   li.addEventListener('contextmenu', e => {
     e.preventDefault();
-    if (armed && !swiping && !longFired) { longFired = true; disarm(); openSheet(it); }
+    gtrace('ctx@' + (Date.now() - downAt) + 'ms');
+    fireLong('ctx');
   });
   li.addEventListener('pointerup', () => {
+    gtrace('up@' + (Date.now() - downAt) + 'ms/' + Math.round(travel) + 'px');
     clearTimeout(timer);
     if (!swiping) return;
     if (dx > THRESH())       { if (Date.now() >= lockUntil) checkoff(it); else springBack(); }
@@ -1822,9 +1904,19 @@ function attachGestures(li, it) {
     swiping = false;
   });
   li.addEventListener('click', () => {
+    gtrace('click' + (longFired ? '(ignored)' : ''));
     if (armed && !longFired && !swiping && Date.now() >= lockUntil) checkoff(it);
     armed = false;
   });
+}
+
+/* What the last touch on an item actually produced, shown in ⚙️. Long-press has
+ * now been "fixed" twice on a theory about which event Android sends; this is
+ * the evidence, gathered on the phone that has the problem. */
+let gestureLog = [];
+function gtrace(ev) {
+  gestureLog.push(ev);
+  if (gestureLog.length > 10) gestureLog.shift();
 }
 
 function skipItem(it) {
