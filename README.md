@@ -145,6 +145,12 @@ pick from OpenStreetMap. The row then carries an address and an `osm_id`.
 Adding by name with ＋ still works and is unchanged — a shop OSM has never
 heard of stays first class.
 
+**Or paste a link.** A shop OpenStreetMap has never heard of — a branch that
+opened last month — can be added from a Google Maps place link or the chain's
+own store page: 🏬 → paste it in the 📎 box. The pin is reverse-geocoded, the
+chain's branch is matched and verified against it, and one tap adds the store
+pinned and priced.
+
 **Link its prices.** A pinned store shows *Link prices*, which resolves it to
 the chain's own branch number (Wegmans Princeton = 93, Whole Foods Princeton =
 10187, ShopRite Lawrenceville = 500). Three chains have an adapter — **Wegmans,

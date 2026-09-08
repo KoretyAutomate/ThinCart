@@ -81,6 +81,13 @@
   #viewtoggle button { flex:1; border:none; background:none; padding:8px 10px;
     font:inherit; font-size:.82rem; font-weight:600; color:var(--muted); cursor:pointer; }
   #viewtoggle button.sel { background:var(--green); color:#fff; }
+  #gpsguess { display:none; align-items:center; gap:8px; margin:8px 12px 0; padding:9px 12px;
+    background:#e9f5ec; border:1.5px solid #9ec7ab; border-radius:12px; font-size:.9rem; }
+  #gpsguess.on { display:flex; }
+  #gpsguess b { flex:1; font-weight:600; }
+  #gpsguess button { border:none; border-radius:999px; padding:7px 14px; font-weight:700;
+    font-size:.85rem; cursor:pointer; background:#fff; color:var(--ink); }
+  #gpsguess button.yes { background:var(--green); color:#fff; }
   #aislenote { display:none; font-size:.78rem; color:var(--muted); margin:0 4px 10px; }
   #aislenote.on { display:block; }
   ul#list { list-style:none; margin:0; padding:0; }
@@ -211,10 +218,10 @@
     border-radius:10px; font-size:.95rem; outline:none; min-width:0; }
   #newstore-row button { background:var(--green); color:#fff; border:none;
     border-radius:10px; padding:0 16px; font-size:1.1rem; cursor:pointer; }
-  #storesearch-row { display:flex; gap:8px; margin-top:8px; }
-  #storesearch-row input { flex:1; padding:11px 12px; border:1.5px solid #d4dcd4;
+  #storesearch-row, #storelink-row { display:flex; gap:8px; margin-top:8px; }
+  #storesearch-row input, #storelink-row input { flex:1; padding:11px 12px; border:1.5px solid #d4dcd4;
     border-radius:10px; font-size:.95rem; outline:none; min-width:0; }
-  #storesearch-row button { background:#eef2ec; color:var(--ink); border:1.5px solid #d4dcd4;
+  #storesearch-row button, #storelink-row button { background:#eef2ec; color:var(--ink); border:1.5px solid #d4dcd4;
     border-radius:10px; padding:0 16px; font-size:1.05rem; cursor:pointer; }
   #storesearch-results:not(:empty) { margin-top:10px; border:1.5px solid #d4dcd4;
     border-radius:12px; overflow:hidden; background:var(--card); }
@@ -222,6 +229,8 @@
   .osmhit:last-child { border-bottom:none; }
   .osmhit:active { background:#eef2ec; }
   .osmhit b { display:block; font-size:.95rem; }
+  .osmhit i { display:block; font-style:normal; color:var(--green-dark); font-size:.78rem; margin-top:2px; }
+  .osmhit i:empty { display:none; }
   .osmhit span { display:block; color:var(--muted); font-size:.78rem; margin-top:2px;
     overflow-wrap:anywhere; }
   .osmnote { padding:11px 13px; color:var(--muted); font-size:.83rem; }
@@ -416,6 +425,12 @@
   <div id="cands"></div>
 </form>
 
+<div id="gpsguess">
+  <b id="gpsguess-text"></b>
+  <button class="yes" id="gpsguess-yes"></button>
+  <button id="gpsguess-no"></button>
+</div>
+
 <div id="tray">
   <div class="tray-label" id="tray-label" role="button"></div>
   <div id="chips"></div>
@@ -553,6 +568,10 @@
     <div id="storesearch-row">
       <input id="storesearch-area" maxlength="80">
       <button id="storesearch-go" aria-label="Find the exact store">🔍</button>
+    </div>
+    <div id="storelink-row">
+      <input id="storelink" maxlength="800" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false">
+      <button id="storelink-go" aria-label="Add from a link">📎</button>
     </div>
     <div id="storesearch-results"></div>
     <p class="stores-note" id="stores-note"></p>
@@ -693,11 +712,18 @@ const STR = {
     new_store_ph:'Add store… (OK Store, …)',
     area_ph:'…in which town? (for 🔍)',
     osm_searching:'Searching OpenStreetMap…',
-    osm_none:'No shop of that name found there. The ＋ button still adds it by name.',
+    osm_none:'No shop of that name found there. Paste a Google Maps link or the store\'s own page below (📎), or ＋ adds it by name.',
+    link_ph:'…or paste a Google Maps / store page link (📎)',
+    link_reading:'Reading the link…',
+    link_bad:'That link names no shop. A Google Maps place link, or the chain\'s own store page, works.',
+    link_priced:(c,n)=>`💲 prices & aisles: ${c} store ${n}`,
+    link_unpriced:r=>`no prices: ${r}`,
     osm_off:'Store search is off on the server (THINCART_LOOKUP).',
     osm_fail:'Could not reach OpenStreetMap. The ＋ button still adds it by name.',
     osm_need:'Type a store name above first.',
     view_cat:'By category', view_aisle:'By aisle',
+    aisle_at:s=>`🏬 aisles at ${s}`,
+    gps_guess:s=>`📍 Are you at ${s}?`, gps_yes:'Yes', gps_no:'Not here',
     aisle_loading:s=>`Finding aisles at ${s}…`,
     aisle_unknown:'🤷 Aisle unknown',
     aisle_approx:'matched by name, not your usual product',
@@ -802,11 +828,18 @@ const STR = {
     new_store_ph:'店舗を追加… (OKストア など)',
     area_ph:'どの街？（🔍 用）',
     osm_searching:'OpenStreetMap を検索中…',
-    osm_none:'その名前の店は見つかりませんでした。＋ で名前だけ登録もできます。',
+    osm_none:'その名前の店は見つかりませんでした。下に Google マップのリンクか店舗ページのリンクを貼るか（📎）、＋ で名前だけ登録もできます。',
+    link_ph:'…または Google マップ / 店舗ページのリンクを貼る（📎）',
+    link_reading:'リンクを読み取り中…',
+    link_bad:'そのリンクからは店舗を特定できません。Google マップの地点リンクか、チェーンの店舗ページなら使えます。',
+    link_priced:(c,n)=>`💲 価格・売り場: ${c} 店舗 ${n}`,
+    link_unpriced:r=>`価格なし: ${r}`,
     osm_off:'サーバー側で店舗検索が無効です（THINCART_LOOKUP）。',
     osm_fail:'OpenStreetMap に接続できません。＋ で名前だけ登録もできます。',
     osm_need:'先に上の欄に店名を入力してください。',
     view_cat:'カテゴリ順', view_aisle:'売り場順',
+    aisle_at:s=>`🏬 ${s} の売り場順`,
+    gps_guess:s=>`📍 いま ${s} にいますか？`, gps_yes:'はい', gps_no:'違う',
     aisle_loading:s=>`${s} の売り場を検索中…`,
     aisle_unknown:'🤷 売り場不明',
     aisle_approx:'名前が近い商品の売り場です',
@@ -907,6 +940,7 @@ function applyLang() {
   $('reload-btn').textContent = T().reload_btn;
   $('newstore-name').placeholder = T().new_store_ph;
   $('storesearch-area').placeholder = T().area_ph;
+  $('storelink').placeholder = T().link_ph;
 }
 
 let catalog = JSON.parse(localStorage.getItem('pc_catalog') || '[]');
@@ -1579,39 +1613,78 @@ async function searchStores() {
     d.innerHTML = '<b></b><span></span>';
     d.querySelector('b').textContent = '🏬 ' + h.name;
     d.querySelector('span').textContent = h.address || '';
-    d.onclick = () => {
-      // Two branches of one chain share a name, and stores are keyed by their
-      // canonical name — so adding "Wegmans" twice would collapse them into one
-      // row, overwriting the first branch's address and its price link. That
-      // matters most for exactly the case this feature exists for: comparing
-      // the same product at two branches. Disambiguate with the town, and only
-      // when a DIFFERENT real place is already using that name.
-      // canon() is the twin of the server's db.canonical(), which is what
-      // stores are actually keyed by — a free-text "wegmans" and an OSM
-      // "Wegmans" are one row there, and a strict === here would miss it.
-      const clash = (base.stores || []).some(s =>
-        canon(s.name) === canon(h.name) && s.osm_id && s.osm_id !== h.osm_id);
-      // A clash MUST produce a different name, so fall through to whatever is
-      // available: the town reads best, the street still reads like an address,
-      // and the osm_id is ugly but always there. Leaving the name unchanged
-      // would let the server's canonical-name upsert overwrite the other branch
-      // — which is the whole bug this exists to prevent.
-      const tag = h.town
-        || (h.address || '').split(',')[0].trim()
-        || h.osm_id;
-      const name = clash ? `${h.name} (${tag})` : h.name;
-      enqueue({
-        type:'store_upsert', store_name: name,
-        store_osm_id: h.osm_id, store_address: h.address || '',
-        store_lat: h.lat, store_lon: h.lon, store_brand: h.brand || '',
-      });
-      $('newstore-name').value = '';
-      $('storesearch-area').value = '';
-      box.innerHTML = '';
-    };
+    d.onclick = () => addPinnedHit(h);
     box.appendChild(d);
   }
 }
+
+/* One tap on a found shop — from OpenStreetMap or from a pasted link — adds
+ * it as a pinned row. A link hit may already carry its chain link. */
+function addPinnedHit(h) {
+  // Two branches of one chain share a name, and stores are keyed by their
+  // canonical name — so adding "Wegmans" twice would collapse them into one
+  // row, overwriting the first branch's address and its price link. That
+  // matters most for exactly the case this feature exists for: comparing
+  // the same product at two branches. Disambiguate with the town, and only
+  // when a DIFFERENT real place is already using that name.
+  // canon() is the twin of the server's db.canonical(), which is what
+  // stores are actually keyed by — a free-text "wegmans" and an OSM
+  // "Wegmans" are one row there, and a strict === here would miss it.
+  const clash = (base.stores || []).some(s =>
+    canon(s.name) === canon(h.name) && s.osm_id && s.osm_id !== h.osm_id);
+  // A clash MUST produce a different name, so fall through to whatever is
+  // available: the town reads best, the street still reads like an address,
+  // and the osm_id is ugly but always there. Leaving the name unchanged
+  // would let the server's canonical-name upsert overwrite the other branch
+  // — which is the whole bug this exists to prevent.
+  const tag = h.town
+    || (h.address || '').split(',')[0].trim()
+    || h.osm_id;
+  const name = clash ? `${h.name} (${tag})` : h.name;
+  const link = h.chain_store_id ? { store_chain: h.chain, store_chain_id: h.chain_store_id } : {};
+  enqueue({
+    type:'store_upsert', store_name: name,
+    store_osm_id: h.osm_id, store_address: h.address || '',
+    store_lat: h.lat, store_lon: h.lon, store_brand: h.brand || '', ...link,
+  });
+  $('newstore-name').value = '';
+  $('storesearch-area').value = '';
+  $('storelink').value = '';
+  $('storesearch-results').innerHTML = '';
+}
+
+/* A pasted Google Maps pin or a chain's store page: for the shop the map has
+ * never heard of. The server turns it into one hit in the same shape as an
+ * OpenStreetMap result, with the price link already resolved where it could
+ * be, and it is offered the same way — one card, one tap. */
+async function addFromLink() {
+  const url = $('storelink').value.trim();
+  if (!url) return;
+  osmNote(T().link_reading);
+  let d;
+  try {
+    const res = await fetch('/api/stores/from_link?url=' + encodeURIComponent(url));
+    if (res.status === 503) { osmNote(await why503(res, T().osm_off, T().osm_fail)); return; }
+    if (!res.ok) { osmNote(T().link_bad); return; }
+    d = await res.json();
+  } catch (e) { osmNote(T().osm_fail); return; }
+  const h = d && d.result;
+  if (!h) { osmNote(T().link_bad + (d && d.reason ? ' (' + d.reason + ')' : '')); return; }
+  const box = $('storesearch-results');
+  box.innerHTML = '';
+  const card = document.createElement('div');
+  card.className = 'osmhit';
+  card.innerHTML = '<b></b><span></span><i></i>';
+  card.querySelector('b').textContent = '🏬 ' + h.name;
+  card.querySelector('span').textContent = h.address || '';
+  card.querySelector('i').textContent = h.chain_store_id
+    ? T().link_priced(h.brand || h.chain, h.chain_store_id)
+    : (h.link_reason ? T().link_unpriced(h.link_reason) : '');
+  card.onclick = () => addPinnedHit(h);
+  box.appendChild(card);
+}
+$('storelink-go').onclick = addFromLink;
+$('storelink').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addFromLink(); } });
 
 window.openSheet = it => openSheet(it);
 
@@ -1643,7 +1716,8 @@ function render() {
     // Said once, above the list, rather than on every row: the aisle is
     // probably right, the certainty about WHICH product is not.
     const n = $('aislenote');
-    n.textContent = (aisleMsg ? aisleMsg + ' · ' : '') + '≈ ' + T().aisle_approx;
+    n.textContent = [currentStore() ? T().aisle_at(currentStore()) : '', aisleMsg,
+                     '≈ ' + T().aisle_approx].filter(Boolean).join(' · ');
     n.classList.add('on');
   }
   let lastKey = undefined;
@@ -1729,6 +1803,16 @@ function attachGestures(li, it) {
     }
   });
   li.addEventListener('pointercancel', () => { disarm(); if (swiping) springBack(); swiping = false; });
+  /* Android's WebView (and Chrome) turns a held touch into a long-press
+   * gesture at about 500 ms and CANCELS the pointer stream when it does — so
+   * the 600 ms timer above was disarmed a hair before it could fire, and the
+   * editor was unreachable from the phone that matters. The same gesture
+   * announces itself as a contextmenu event, which is the reliable signal on
+   * Chromium; the timer stays for iOS, which fires no contextmenu on touch. */
+  li.addEventListener('contextmenu', e => {
+    e.preventDefault();
+    if (armed && !swiping && !longFired) { longFired = true; disarm(); openSheet(it); }
+  });
   li.addEventListener('pointerup', () => {
     clearTimeout(timer);
     if (!swiping) return;
@@ -1741,7 +1825,6 @@ function attachGestures(li, it) {
     if (armed && !longFired && !swiping && Date.now() >= lockUntil) checkoff(it);
     armed = false;
   });
-  li.addEventListener('contextmenu', e => e.preventDefault());
 }
 
 function skipItem(it) {
@@ -2205,7 +2288,10 @@ function renderViewToggle() {
   const m = viewMode();
   $('view-cat').classList.toggle('sel', m === 'cat');
   $('view-aisle').classList.toggle('sel', m === 'aisle');
-  const note = on && m === 'aisle' ? aisleMsg : '';
+  // WHOSE aisles, always — the order on screen is one branch's shelf plan,
+  // and a list sorted for the wrong shop reads exactly like one sorted right.
+  const at = on && m === 'aisle' && currentStore() ? T().aisle_at(currentStore()) : '';
+  const note = [at, on && m === 'aisle' ? aisleMsg : ''].filter(Boolean).join(' · ');
   $('aislenote').textContent = note;
   $('aislenote').classList.toggle('on', !!note);
 }
@@ -2227,6 +2313,55 @@ function currentStore() {
 const setCurrentStore = name => name
   ? localStorage.setItem(AT_KEY, JSON.stringify({ name, at: Date.now() }))
   : localStorage.removeItem(AT_KEY);
+
+/* ============ "I'm at…" guessed from where the phone is ==================
+ * Setting the store by hand in 🏬 is a step nobody remembers in a car park.
+ * When no store is set, the phone's position is compared with the pinned
+ * stores and the nearest one within a car park's width is OFFERED — never
+ * set silently, because a wrong "I'm at" stamps every check-off with the
+ * wrong shop and re-sorts the list for the wrong aisles. "Not here" is
+ * remembered for the session so the question is asked once, not per render. */
+const GPS_DISMISS = 'pc_gps_no', GPS_RADIUS_KM = 0.3;
+function kmBetween(lat1, lon1, lat2, lon2) {
+  const r = Math.PI / 180, dp = (lat2 - lat1) * r, dl = (lon2 - lon1) * r;
+  const a = Math.sin(dp / 2) ** 2 + Math.cos(lat1 * r) * Math.cos(lat2 * r) * Math.sin(dl / 2) ** 2;
+  return 2 * 6371 * Math.asin(Math.sqrt(a));
+}
+function nearestStore(lat, lon) {
+  let best = null, bestKm = GPS_RADIUS_KM;
+  for (const s of (base.stores || [])) {
+    if (s.lat == null || s.lon == null) continue;
+    const km = kmBetween(lat, lon, s.lat, s.lon);
+    if (km <= bestKm) { best = s; bestKm = km; }
+  }
+  return best;
+}
+function guessStoreByGps() {
+  if (!navigator.geolocation || currentStore()) return;
+  if (!(base.stores || []).some(s => s.lat != null)) return;
+  navigator.geolocation.getCurrentPosition(pos => {
+    const s = nearestStore(pos.coords.latitude, pos.coords.longitude);
+    if (!s) return;
+    let no = ''; try { no = sessionStorage.getItem(GPS_DISMISS) || ''; } catch (e) {}
+    if (no === s.name) return;
+    $('gpsguess-text').textContent = T().gps_guess(s.name);
+    $('gpsguess-yes').textContent = T().gps_yes;
+    $('gpsguess-no').textContent = T().gps_no;
+    $('gpsguess-yes').onclick = () => {
+      setCurrentStore(s.name);
+      aisleMap = null; aisleFor = null; aisleMsg = '';
+      $('gpsguess').classList.remove('on');
+      if (viewMode() === 'aisle') loadAisles(); else render();
+    };
+    $('gpsguess-no').onclick = () => {
+      try { sessionStorage.setItem(GPS_DISMISS, s.name); } catch (e) {}
+      $('gpsguess').classList.remove('on');
+    };
+    $('gpsguess').classList.add('on');
+  }, () => { /* refused or unavailable: the 🏬 selector is still there */ },
+  { timeout: 8000, maximumAge: 120000 });
+}
+window.guessStoreByGps = guessStoreByGps;
 
 function checkoff(it) {
   lockUntil = Date.now() + 350;
@@ -2410,7 +2545,7 @@ function connectWS() {
 }
 
 /* phone unlock / tab foreground / network back — the NORMAL in-store path */
-const wake = () => { connectWS(); flush(); };
+const wake = () => { connectWS(); flush(); guessStoreByGps(); };
 document.addEventListener('visibilitychange', () => { if (!document.hidden) wake(); });
 window.addEventListener('online', wake);
 window.addEventListener('pageshow', wake);
@@ -2510,6 +2645,7 @@ function boot() {
   connectWS();
   flush();
   loadCatalog();
+  guessStoreByGps();
   // Resume an aisle walk across an app restart — the phone locks constantly
   // mid-shop, and coming back to the category view every time would make the
   // toggle useless exactly when it matters.

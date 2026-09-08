@@ -128,6 +128,9 @@ const AISLES_OK = {
     // Row text carries the item's icon, so compare on the names it ends with.
     const names = b.rows().map(s => s.split(" ").pop());
     check("items follow their groups", names.join(",") === "bread,rice,milk", b.rows());
+    // Whose aisles these are — a list sorted for the wrong shop reads exactly
+    // like one sorted right, so the store is named above it, always.
+    check("the note says whose aisles these are", /Wegmans/.test(b.note()), b.note());
   }
 
   console.log("\n--- 3. unknown vs never-asked are different groups --------------");

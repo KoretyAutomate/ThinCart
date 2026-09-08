@@ -44,4 +44,10 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- "I'm at…" guessed from where the phone is: the served page asks the
+         WebView for a position, and the WebView only asks the person once
+         the app has declared it may. Coarse is enough to tell shops apart;
+         fine is what the WebView's geolocation actually requests. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 </manifest>

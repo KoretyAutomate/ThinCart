@@ -61,6 +61,9 @@ MODE = os.environ.get("THINCART_LOOKUP", "off").strip().lower()
 NOMINATIM_URL = os.environ.get(
     "THINCART_NOMINATIM_URL", "https://nominatim.openstreetmap.org/search"
 ).strip()
+NOMINATIM_REVERSE_URL = os.environ.get(
+    "THINCART_NOMINATIM_REVERSE_URL", "https://nominatim.openstreetmap.org/reverse"
+).strip()
 # Nominatim's usage policy requires an identifying User-Agent and at most one
 # request a second. Both are conditions of being allowed to use it at all.
 USER_AGENT = "ThinCart/1.0 (self-hosted household shopping list; +https://github.com/KoretyAutomate/ThinCart)"
@@ -169,8 +172,10 @@ def cache_put(kind: str, key: str, payload: Any) -> None:
     _conn.commit()
 
 
-async def _nominatim(params: dict[str, str]) -> list[dict] | None:
-    """One rate-limited Nominatim call. None on any failure — never a guess."""
+async def _nominatim(params: dict[str, str], url: str = "") -> list[dict] | None:
+    """One rate-limited Nominatim call. None on any failure — never a guess.
+    `url` selects the endpoint; /reverse answers with one place, and it comes
+    back as a one-item list so every caller reads the same shape."""
     global _nominatim_last
     async with _nominatim_lock:
         wait = NOMINATIM_MIN_INTERVAL - (asyncio.get_running_loop().time() - _nominatim_last)
@@ -178,7 +183,7 @@ async def _nominatim(params: dict[str, str]) -> list[dict] | None:
             await asyncio.sleep(wait)
         try:
             async with httpx.AsyncClient(timeout=15) as client:
-                r = await client.get(NOMINATIM_URL, params=params, headers={"User-Agent": USER_AGENT})
+                r = await client.get(url or NOMINATIM_URL, params=params, headers={"User-Agent": USER_AGENT})
                 r.raise_for_status()
                 data = r.json()
         except Exception as e:
@@ -186,7 +191,37 @@ async def _nominatim(params: dict[str, str]) -> list[dict] | None:
             return None
         finally:
             _nominatim_last = asyncio.get_running_loop().time()
+    if isinstance(data, dict):
+        return [data] if "osm_id" in data else None
     return data if isinstance(data, list) else None
+
+
+async def reverse_geocode(lat: float, lon: float) -> dict | None:
+    """The place under a pin, in our store shape (address, town, postcode)."""
+    raw = await _nominatim({"lat": str(lat), "lon": str(lon), "format": "jsonv2", "addressdetails": "1",
+                            "zoom": "18"}, url=NOMINATIM_REVERSE_URL)
+    out = osm.parse_store_results(raw) if raw else []
+    if not out or not raw:
+        return None
+    # Under a pin there is usually no named shop, just a building or a road;
+    # the parser would then take the house number for a name and cut it off
+    # the address. Keep the whole address and claim no name.
+    if not raw[0].get("name"):
+        out[0]["name"] = ""
+        out[0]["address"] = (raw[0].get("display_name") or "").strip()
+    out[0]["postcode"] = str((raw[0].get("address") or {}).get("postcode") or "")
+    return out[0]
+
+
+async def follow_link(url: str) -> str | None:
+    """Where a short link lands. Google's map links are only a redirect."""
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            r = await client.get(url, headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Chrome/126"})
+            return str(r.url)
+    except Exception as e:
+        log.warning("could not follow link: %s", e)
+        return None
 
 
 # --- Wegmans adapter ---------------------------------------------------------

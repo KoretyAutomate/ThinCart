@@ -50,7 +50,7 @@ const stateOf = (stores, revision = 1) =>
  * actually applies the delete — so /api/state afterwards reflects it, the way
  * the DGX would.
  */
-async function boot(stores, { linkReply = null } = {}) {
+async function boot(stores, { linkReply = null, routes = {} } = {}) {
   const dom = new JSDOM(HTML, { runScripts: "outside-only", url: "https://s.ts.net/" });
   const w = dom.window;
   w.localStorage.setItem("pc_name", "tester");
@@ -74,6 +74,8 @@ async function boot(stores, { linkReply = null } = {}) {
                        : Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
     if (u.includes("/api/state"))
       return Promise.resolve({ ok: true, status: 200, json: async () => stateOf(live, rev) });
+    for (const [frag, body] of Object.entries(routes))
+      if (u.includes(frag)) return Promise.resolve({ ok: true, status: 200, json: async () => body });
     return Promise.resolve({ ok: true, status: 200, json: async () => ({}), text: async () => "" });
   };
   w.confirm = () => true;
@@ -274,6 +276,40 @@ async function boot(stores, { linkReply = null } = {}) {
       asked.length === 1 && /Skillman, NJ 08558/.test(asked[0]), asked);
     check("declined: nothing was written", !b.sent.some(o => o.type === "store_upsert" && o.store_chain_id), b.sent);
     check("and the button is back, with a way forward", !!b.linkBtn() && /map/.test(b.linkText()), b.linkText());
+  }
+
+  console.log("\n--- 8c. a pasted link becomes a pinned, priced store in one tap ----");
+  {
+    /* The Montgomery Whole Foods: OpenStreetMap has never heard of it, so the
+     * pin search cannot return it. A Google Maps link or the chain's own store
+     * page names it exactly, and the server hands back one hit with the price
+     * link already resolved. Same card, same tap, as an OSM result. */
+    const hit = { name: "Whole Foods Market", address: "1200, State Road, Montgomery Township, NJ, 08558",
+                  lat: 40.402224, lon: -74.652613, town: "Montgomery Township", brand: "Whole Foods",
+                  osm_id: "geo:40.402224,-74.652613", chain: "wholefoods", chain_store_id: "10738", link_reason: "" };
+    const b = await boot([], { routes: { "/api/stores/from_link": { result: hit, reason: "" } } });
+    b.doc.getElementById("storelink").value = "https://maps.app.goo.gl/AbCdEf";
+    b.doc.getElementById("storelink-go").click();
+    await settle();
+    const card = b.doc.querySelector("#storesearch-results .osmhit");
+    check("one card, the shop the link names", card && /Whole Foods Market/.test(card.textContent), card && card.textContent);
+    check("and it says prices are already linked", card && /store 10738/.test(card.textContent), card && card.textContent);
+    card.click();
+    await settle();
+    const up = b.sent.find(o => o.type === "store_upsert");
+    check("one tap adds it pinned AND linked",
+      up && up.store_osm_id === "geo:40.402224,-74.652613" && up.store_lat === 40.402224
+        && up.store_chain === "wholefoods" && up.store_chain_id === "10738", up);
+    check("the link box is cleared", b.doc.getElementById("storelink").value === "");
+  }
+  {
+    const b = await boot([], { routes: { "/api/stores/from_link": { result: null, reason: "not a link this can read — a Google Maps place link, or a chain's store page" } } });
+    b.doc.getElementById("storelink").value = "https://example.com/x";
+    b.doc.getElementById("storelink-go").click();
+    await settle();
+    const note = b.doc.querySelector("#storesearch-results").textContent;
+    check("a link that names no shop says so, and what would work", /Google Maps/.test(note), note);
+    check("and nothing was added", !b.sent.some(o => o.type === "store_upsert"), b.sent);
   }
 
   console.log("\n--- 9. a link completing mid-sentence does not eat the note -------");
