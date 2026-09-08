@@ -1980,3 +1980,46 @@ updates are one tap inside the app: the OutfitAdvisor channel, ported.
   a build that forgets to raise it is invisible to every phone.
 
 Suites: **243 python**, 133 web, **89 launcher**.
+
+### 2026-09-08 — long-press, third attempt: stop identifying the signal
+
+The owner installed v1.2 and long-press to edit was still dead. Twice now it was
+"fixed" on a theory about which event Android sends — a 600 ms timer (works in
+a browser, not on the phone), then a `contextmenu` listener (a guess about
+Chromium). Guessing a third time was not worth another round trip.
+
+So the rule changed: **accept every signal that means a held finger, and record
+what actually arrives.** `fireLong(why)` is the single way in, reached by
+
+- the 600 ms timer, where nothing interrupts (browsers, iOS);
+- `contextmenu`, which Chromium raises for the gesture;
+- **`pointercancel` on a finger that has not moved, ≥350 ms after touch-down** —
+  the platform taking the gesture over, which is what a long-press IS on a
+  WebView that raises no contextmenu. This is the case both earlier fixes
+  missed, and the one the phone most likely hits.
+
+A scroll cancels the pointer too, so the two are told apart by STILLNESS —
+the finger must have been travelling nowhere for a quarter-second and have
+covered under 8 px of ground. The gate caught two wrong versions of that test
+and both are now regression cases:
+
+- *elapsed time alone* — pause half a second and THEN begin to scroll, and with
+  `touch-action: pan-y` the pan cancels before the movement passes the swipe
+  threshold, so a real scroll looked exactly like a hold;
+- *displacement from the first point* — a pan creeping a pixel at a time never
+  grows its displacement by enough to register as movement, and a finger moving
+  back toward where it started shrinks it. Travel is now accumulated from the
+  PREVIOUS point, so both count. `app/tests/longpress.test.js` pins all three entry points, the
+scroll that must not open it, opening exactly once, and a plain tap still
+checking off.
+
+**And the evidence, so a fourth guess is unnecessary.** ⚙️ now shows the last
+touch on an item as the event sequence it produced —
+`down → cancel@512ms/2px → OPEN:cancel` — so the phone that disagrees can say
+what it actually did. ⚙️ also gained a **location check**: standing at home,
+"no store offered" and "location never read" look identical, and only the
+second is a fault. It names the nearest pinned store and its distance
+("Nearest pinned store: Wegmans, 4.2 km away — too far to offer"), which
+distinguishes them in one tap.
+
+Served page only — no APK. Suites: 243 python, **169 web**, 89 launcher.
