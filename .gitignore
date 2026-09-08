@@ -28,3 +28,5 @@ mobile/node_modules/
 # run, and it had no tests until then. Its deps are install output, not source.
 app/node_modules/
 *.apk
+# published APKs for the in-app updater (server/publish_apk.py)
+dist/

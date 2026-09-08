@@ -1940,3 +1940,43 @@ history follows. If "most recent wins" is wanted instead of "most often", that
 is a one-line rule change, deliberately not made without asking.
 
 Suites: **238 python**, 133 web, 52 launcher.
+
+### 2026-09-07 (night) — purchase-history store tags cleared; in-app updates
+
+**「購入履歴がそもそも間違えている筈です。購入履歴の店舗情報のタグ付けは削除して下さい。」**
+Done, on the live DB, after `.backup` to `~/backups/thincart/pre-untag-*.db`:
+`UPDATE purchase_events SET store_id = NULL` — 34 rows, all 240 purchases
+kept. The "usual store" recommendation now has no history to draw on; the
+nine explicit per-item pins were left in place at the owner's choice. How the
+tags were wrong is worth knowing: "I'm at ⟨store⟩" lives for six hours, so a
+check-off at home the same evening was stamped with the morning's shop.
+
+**「APKのインストールではなく更新で対応できませんか？」** For a permission,
+no — Android reads it from the APK, and only an install replaces an APK — so
+the location permission needs one more sideload. But from that build on,
+updates are one tap inside the app: the OutfitAdvisor channel, ported.
+
+- `server/updates.py` — `GET /version` (with the CORS header the launcher's
+  own origin needs) and `GET /apk`, from `dist/` (gitignored), path-traversal
+  refused. `server/publish_apk.py` reads versionCode/versionName out of the
+  APK's own binary manifest, refuses any APK not signed with the persistent
+  key, and writes `dist/version.json` with size and sha256.
+  `server/publish_latest_apk.sh` fetches the newest successful CI build and
+  publishes it — the one command to run after a merge that touched `mobile/`.
+- `AppUpdatePlugin.java` — a Java port of OutfitAdvisor's Kotlin plugin (this
+  shell is Java-only): `current()` and `install({url, sha256, size})`, which
+  downloads off the main thread, checks size and checksum, and hands the file
+  to the system installer through the FileProvider already in the manifest.
+  `REQUEST_INSTALL_PACKAGES` declared; Android asks the person once.
+- The launcher checks `/version` after the probe and OFFERS a newer build
+  before handing over — "Update available — v1.2 · you're on v1.1 · 3.4 MB ·
+  your list, server address and settings are kept" · Install / Later. Later
+  holds for the run. Never a gate: a slow, missing or unreachable `/version`
+  opens the app as usual. The settings screen names the installed build and
+  has "Check for an update". It lives in the launcher because the native
+  bridge is injected for the bundled page only; the tailnet page cannot reach
+  the installer.
+- versionCode 2 → 3, versionName 1.1 → 1.2. The updater compares versionCode;
+  a build that forgets to raise it is invisible to every phone.
+
+Suites: **243 python**, 133 web, **89 launcher**.

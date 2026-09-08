@@ -92,12 +92,25 @@
     </div>
   </section>
 
+  <!-- Update: the DGX is publishing a newer build than this one -->
+  <section id="screen-update" class="screen">
+    <div class="card">
+      <p class="current"><b id="update-title">Update available</b></p>
+      <p class="hint" id="update-sub"></p>
+      <p class="err" id="update-err"></p>
+      <button id="update-install">Install update</button>
+      <button id="update-later" class="ghost">Later</button>
+    </div>
+  </section>
+
   <!-- Settings / retry: shown when the probe fails, or on returning with Back -->
   <section id="screen-settings" class="screen">
     <div class="card">
       <p class="current">Server: <b id="current-url"></b></p>
+      <p class="current" id="version-line"></p>
       <p class="err" id="settings-err"></p>
       <button id="open">Open ThinCart</button>
+      <button id="update-check" class="ghost">Check for an update</button>
       <button id="fresh" class="ghost">Force a fresh copy</button>
       <button id="change" class="ghost">Use a different server</button>
     </div>
@@ -122,6 +135,11 @@ var STORE_KEY = "thincart.server";      // localStorage — survives app restart
 var LAUNCH_KEY = "thincart.launched";   // sessionStorage — cleared on cold start
 var PROBE_TIMEOUT_MS = 8000;
 var HANDOFF_GRACE_MS = 6000;   // still on this page after a launch => something went wrong
+var UPDATE_SKIP_KEY = "thincart.updateSkip";   // sessionStorage — "Later" holds for this run
+var VERSION_TIMEOUT_MS = 5000;
+/* The native bridge. Present only inside the APK — in a browser this page has
+ * no Capacitor and every update path below is a no-op. */
+var Plugins = (window.Capacitor && window.Capacitor.Plugins) || {};
 
 /* Turn what a human types into a URL to load, or null if it cannot be one.
  * Bare IPv4 means the plain-HTTP dev address (100.x.x.x:8123); a name means the
@@ -195,12 +213,96 @@ window.probeServer = probeServer;
 window.openServer = openServer;
 window.launchUrl = launchUrl;
 
+/* ---- in-app updates ------------------------------------------------------
+ * The DGX publishes a build at GET /version (scripts/publish_apk.py). If its
+ * versionCode beats the running one, the install is OFFERED before the handoff.
+ * Android keeps the saved server address and any queued ops across an update
+ * as long as the signing key is unchanged — which the CI gate enforces — so
+ * this never costs anything. It lives here, in the bundled page, because the
+ * native bridge is injected for this origin only; the tailnet page the app
+ * hands over to cannot reach the installer.
+ *
+ * Never a gate: a /version that is slow, missing or unreachable means "no
+ * update", and the app opens as usual. */
+function checkUpdate(url, fetchImpl) {
+  if (!Plugins.AppUpdate) return Promise.resolve(null);
+  var f = fetchImpl || window.fetch.bind(window);
+  var cur;
+  return Plugins.AppUpdate.current().then(function (c) {
+    cur = c;
+    var ctl = typeof AbortController === "function" ? new AbortController() : null;
+    var timer = setTimeout(function () { if (ctl) ctl.abort(); }, VERSION_TIMEOUT_MS);
+    var opts = { method: "GET", mode: "cors", cache: "no-store" };
+    if (ctl) opts.signal = ctl.signal;
+    return f(url + "/version", opts).then(function (r) {
+      clearTimeout(timer);
+      return r && r.ok ? r.json() : null;
+    });
+  }).then(function (v) {
+    if (!v || !cur || !(Number(v.versionCode) > Number(cur.versionCode))) return null;
+    return { available: v, current: cur };
+  }).catch(function () { return null; });
+}
+window.checkUpdate = checkUpdate;
+
+function updateSkipped(code) {
+  try { return sessionStorage.getItem(UPDATE_SKIP_KEY) === String(code); } catch (e) { return false; }
+}
+
+function showUpdate(u, url, onLater) {
+  var v = u.available, cur = u.current;
+  $("update-title").textContent = "Update available — v" + v.versionName;
+  $("update-sub").textContent = "You're on v" + cur.versionName
+    + (v.size ? " · " + (v.size / 1e6).toFixed(1) + " MB" : "")
+    + " · your list, server address and settings are kept."
+    + (v.notes ? "\n\n" + v.notes : "");
+  setErr($("update-err"), cur.canInstall === false
+    ? "Android will first ask you to allow installs from this app — a one-time toggle." : "");
+  $("update-install").onclick = function () {
+    $("update-install").disabled = true;
+    setErr($("update-err"), "Downloading…");
+    Plugins.AppUpdate.install({ url: url + "/apk", sha256: v.sha256 || "", size: v.size || 0 })
+      .then(function (r) {
+        if (r && r.status === "needs-permission") {
+          setErr($("update-err"), "Allow installs from ThinCart in the screen that just opened, "
+            + "then come back and tap Install again.");
+        } else {
+          setErr($("update-err"), "The installer is open. When it finishes, open ThinCart again.");
+        }
+        $("update-install").disabled = false;
+      })
+      .catch(function (e) {
+        setErr($("update-err"), "Update failed: " + ((e && e.message) || "download error") + ". Nothing was changed.");
+        $("update-install").disabled = false;
+      });
+  };
+  $("update-later").onclick = function () {
+    try { sessionStorage.setItem(UPDATE_SKIP_KEY, String(v.versionCode)); } catch (e) { /* this run only */ }
+    onLater();
+  };
+  show("update");
+}
+
+/* The settings screen says which build this is and whether a newer one waits. */
+function renderVersion(url) {
+  var line = $("version-line");
+  if (!Plugins.AppUpdate) { line.textContent = ""; return; }
+  Plugins.AppUpdate.current().then(function (c) {
+    line.textContent = "App v" + c.versionName;
+    if (!url) return;
+    return checkUpdate(url).then(function (u) {
+      line.textContent = u ? "App v" + c.versionName + " → v" + u.available.versionName + " available"
+                           : "App v" + c.versionName + " · up to date";
+    });
+  }).catch(function () { line.textContent = ""; });
+}
+
 /* ---- screens ---------------------------------------------------------- */
 
 var $ = function (id) { return document.getElementById(id); };
 
 function show(name) {
-  ["connecting", "setup", "settings"].forEach(function (s) {
+  ["connecting", "setup", "settings", "update"].forEach(function (s) {
     $("screen-" + s).classList.toggle("on", s === name);
   });
 }
@@ -268,6 +370,7 @@ function launch(url, force) {
 function showSettings(msg) {
   $("current-url").textContent = savedServer() || "—";
   setErr($("settings-err"), msg);
+  renderVersion(savedServer());
   show("settings");
 }
 
@@ -281,8 +384,19 @@ function tryLaunch(url, force) {
   show("connecting");
   $("connecting-text").textContent = "Connecting to " + url.replace(/^https?:\/\//, "") + "…";
   return probeServer(url).then(function (ok) {
-    if (ok) { launch(url, force); return; }
-    showSettings("Can't reach that server. Check that Tailscale is connected on this phone.");
+    if (!ok) {
+      showSettings("Can't reach that server. Check that Tailscale is connected on this phone.");
+      return;
+    }
+    // A newer build on the DGX is offered first; "Later" and anything that
+    // goes wrong with the check fall through to the app as usual.
+    return checkUpdate(url).then(function (u) {
+      if (u && !updateSkipped(u.available.versionCode)) {
+        showUpdate(u, url, function () { launch(url, force); });
+      } else {
+        launch(url, force);
+      }
+    });
   });
 }
 
@@ -325,6 +439,18 @@ $("fresh").addEventListener("click", function () {
 
 $("change").addEventListener("click", function () {
   showSetup(savedServer() || "", "");
+});
+
+$("update-check").addEventListener("click", function () {
+  var saved = savedServer();
+  if (!saved) { showSetup("", ""); return; }
+  if (!Plugins.AppUpdate) { setErr($("settings-err"), "Updates are Android-only — this is running in a browser."); return; }
+  setErr($("settings-err"), "Checking…");
+  checkUpdate(saved).then(function (u) {
+    if (u) { showUpdate(u, saved, function () { showSettings(""); }); return; }
+    setErr($("settings-err"), "");
+    renderVersion(saved);
+  });
 });
 
 start();

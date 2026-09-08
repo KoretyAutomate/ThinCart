@@ -33,7 +33,8 @@ const drain = () => new Promise(r => setTimeout(r, 0));
 /* Boot a fresh launcher. `saved` seeds localStorage (a previous install),
  * `launched` seeds sessionStorage (we came back with the Back button), and
  * `reachable` decides what the probe's fetch does. */
-function boot({ saved = null, launched = false, reachable = true, record = null } = {}) {
+function boot({ saved = null, launched = false, reachable = true, record = null,
+                capacitor = null, version = null } = {}) {
   const navigated = [];
   const dom = new JSDOM(html, {
     runScripts: "outside-only", url: "https://localhost/", pretendToBeVisual: true,
@@ -43,10 +44,16 @@ function boot({ saved = null, launched = false, reachable = true, record = null 
   if (saved) w.localStorage.setItem("thincart.server", saved);
   if (launched) w.sessionStorage.setItem("thincart.launched", "1");
 
+  // The native bridge exists only inside the APK; a test that hands one in is
+  // the APK, a test that does not is a browser.
+  if (capacitor) w.Capacitor = { Plugins: { AppUpdate: capacitor } };
   w.fetch = (url, opts) => {
     if (record) record.push({ url, opts });
-    return reachable ? Promise.resolve({ type: "opaque" })
-                     : Promise.reject(new TypeError("Failed to fetch"));
+    if (!reachable) return Promise.reject(new TypeError("Failed to fetch"));
+    if (String(url).endsWith("/version"))
+      return Promise.resolve(version ? { ok: true, status: 200, json: async () => version }
+                                     : { ok: false, status: 404, json: async () => ({}) });
+    return Promise.resolve({ type: "opaque" });
   };
 
   const script = html.split("<script>")[1].split("</script>")[0];
@@ -56,7 +63,7 @@ function boot({ saved = null, launched = false, reachable = true, record = null 
   // openServer() seam is what gets stubbed. Overridden after eval, before any
   // probe resolves — start() only reaches openServer via an awaited promise.
   w.openServer = (url) => navigated.push(url);
-  return { w, navigated, visible: () => ["connecting", "setup", "settings"]
+  return { w, navigated, visible: () => ["connecting", "setup", "settings", "update"]
     .find(s => w.document.getElementById("screen-" + s).classList.contains("on")) };
 }
 
@@ -239,6 +246,74 @@ for (const bad of BAD) {
     const withQuery = w.launchUrl("https://spark.example.ts.net/?a=1", true);
     check("an existing query keeps its ? and gets &",
       /^https:\/\/spark\.example\.ts\.net\/\?a=1&fresh=\d+$/.test(withQuery), withQuery);
+  }
+
+  /* ---- in-app updates: the reason this launcher can reach the installer ---- */
+  const INSTALLED = { versionCode: 2, versionName: "1.1", canInstall: true };
+  const NEWER = { versionCode: 3, versionName: "1.2", file: "thincart.apk", size: 3409665, sha256: "abc123" };
+  const plugin = (installs) => ({
+    current: async () => INSTALLED,
+    install: async (o) => { installs.push(o); return { status: "installer-opened", bytes: 1 }; },
+  });
+
+  console.log("\n--- 13. a newer build on the DGX is offered before the handoff ------");
+  {
+    const installs = [];
+    const b = boot({ saved: "https://spark.example.ts.net", reachable: true, capacitor: plugin(installs), version: NEWER });
+    await drain(); await drain(); await drain(); await drain();
+    check("the update screen is shown", b.visible() === "update", b.visible());
+    check("and the app was NOT opened underneath it", b.navigated.length === 0, b.navigated);
+    const sub = b.w.document.getElementById("update-sub").textContent;
+    check("it says which build, from which, and that nothing is lost",
+      /v1\.1/.test(sub) && /3\.4 MB/.test(sub) && /kept/.test(sub), sub);
+    b.w.document.getElementById("update-install").click();
+    await drain(); await drain();
+    check("Install hands the DGX's /apk and its checksum to the native installer",
+      installs.length === 1 && installs[0].url === "https://spark.example.ts.net/apk"
+        && installs[0].sha256 === "abc123" && installs[0].size === 3409665, installs);
+    const msg = b.w.document.getElementById("update-err").textContent;
+    check("and says what happens next", /installer is open/i.test(msg), msg);
+  }
+
+  console.log("\n--- 14. Later opens the app, and does not ask again this run --------");
+  {
+    const b = boot({ saved: "https://spark.example.ts.net", reachable: true, capacitor: plugin([]), version: NEWER });
+    await drain(); await drain(); await drain(); await drain();
+    b.w.document.getElementById("update-later").click();
+    await drain();
+    check("the app opens", b.navigated.length === 1, b.navigated);
+    b.w.document.getElementById("open").click();     // the same run, again
+    await drain(); await drain(); await drain(); await drain();
+    check("no second offer for the same build", b.visible() !== "update" && b.navigated.length === 2,
+      { visible: b.visible(), navigated: b.navigated });
+  }
+
+  console.log("\n--- 15. nothing to offer means the app opens as usual ---------------");
+  {
+    const b = boot({ saved: "https://spark.example.ts.net", reachable: true, capacitor: plugin([]),
+                     version: { ...NEWER, versionCode: 2 } });          // same build
+    await drain(); await drain(); await drain(); await drain();
+    check("same version: straight in", b.navigated.length === 1, b.navigated);
+  }
+  {
+    const b = boot({ saved: "https://spark.example.ts.net", reachable: true, capacitor: plugin([]), version: null });
+    await drain(); await drain(); await drain(); await drain();
+    check("nothing published (404): straight in", b.navigated.length === 1, b.navigated);
+  }
+  {
+    const calls = [];
+    const b = boot({ saved: "https://spark.example.ts.net", reachable: true, version: NEWER, record: calls });
+    await drain(); await drain(); await drain(); await drain();
+    check("a browser (no native bridge): straight in", b.navigated.length === 1, b.navigated);
+    check("and /version is not even asked for", !calls.some(c => String(c.url).endsWith("/version")), calls.map(c => c.url));
+  }
+
+  console.log("\n--- 16. the settings screen says which build this is ----------------");
+  {
+    const b = boot({ saved: "https://spark.example.ts.net", launched: true, capacitor: plugin([]), version: NEWER });
+    await drain(); await drain(); await drain(); await drain();
+    const line = b.w.document.getElementById("version-line").textContent;
+    check("names the installed build and the waiting one", /v1\.1/.test(line) && /v1\.2 available/.test(line), line);
   }
 
   console.log(`\n================ ${passed} passed, ${failed} failed ================`);
