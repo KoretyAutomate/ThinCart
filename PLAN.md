@@ -2105,10 +2105,21 @@ evidence that the thing happened.
 introduced a way to be half-open: Skip and Remove are bound per item at the END
 of the filling, so a throw partway through left the PREVIOUS item's handlers
 under the new item's name — Remove would have deleted the wrong row. The
-reviewer reproduced it with an injected store-rendering failure. `editState`
-and all three action handlers are now cleared BEFORE the filling and re-enabled
-only once it completes; a broken editor can be read and dismissed but cannot
-remove, skip or save. The test injects the fault by removing a field the
-filling reads.
+reviewer reproduced it with an injected store-rendering failure. A second pass
+then found the same hole in a fourth control: the price list keeps its rows
+clickable, and one of them picks a product for whichever item was last looked
+up — look up prices for milk, close, open a broken eggs, click the surviving
+row, and milk gets the pick.
 
-Suites: 243 python, **190 web**, 89 launcher.
+`editState`, all three action handlers, the Compare button AND the price
+results are now cleared BEFORE the filling and restored only once it completes.
+A broken editor can be read and dismissed but cannot remove, skip, save or pick
+a product. The tests inject the fault by removing a field the filling reads,
+and replay the reviewer's exact sequence.
+
+The shape worth remembering: making something visible earlier moved it into a
+state it had never been in before — shown but not initialised — and every
+control that had been safe *because* it was only ever reachable after a
+successful fill stopped being safe. Ordering changes have a blast radius.
+
+Suites: 243 python, **194 web**, 89 launcher.
