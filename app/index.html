@@ -655,6 +655,7 @@ const STR = {
   en: {
     add_ph:'Add item… (milk, eggs, apples …)', qty_ph:'qty', tray:'Suggested — probably due',
     empty:'List is empty — nice work 🎉', uncat:'📦 Uncategorized',
+    sheet_broken:'Could not load this item — tell Claude what ⚙️ says.',
     sheet_name:'Name', sheet_qty:'Quantity', sheet_cat:'Category', sheet_save:'Save changes',
     sheet_note:'Neither counts as a purchase. Skipped items get suggested again tomorrow.',
     sheet_skip:'🚫 Out of stock — skip', sheet_remove:'Remove (added by mistake)', cancel:'Cancel',
@@ -781,6 +782,7 @@ const STR = {
   ja: {
     add_ph:'追加… (牛乳, 卵, りんご など)', qty_ph:'数量', tray:'提案 — そろそろ買い時',
     empty:'リストは空です 🎉', uncat:'📦 未分類',
+    sheet_broken:'この品目を読み込めませんでした — ⚙️ の内容をお知らせください。',
     sheet_name:'名前', sheet_qty:'数量', sheet_cat:'カテゴリー', sheet_save:'変更を保存',
     sheet_note:'どちらも購入としては記録されません。スキップは明日また提案されます。',
     sheet_skip:'🚫 在庫なし — スキップ', sheet_remove:'削除（間違えて追加）', cancel:'キャンセル',
@@ -1968,7 +1970,10 @@ function renderStoreOpts() {
 /* set when the sheet was opened from a candidate in the add row: that text is
  * the user's unsaved input and is only discarded once the edit actually saves */
 let clearAddRowOnSave = false;
-function closeSheet() {
+function closeSheet(why) {
+  /* Every way the editor can shut is named in the trace. Four rounds were lost
+   * to not knowing whether it had failed to open or been closed again. */
+  gtrace('CLOSE:' + (why || 'other'));
   $('sheet').style.display = 'none'; editState = null; clearAddRowOnSave = false;
 }
 /* ============ price comparison (Phase 6C) ===================================
@@ -2173,6 +2178,38 @@ async function showPrices(it, sku, name, chain) {
  * jsdom's pointer emulation more than it tests this app. Same seam, and the
  * same reason, as openServer() in the APK launcher. */
 function openSheet(it) {
+  /* SHOW IT FIRST. Everything below fills the editor in, and any one of those
+   * lines throwing used to leave the sheet hidden while the trace still said
+   * it had opened — five rounds of "long press doesn't work" where the gesture
+   * was never the problem. Making the sheet visible before anything that can
+   * fail means a half-filled editor at worst, never an invisible one. */
+  $('sheet').style.display = 'flex';
+  /* Nothing from the last item may survive into this one. Skip and Remove are
+   * bound per item at the END of the filling, so a throw partway through would
+   * leave the PREVIOUS item's handlers under the new item's name — Remove would
+   * delete the wrong row. editState goes too, which is what saveSheet reads.
+   * Disabled until the filling has actually finished. */
+  editState = null;
+  const acts = ['sheet-save', 'sheet-skip', 'sheet-remove', 'sheet-compare'];
+  for (const id of acts) { $(id).onclick = null; $(id).disabled = true; }
+  // The price list is the fourth way to write to the wrong row: its rows stay
+  // clickable and pick a product for whichever item was last looked up.
+  $('sheet-prices').innerHTML = '';
+  try {
+    fillSheet(it);
+    $('sheet-save').onclick = saveSheet;
+    for (const id of acts) $(id).disabled = false;
+  } catch (e) {
+    // Say so on screen rather than leaving a blank card: an editor that cannot
+    // be filled in is a bug report, not something to swallow. The buttons stay
+    // disabled — half-read fields must not be saved over a good row.
+    gtrace('FILL-FAILED:' + ((e && e.message) || e));
+    $('sheet-title').textContent = T().sheet_broken;
+  }
+  gtrace('shown:' + $('sheet').style.display);
+}
+
+function fillSheet(it) {
   clearAddRowOnSave = false;
   editState = { it, category: it.category || 'other',
                 // only an EXPLICIT preference preselects — a history-derived
@@ -2190,7 +2227,6 @@ function openSheet(it) {
   $('sheet-compare').onclick = () => comparePrices(it);
   renderStoreOpts();
   renderCatOpts();
-  $('sheet').style.display = 'flex';
   // the card is a scroll container and is REUSED across opens — without this it
   // reopens wherever the last edit left it (e.g. down at Remove/Cancel), which
   // puts Name and Quantity back off-screen, the very thing the cap fixed
@@ -2200,8 +2236,8 @@ function openSheet(it) {
   const ta = $('sheet-note-input');
   const fit = () => { ta.style.height = ''; ta.style.height = Math.min(ta.scrollHeight + 3, 140) + 'px'; };
   ta.oninput = fit; fit();
-  $('sheet-skip').onclick   = () => { closeSheet(); enqueue({ type:'skip',   item_id:it.id }); };
-  $('sheet-remove').onclick = () => { closeSheet(); enqueue({ type:'remove', item_id:it.id }); };
+  $('sheet-skip').onclick   = () => { closeSheet('skip'); enqueue({ type:'skip',   item_id:it.id }); };
+  $('sheet-remove').onclick = () => { closeSheet('remove'); enqueue({ type:'remove', item_id:it.id }); };
 }
 function saveSheet() {
   if (!editState) return;
@@ -2223,10 +2259,10 @@ function saveSheet() {
   if ((editState.store || '') !== origStore)       { fields.store = editState.store || ''; changed = true; }
   if (changed) enqueue(fields);
   if (clearAddRowOnSave) { $('name').value = ''; $('qty').value = ''; }
-  closeSheet();
+  closeSheet('save');
 }
 $('sheet-save').onclick = saveSheet;
-$('sheet-cancel').onclick = closeSheet;
+$('sheet-cancel').onclick = () => closeSheet('cancel');
 /* Tap the dark area to dismiss — but only when the tap BEGAN there.
  *
  * This is what made long-press look broken for four rounds. The trace from the
@@ -2246,7 +2282,7 @@ $('sheet').addEventListener('pointerdown', e => {
   sheetPressedBackdrop = e.target === $('sheet');
 });
 $('sheet').onclick = e => {
-  if (e.target === $('sheet') && sheetPressedBackdrop) closeSheet();
+  if (e.target === $('sheet') && sheetPressedBackdrop) closeSheet('backdrop');
   sheetPressedBackdrop = false;
 };
 
