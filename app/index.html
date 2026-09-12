@@ -81,6 +81,14 @@
   #viewtoggle button { flex:1; border:none; background:none; padding:8px 10px;
     font:inherit; font-size:.82rem; font-weight:600; color:var(--muted); cursor:pointer; }
   #viewtoggle button.sel { background:var(--green); color:#fff; }
+  /* An old page is the one fault that hides every other fix, so it is said
+   * where the list is, not inside a panel nobody opens while shopping. */
+  #stalebar { display:none; align-items:center; gap:8px; margin:8px 12px 0; padding:10px 12px;
+    background:#fbe9e5; border:1.5px solid #e6c6bd; border-radius:12px; font-size:.9rem; }
+  #stalebar.on { display:flex; }
+  #stalebar b { flex:1; font-weight:600; color:var(--red); }
+  #stalebar button { border:none; border-radius:999px; padding:8px 15px; font-weight:700;
+    font-size:.85rem; cursor:pointer; background:var(--red); color:#fff; }
   #gpsguess { display:none; align-items:center; gap:8px; margin:8px 12px 0; padding:9px 12px;
     background:#e9f5ec; border:1.5px solid #9ec7ab; border-radius:12px; font-size:.9rem; }
   #gpsguess.on { display:flex; }
@@ -425,6 +433,11 @@
   <div id="cands"></div>
 </form>
 
+<div id="stalebar">
+  <b id="stalebar-text"></b>
+  <button id="stalebar-go"></button>
+</div>
+
 <div id="gpsguess">
   <b id="gpsguess-text"></b>
   <button class="yes" id="gpsguess-yes"></button>
@@ -758,6 +771,8 @@ const STR = {
     diag_none:'Nothing yet — press and hold an item on the list, then come back here.',
     ver_h:'App version',
     set_note:'Reloading fetches the current app from the server. Your list, and anything you added while offline, are untouched.',
+    stale_bar:'This phone is showing an old version of the app.',
+    stale_go:'↻ Update now',
     reload_btn:'↻ Reload the app',
     reload_working:'↻ Fetching the current app…',
     reload_fail:'Could not reach the server, so nothing was changed — you still have a working copy. Check that Tailscale is connected.',
@@ -884,6 +899,8 @@ const STR = {
     diag_none:'まだありません。リストの品目を長押ししてから、ここに戻ってください。',
     ver_h:'アプリのバージョン',
     set_note:'再読み込みすると、サーバーから最新のアプリを取得します。買い物リストと、オフライン中に追加した内容はそのまま残ります。',
+    stale_bar:'この端末は古いバージョンを表示しています。',
+    stale_go:'↻ 今すぐ更新',
     reload_btn:'↻ アプリを再読み込み',
     reload_working:'↻ 最新のアプリを取得中…',
     reload_fail:'サーバーに接続できなかったため、何も変更していません — 手元のコピーはそのまま使えます。Tailscale の接続を確認してください。',
@@ -1296,14 +1313,26 @@ async function showBuild() {
   const el = $('buildline');
   if (!el) return;
   el.textContent = T().build_page(BUILD);
+  el.classList.remove('stale');
   try {
     const res = await fetch('/health', { cache: 'no-store' });
     if (!res.ok) return;
     const d = await res.json();
-    if (d.build && d.build !== BUILD) {
+    const stale = !!(d.build && d.build !== BUILD);
+    if (stale) {
       el.textContent = T().build_stale(BUILD, d.build);
       el.classList.add('stale');
     }
+    /* And say it ON THE LIST, not only in the panel. An old page is the one
+     * fault that hides every other fix: five rounds of "long press doesn't
+     * work" were reported from a page that predated the fix being tested, and
+     * nothing on screen said so. The build line in ⚙️ was already right and
+     * nobody had reason to open ⚙️. */
+    $('stalebar-text').textContent = T().stale_bar;
+    $('stalebar-go').textContent = T().stale_go;
+    // Its own button and its own line: the bar is on the list, the panel may be shut.
+    $('stalebar-go').onclick = () => reloadApp($('stalebar-go'), $('stalebar-text'));
+    $('stalebar').classList.toggle('on', stale);
   } catch (e) { /* offline: the page's own stamp is still worth showing */ }
 }
 
@@ -1338,9 +1367,15 @@ async function showBuild() {
  * to evict to, and never runs at all if the install could not complete. If the
  * update fails we stay on the old worker, which is an old app rather than no
  * app. Strictly better than doing it from out here. */
-async function reloadApp() {
-  const btn = $('reload-btn'), err = $('reload-err');
+async function reloadApp(btn, err) {
+  /* Reports into whichever surface invoked it. The same reload is offered from
+   * two places now — ⚙️ and the stale bar on the list — and writing progress
+   * into the panel's elements while the panel is shut is a silent failure:
+   * press Update now with the server unreachable and nothing at all happens. */
+  btn = btn || $('reload-btn');
+  err = err || $('reload-err');
   if (btn.disabled) return;
+  const label = btn.textContent;
   btn.disabled = true;
   btn.textContent = T().reload_working;
   err.classList.remove('on');
@@ -1353,7 +1388,7 @@ async function reloadApp() {
     await res.text();   // drain it, so the entry is fully written before we go
   } catch (e) {
     btn.disabled = false;
-    btn.textContent = T().reload_btn;
+    btn.textContent = label;
     err.textContent = T().reload_fail;
     err.classList.add('on');
     return;
@@ -1377,7 +1412,7 @@ async function reloadApp() {
 function hardReload() { location.reload(); }
 window.hardReload = hardReload;
 window.reloadApp = reloadApp;
-$('reload-btn').onclick = reloadApp;
+$('reload-btn').onclick = () => reloadApp($('reload-btn'), $('reload-err'));
 
 /* Its own panel behind ⚙️, rather than the foot of the Stores list where it
  * first landed. That position was reachable only by scrolling past the store
@@ -1390,7 +1425,7 @@ $('reload-btn').onclick = reloadApp;
 $('set-btn').onclick = () => {
   $('set-panel').style.display = 'flex';
   showBuild();
-  $('diag-out').textContent = gestureLog.length ? gestureLog.join('  →  ') : T().diag_none;
+  $('diag-out').textContent = 'build ' + BUILD + (gestureLog.length ? ' · ' + gestureLog.join('  →  ') : ' · ' + T().diag_none);
 };
 
 /* Standing at home, "no store offered" and "location never read" look
@@ -2694,7 +2729,9 @@ function connectWS() {
 }
 
 /* phone unlock / tab foreground / network back — the NORMAL in-store path */
-const wake = () => { connectWS(); flush(); guessStoreByGps(); };
+/* showBuild on every wake, not only at startup: the phone that has been open
+ * since before a deploy is exactly the one that needs telling. */
+const wake = () => { connectWS(); flush(); guessStoreByGps(); showBuild(); };
 document.addEventListener('visibilitychange', () => { if (!document.hidden) wake(); });
 window.addEventListener('online', wake);
 window.addEventListener('pageshow', wake);

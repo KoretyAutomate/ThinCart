@@ -2123,3 +2123,51 @@ control that had been safe *because* it was only ever reachable after a
 successful fill stopped being safe. Ordering changes have a blast radius.
 
 Suites: 243 python, **194 web**, 89 launcher.
+
+### 2026-09-12 (later still) — five traces, and the phone was never running the fix
+
+Third trace:
+
+```
+down → ctx@595ms → OPEN:ctx → up@3307ms/12px
+```
+
+No `shown:`. That line is written **unconditionally** at the end of
+`openSheet` in the build deployed hours earlier — so its absence is proof the
+phone was not running that build. Checked against the served page rather than
+assumed: the live `/` always contains `gtrace('shown:'`.
+
+So the whole sequence has to be re-read. Every trace was taken as evidence
+about the code on the DGX; at least the last one was evidence about older code.
+Five rounds of "long press doesn't work" were, in part, five rounds of testing
+a page that predated the fix under test — which is why each fix "did nothing"
+and why the next theory always looked necessary.
+
+**The app already detected this.** `showBuild()` has compared the page's own
+stamp with `/health` since 2026-09-07 and turns the build line red. But that
+line lives in ⚙️, and nobody opens ⚙️ while shopping. A correct diagnosis
+nobody sees is not a diagnosis.
+
+Two changes, both about making the truth unavoidable rather than available:
+
+- **The staleness is stated on the LIST** — a red bar above it, "This phone is
+  showing an old version of the app", with **↻ Update now** wired to the same
+  `reloadApp()` the ⚙️ button uses. Re-checked on every wake, not only at
+  startup: a phone left open across a deploy is exactly the one that needs it.
+- **Every gesture trace names its build** — `build 478903ce · down → ctx@595ms
+  → …`. A report can no longer be ambiguous about which version produced it,
+  and neither of us can spend another round on that ambiguity.
+
+The lesson is not "check the build". It is that a diagnostic which requires a
+deliberate visit is a diagnostic that will be skipped precisely when things are
+going wrong, and that evidence with no provenance is worth less than none —
+because it is confidently misread.
+
+**A [P2] from the gate on that bar.** The button on the list called the same
+`reloadApp()`, which wrote its progress and any failure into the ⚙️ panel's
+elements — and the panel is shut when the bar is being used. Press *Update now*
+with the server unreachable and, from the list, nothing at all happens: the one
+failure mode the bar exists to end. `reloadApp(btn, err)` now reports into
+whichever surface invoked it, and restores that surface's own label.
+
+Suites: 243 python, **206 web**, 89 launcher.
