@@ -2067,3 +2067,48 @@ The diagnostic earned its place: four rounds of guessing, then one line of
 evidence. Keep ⚙️'s trace.
 
 Suites: 243 python, **175 web**, 89 launcher.
+
+### 2026-09-12 (later) — `OPEN:` was not proof the editor appeared
+
+A second trace after the backdrop fix:
+
+```
+down → ctx@597ms → OPEN:ctx → cancel@3498ms/11px/still3ms
+```
+
+No click this time, no backdrop dismissal — and still no editor. Which exposed
+a flaw in the instrument itself: `gtrace('OPEN:' + why)` was written BEFORE
+`openSheet()` ran, and inside `openSheet` the line that makes the sheet visible
+came **after** five calls that fill it in — the title, four field values,
+`renderStoreOpts()`, `renderCatOpts()`. Any one of those throwing on the phone
+leaves the sheet hidden while the trace cheerfully reports it opened. Two
+rounds were spent reading `OPEN:ctx` as "the editor is on screen"; it only ever
+meant "we called the function".
+
+Three changes, and the first is the fix:
+
+- **Show the sheet FIRST.** `display:flex` is now the first statement in
+  `openSheet`, before anything that can fail. The filling runs in a `try`, and
+  a failure puts a plain message in the title rather than leaving a blank card.
+  Worst case is a half-filled editor; never an invisible one.
+- **The trace says whether it is actually on screen** — `shown:flex` — so
+  "never appeared" and "appeared and was shut" can no longer be confused.
+- **Every exit names itself**: `CLOSE:cancel|save|skip|remove|backdrop`. Four
+  rounds were lost to not knowing which of those had happened, or whether any
+  had.
+
+The instrument was built to stop the guessing and then itself reported
+something ambiguous. An event that fires before the thing it describes is not
+evidence that the thing happened.
+
+**And a [P2] the gate found in that fix.** Showing the sheet before filling it
+introduced a way to be half-open: Skip and Remove are bound per item at the END
+of the filling, so a throw partway through left the PREVIOUS item's handlers
+under the new item's name — Remove would have deleted the wrong row. The
+reviewer reproduced it with an injected store-rendering failure. `editState`
+and all three action handlers are now cleared BEFORE the filling and re-enabled
+only once it completes; a broken editor can be read and dismissed but cannot
+remove, skip or save. The test injects the fault by removing a field the
+filling reads.
+
+Suites: 243 python, **190 web**, 89 launcher.

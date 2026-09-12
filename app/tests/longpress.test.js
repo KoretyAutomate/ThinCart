@@ -236,6 +236,93 @@ function boot() {
     check("a drag out of the card does not dismiss", b.sheetOpen());
   }
 
+  console.log("\n--- 5c. the trace distinguishes 'never shown' from 'shut again' -----");
+  {
+    /* `OPEN:ctx` alone was ambiguous for two rounds: it is written BEFORE the
+     * sheet is filled in, so a throw anywhere in the filling left the editor
+     * invisible while the trace still claimed it had opened. The sheet is now
+     * displayed first, and the trace says both that it was shown and — if
+     * something later closes it — which of the five exits did. */
+    const b = boot();
+    b.ev("pointerdown", { x: 50, y: 50 });
+    b.ev("contextmenu");
+    check("the trace confirms it is actually on screen", /shown:flex/.test(b.trace()), b.trace());
+  }
+  {
+    const b = boot();
+    b.ev("pointerdown", { x: 50, y: 50 });
+    b.ev("contextmenu");
+    b.doc.getElementById("sheet-cancel").click();
+    check("Cancel is not open (it names itself)", !b.sheetOpen());
+    check("and the trace says which exit shut it", /CLOSE:cancel/.test(b.trace()), b.trace());
+  }
+
+  console.log("\n--- 5d. an editor that cannot be filled in touches nothing ----------");
+  {
+    /* Showing the sheet before filling it introduced a way to be half-open.
+     * Skip and Remove are bound per item at the END of the filling, so a throw
+     * partway through would leave the PREVIOUS item's handlers under the new
+     * item's name — Remove would delete the wrong row. Reproduced by the
+     * pre-push reviewer with an injected store-rendering failure; reproduced
+     * here by removing a field the filling reads. */
+    const b = boot();
+    b.ev("pointerdown", { x: 50, y: 50 });
+    b.ev("contextmenu");                       // item opened normally first
+    b.doc.getElementById("sheet-cancel").click();
+    b.doc.getElementById("sheet-qty").remove();  // now break the filling
+    b.ev("pointerdown", { x: 50, y: 50 });
+    b.ev("contextmenu");
+    check("the sheet is still shown rather than vanishing", b.sheetOpen());
+    check("and says it could not be loaded",
+      /Could not load/.test(b.doc.getElementById("sheet-title").textContent),
+      b.doc.getElementById("sheet-title").textContent);
+    check("the trace names the failure", /FILL-FAILED/.test(b.trace()), b.trace());
+    for (const id of ["sheet-save", "sheet-skip", "sheet-remove"]) {
+      check(`${id} is disabled`, b.doc.getElementById(id).disabled, id);
+    }
+    b.doc.getElementById("sheet-remove").click();
+    b.doc.getElementById("sheet-save").click();
+    check("so nothing can be removed or saved from a broken editor",
+      !b.queued().some(o => ["remove", "skip", "edit"].includes(o.type)), b.queued());
+    // The price list is the fourth way to write to the wrong row: its rows stay
+    // clickable and pick a product for whichever item was last looked up.
+    check("Compare is disabled too", b.doc.getElementById("sheet-compare").disabled);
+    check("and last item's price results are gone",
+      b.doc.getElementById("sheet-prices").innerHTML === "",
+      b.doc.getElementById("sheet-prices").innerHTML);
+  }
+  {
+    /* The reviewer's exact sequence: look up prices for one item, close, then
+     * open another whose filling fails — a surviving price row must not pick a
+     * product for the first item. */
+    const b = boot();
+    b.ev("pointerdown", { x: 50, y: 50 });
+    b.ev("contextmenu");
+    const prices = b.doc.getElementById("sheet-prices");
+    const row = b.doc.createElement("div");           // as a price lookup would leave it
+    row.className = "prow";
+    row.onclick = () => b.w.eval("enqueue({type:'product_pick', catalog_id:1, pick_chain:'wegmans', pick_sku:'x', pick_name:'y'})");
+    prices.appendChild(row);
+    b.doc.getElementById("sheet-cancel").click();
+    b.doc.getElementById("sheet-qty").remove();       // break the next filling
+    b.ev("pointerdown", { x: 50, y: 50 });
+    b.ev("contextmenu");
+    check("no stale price row survives into the next item",
+      !b.doc.querySelector("#sheet-prices .prow"), prices.innerHTML);
+    check("and nothing was picked for the previous item",
+      !b.queued().some(o => o.type === "product_pick"), b.queued());
+  }
+  {
+    // ...and a normal open leaves them usable.
+    const b = boot();
+    b.ev("pointerdown", { x: 50, y: 50 });
+    b.ev("contextmenu");
+    check("a good editor has its actions enabled",
+      !b.doc.getElementById("sheet-remove").disabled && !b.doc.getElementById("sheet-save").disabled);
+    b.doc.getElementById("sheet-remove").click();
+    check("and Remove still works", b.queued().some(o => o.type === "remove"), b.queued());
+  }
+
   console.log("\n--- 6. what happened is recorded, for the phone that disagrees ------");
   {
     const b = boot();
