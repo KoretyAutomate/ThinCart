@@ -2227,7 +2227,28 @@ function saveSheet() {
 }
 $('sheet-save').onclick = saveSheet;
 $('sheet-cancel').onclick = closeSheet;
-$('sheet').onclick = e => { if (e.target === $('sheet')) closeSheet(); };
+/* Tap the dark area to dismiss — but only when the tap BEGAN there.
+ *
+ * This is what made long-press look broken for four rounds. The trace from the
+ * phone read `down → ctx@592ms → OPEN:ctx → up@2083ms/4px`: the editor opened
+ * correctly, and there is no `click` on the item afterwards because by then the
+ * sheet covered it. The finger came down on a row, the sheet appeared UNDER it,
+ * and lifting produced a click on the backdrop — which closed the editor a
+ * moment after it opened. Every event fix was right; the sheet was being shut
+ * by the same gesture that opened it.
+ *
+ * A time-based grace would not do: that finger stayed down for 1.5 s after the
+ * sheet appeared. Requiring the press and the release to BOTH land on the
+ * backdrop is exact, and it also stops a drag that starts inside the card and
+ * ends outside from dismissing an edit in progress. */
+let sheetPressedBackdrop = false;
+$('sheet').addEventListener('pointerdown', e => {
+  sheetPressedBackdrop = e.target === $('sheet');
+});
+$('sheet').onclick = e => {
+  if (e.target === $('sheet') && sheetPressedBackdrop) closeSheet();
+  sheetPressedBackdrop = false;
+};
 
 /* ============ ops ============ */
 function enqueue(fields) {

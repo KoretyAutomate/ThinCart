@@ -2023,3 +2023,47 @@ second is a fault. It names the nearest pinned store and its distance
 distinguishes them in one tap.
 
 Served page only — no APK. Suites: 243 python, **169 web**, 89 launcher.
+
+### 2026-09-12 — long-press, the actual bug: the sheet was shut by the finger that opened it
+
+Four rounds were spent on WHICH event Android sends. All four were wrong about
+the problem, and the owner's trace ended it in one line:
+
+```
+down → ctx@592ms → OPEN:ctx → up@2083ms/4px
+```
+
+`OPEN:ctx` says the editor **opened**, at 592 ms, exactly as intended — the
+event handling had been correct since #13. The tell is what is missing: there
+is no `click` on the item afterwards, because by then the sheet covered it.
+
+The finger came down on a row; the sheet appeared UNDER it; lifting produced a
+click on the backdrop; and the backdrop's dismiss handler —
+
+```js
+$('sheet').onclick = e => { if (e.target === $('sheet')) closeSheet(); };
+```
+
+— closed the editor a moment after it opened. On screen: nothing, or a flash.
+The card sits at `align-items: flex-end`, so a row anywhere up the list
+releases over the dark area rather than over the card, which is why it looked
+total rather than intermittent.
+
+**The fix is to require the press AND the release to land on the backdrop.** A
+time-based grace would not have done: that finger stayed down for 1.5 s after
+the sheet appeared. Requiring both is exact, and it also stops a drag that
+begins inside the card and ends outside from discarding an edit in progress.
+
+**Why it took four rounds, and the lesson this project keeps re-teaching.**
+Every test dispatched `click` at the ITEM, because that is where the gesture
+starts. The click that mattered landed on an element that did not exist when
+the gesture began. The suite was testing the layer next to the one the phone
+touches — the fourth time this exact shape has appeared here (stale shell,
+unfindable button, dead panel, and now this). `longpress.test.js` now replays
+the phone's own trace, including the release on the backdrop, and fails
+without the fix (2 of 22).
+
+The diagnostic earned its place: four rounds of guessing, then one line of
+evidence. Keep ⚙️'s trace.
+
+Suites: 243 python, **175 web**, 89 launcher.

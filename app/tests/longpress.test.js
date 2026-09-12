@@ -69,7 +69,15 @@ function boot() {
   const queued = () => {
     try { return JSON.parse(w.localStorage.getItem("pc_queue") || "[]"); } catch (e) { return []; }
   };
-  return { w, doc, li, sent, ev, queued,
+  /** An event on any element — the sheet's backdrop is not the item, and that
+   *  distinction is the whole of the bug this file now covers. */
+  const clickOn = (el, type = "click") => {
+    const e = new w.Event(type, { bubbles: true, cancelable: true });
+    Object.assign(e, { clientX: 0, clientY: 0, pointerId: 1 });
+    el.dispatchEvent(e);
+    return e;
+  };
+  return { w, doc, li, sent, ev, queued, clickOn,
            sheetOpen: () => doc.getElementById("sheet").style.display === "flex",
            trace: () => { doc.getElementById("set-btn").click();
                           return doc.getElementById("diag-out").textContent; } };
@@ -184,6 +192,48 @@ function boot() {
     b.ev("pointerup"); b.ev("click");
     check("a quick tap still checks the item off", b.queued().some(o => o.type === "checkoff"), b.queued());
     check("and does not open the editor", !b.sheetOpen());
+  }
+
+  console.log("\n--- 5b. the finger that opened the editor must not shut it ---------");
+  {
+    /* THE bug, from the phone's own trace:
+     *     down → ctx@592ms → OPEN:ctx → up@2083ms/4px
+     * The editor opened correctly and there is no `click` on the item, because
+     * by then the sheet covered it. The finger came down on a row, the sheet
+     * appeared underneath it, and lifting produced a click on the backdrop —
+     * which dismissed the editor a moment after it opened. Four rounds of
+     * event fixes were all correct; none of them was the problem.
+     *
+     * Note the 1.5 s between opening and the release: a time-based grace
+     * would not have covered it. */
+    const b = boot();
+    b.ev("pointerdown", { x: 50, y: 50 });
+    b.ev("contextmenu");
+    check("the editor opened", b.sheetOpen());
+    await new Promise(r => setTimeout(r, 50));
+    b.ev("pointerup");
+    b.clickOn(b.doc.getElementById("sheet"));      // the release lands on the backdrop
+    check("and the finger lifting does NOT close it", b.sheetOpen());
+  }
+  {
+    // ...while a deliberate tap on the dark area still dismisses it.
+    const b = boot();
+    b.ev("pointerdown", { x: 50, y: 50 });
+    b.ev("contextmenu");
+    const sheet = b.doc.getElementById("sheet");
+    b.clickOn(sheet, "pointerdown");               // a fresh press, on the backdrop
+    b.clickOn(sheet);
+    check("a tap that begins on the backdrop still dismisses", !b.sheetOpen());
+  }
+  {
+    // ...and a drag that starts inside the card never dismisses an edit.
+    const b = boot();
+    b.ev("pointerdown", { x: 50, y: 50 });
+    b.ev("contextmenu");
+    const sheet = b.doc.getElementById("sheet");
+    b.clickOn(sheet.querySelector(".card"), "pointerdown");
+    b.clickOn(sheet);
+    check("a drag out of the card does not dismiss", b.sheetOpen());
   }
 
   console.log("\n--- 6. what happened is recorded, for the phone that disagrees ------");
