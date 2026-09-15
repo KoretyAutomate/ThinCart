@@ -262,6 +262,14 @@
   .prow .pp { font-weight:700; white-space:nowrap; }
   .prow .pu { color:var(--muted); font-size:.76rem; white-space:nowrap; }
   .pnote { padding:9px 11px; color:var(--muted); font-size:.79rem; }
+  /* Beside the row, not on top of it: big enough to hit, quiet enough not to
+     compete with the item's own name. */
+  .item .edit {
+    flex-shrink:0; border:none; background:none; color:var(--muted);
+    font-size:1.05rem; line-height:1; padding:10px 6px 10px 10px; margin:-10px -4px -10px 0;
+    cursor:pointer; touch-action:manipulation;
+  }
+  .item .edit:active { color:var(--green); }
   .stores-note { color:var(--muted); font-size:.8rem; margin:20px 2px; }
   #buildline { margin-top:-8px; font-variant-numeric:tabular-nums; }
   #buildline.stale { color:var(--red); font-weight:600; }
@@ -1777,7 +1785,27 @@ async function addFromLink() {
 $('storelink-go').onclick = addFromLink;
 $('storelink').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addFromLink(); } });
 
-window.openSheet = it => openSheet(it);
+/* THE FUNCTION ITSELF — never a wrapper around it.
+ *
+ * This line used to read `window.openSheet = it => openSheet(it)`, and that is
+ * what made long-press appear broken for six rounds. In a real page script
+ * `function openSheet` already IS `window.openSheet`, so assigning an arrow
+ * over it replaced the function with a wrapper whose body — `openSheet(it)` —
+ * then resolved to the wrapper itself: infinite recursion, RangeError, every
+ * way into the editor dead. The gesture traces were right all along; OPEN:ctx
+ * was logged, the call was made, and the stack blew before the body's first
+ * line.
+ *
+ * `= openSheet` cannot do that: in a page it assigns the function to the name
+ * it already has, and under `eval` it exports the local one. The seam stays
+ * (tests reach the editor through it); the recursion cannot come back.
+ *
+ * It survived six rounds because every test ran the page through `w.eval()`,
+ * which gives a strict-mode script its OWN scope — there `openSheet` is a
+ * local binding the wrapper never shadows, so 200+ green checks were
+ * exercising a function the browser never calls. tests/page_scope.test.js now
+ * boots the page the way a browser does, for exactly this class of fault. */
+window.openSheet = openSheet;
 
 function render() {
   renderTray();
@@ -1826,7 +1854,29 @@ function render() {
     li.innerHTML = `<div class="under"></div>
                     <div class="row"><span class="box"></span>
                     <span class="nm"><span class="nm1"></span></span>
-                    <span class="qty"></span><span class="who"></span></div>`;
+                    <span class="qty"></span><span class="who"></span>
+                    <button class="edit" aria-label="Edit">✎</button></div>`;
+    /* A plain tap target for the editor, beside the gesture rather than
+     * instead of it. Long-press is the nicer gesture and it is still there —
+     * but it has been reported broken six times on the phone that matters,
+     * and being unable to edit an item is not something to keep waiting on a
+     * diagnosis for. A button cannot be taken over by gesture arbitration,
+     * cancelled by a pan, or swallowed by an overlay. */
+    const edit = li.querySelector('.edit');
+    /* The WHOLE pointer sequence, not just the press. Stopping `pointerdown`
+     * alone left `pointermove` and `pointerup` bubbling into the row's swipe
+     * handler with its start coordinates never set — so a finger that drifted
+     * a pixel on the button read as a swipe right across the row and BOUGHT
+     * the item instead of editing it. Losing something off the list because
+     * you meant to edit it is worse than the bug this button exists to route
+     * around. Caught by the pre-push reviewer, 2026-09-15. */
+    for (const t of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'contextmenu'])
+      edit.addEventListener(t, e => e.stopPropagation());
+    edit.addEventListener('click', e => {
+      e.stopPropagation();                 // never also a check-off
+      gtrace('edit-button');
+      openSheet(it);
+    });
     const ico = it.emoji || (it.category ? catEmoji(it.category) : '');
     li.querySelector('.nm1').textContent = (ico ? ico + ' ' : '') + disp(it);
     if (it.store || it.note) {   // criteria sub-line: store chip + note
@@ -1884,6 +1934,10 @@ function attachGestures(li, it) {
     timer = setTimeout(() => fireLong('timer'), 600);
   });
   li.addEventListener('pointermove', e => {
+    /* No press of ours, no gesture. Without this the handler happily measures
+     * a swipe from coordinates that were never set — belt to the button's
+     * braces, and correct for any other way a stray move can arrive. */
+    if (!armed && !swiping) return;
     dx = e.clientX - sx;
     const dy = e.clientY - sy;
     /* Travel from the PREVIOUS point, not displacement from the first one:
@@ -1955,6 +2009,21 @@ function gtrace(ev) {
   gestureLog.push(ev);
   if (gestureLog.length > 10) gestureLog.shift();
 }
+
+/* Any error, anywhere, lands in the trace with its line.
+ *
+ * Six rounds of "long press doesn't work" were spent reasoning about which
+ * statement might throw. Reasoning was wrong every time, and the trace could
+ * only ever say which line was REACHED — never which one failed. A window
+ * error handler says the latter directly, and costs nothing when nothing
+ * throws. It does not swallow anything: the console still gets it. */
+window.addEventListener('error', e => {
+  gtrace('ERROR:' + ((e.error && e.error.message) || e.message || '?')
+         + '@' + String(e.filename || '').split('/').pop() + ':' + e.lineno);
+});
+window.addEventListener('unhandledrejection', e => {
+  gtrace('REJECTED:' + ((e.reason && e.reason.message) || e.reason || '?'));
+});
 
 function skipItem(it) {
   lockUntil = Date.now() + 350;
