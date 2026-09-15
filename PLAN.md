@@ -2171,3 +2171,99 @@ failure mode the bar exists to end. `reloadApp(btn, err)` now reports into
 whichever surface invoked it, and restores that surface's own label.
 
 Suites: 243 python, **206 web**, 89 launcher.
+
+### 2026-09-15 — a ✎ button, and an error handler instead of another theory
+
+Sixth report, and the first with provenance:
+
+```
+build f2bb52dc · down → ctx@592ms → OPEN:ctx → up@1927ms/0px
+```
+
+The build is current, the finger was perfectly still (0 px), the gesture is
+textbook — and `shown:` is missing, though that line is the unconditional last
+statement of `openSheet`. So `openSheet` is entered and does not finish, and
+the failure is BEFORE its `try`: a throw inside it would have traced
+`FILL-FAILED` first.
+
+Every statement before that `try` was then checked against the served page —
+`$('sheet')`, the four action ids, `sheet-prices` all exist; `editState` is
+`let`; there is exactly one `openSheet`. Nothing there can throw, and yet
+something does. **That is the sixth consecutive theory this bug has falsified,
+and the point at which reasoning should stop being the instrument.**
+
+Two changes, neither of them a theory:
+
+- **`window.onerror` feeds the trace.** Any exception, anywhere, is appended as
+  `ERROR:<message>@<file>:<line>`, with `unhandledrejection` alongside. Every
+  trace so far could only say which line was REACHED; this says which one
+  FAILED. It swallows nothing — the console still receives it.
+- **A ✎ button on every row.** Long-press stays; it is the nicer gesture and it
+  works wherever the platform allows it. But being unable to edit an item is
+  not something to keep waiting on a diagnosis for, and a button cannot be
+  taken over by gesture arbitration, cancelled by a pan, or swallowed by an
+  overlay. It stops propagation so it is never also a check-off — losing an
+  item because you meant to edit it would be worse than the bug it fixes.
+
+The judgement here is about cost. Six rounds of "it still doesn't work" is a
+poor trade for a gesture when a two-line affordance does the same job with no
+platform dependency at all. The gesture can keep being debugged with the error
+handler; the owner can edit their list today either way.
+
+**A [P1] the gate found in the button itself, and it was the very thing the
+button was meant to prevent.** Only `pointerdown` was stopped, so `pointermove`
+and `pointerup` still bubbled into the row's swipe handler — whose start
+coordinates were never set, because its `pointerdown` had been blocked. A press
+at a real screen position plus one pixel of drift therefore measured as a swipe
+right across the row and **bought the item** instead of editing it. The whole
+pointer sequence is stopped now, and the row's move handler refuses to measure
+a gesture it never saw begin (`if (!armed && !swiping) return`) — belt to the
+button's braces. The regression test replays it at (350, 200) with a 1 px
+drift, and fails without the fix.
+
+Worth naming: the reviewer reproduced it with *nonzero coordinates*, which the
+original test did not use. A test that presses at (0, 0) cannot tell a stale
+origin from a real one — the zero hid the bug.
+
+---
+
+**AND THEN THE GATE FOUND THE ACTUAL BUG.** Six rounds, and it was one line:
+
+```js
+window.openSheet = it => openSheet(it);
+```
+
+In a real page script `function openSheet` already IS `window.openSheet`.
+Assigning an arrow over it replaced the function with a wrapper whose body —
+`openSheet(it)` — resolved to the wrapper itself. Infinite recursion,
+`RangeError: Maximum call stack size exceeded`, and **every** way into the
+editor dead: the ✎ button, the long press, the candidates dropdown.
+
+Every trace was telling the truth. `OPEN:ctx` was logged, the call was made,
+and the stack blew before the body's first statement — which is exactly why
+`shown:` never appeared and why no `FILL-FAILED` did either. Each round's
+reasoning about "which statement before the try can throw" was looking inside a
+function that was never entered.
+
+**It survived six rounds because of how this suite loads the page.** Every
+other test file does `w.eval(SCRIPT)`. A strict-mode `eval` gives the script
+its own scope, so top-level `function openSheet` is a *local binding* that the
+`window.openSheet` wrapper never shadows — the tests called a function the
+browser never calls. 200+ green checks, all of them exercising the wrong
+binding. The reviewer found it by parsing the page with
+`runScripts: "dangerously"`, which is simply what a browser does.
+
+The fix is `window.openSheet = openSheet` — the function, not a wrapper around
+it: in a page it assigns the name to itself, under `eval` it exports the local,
+and the recursion cannot return. `tests/page_scope.test.js` boots the page as a
+document and fails without it (6 of 11, naming the RangeError).
+
+**The lesson, stated plainly because this project keeps paying for it.** Five
+times now the failure has been a test exercising a layer adjacent to the one
+that runs: the server not the phone, behaviour not findability, the item not
+the overlay, a fresh page not a stale one, and now a scope the browser never
+uses. Convenience in a harness is not free — it buys speed with fidelity, and
+the bill arrives as rounds of confident, wrong diagnosis. The `window.onerror`
+hook added this same round would have named it on the first trace.
+
+Suites: 243 python, **219 web**, 89 launcher.
