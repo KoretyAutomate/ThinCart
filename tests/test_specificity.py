@@ -63,6 +63,21 @@ def test_is_variety_allows_true_aliases_and_distinct_words():
     assert catalog._is_variety("玉ねぎ", ["たまねぎ"]) is False
 
 
+# ── _english_mismatch: varieties that do not name their parent ──────────────
+def test_english_mismatch_blocks_unnamed_varieties():
+    # 2026-09-26: 'elbow macaroni' was alias-merged into パスタ — no shared word
+    assert catalog._english_mismatch("elbow macaroni", "elbow macaroni", ["パスタ", "pasta"]) is True
+    # the typed English name still blocks when the LLM generalises its own
+    assert catalog._english_mismatch("elbow macaroni", "pasta", ["パスタ", "pasta"]) is True
+    assert catalog._english_mismatch("マカロニ", "macaroni", ["パスタ", "pasta"]) is True
+
+
+def test_english_mismatch_allows_matching_or_uncomparable_names():
+    assert catalog._english_mismatch("たまねぎ", "onion", ["玉ねぎ", "たまねぎ", "onion"]) is False
+    assert catalog._english_mismatch("たまねぎ", None, ["玉ねぎ", "onion"]) is False  # no English given
+    assert catalog._english_mismatch("たまねぎ", "onion", ["玉ねぎ"]) is False  # target has none
+
+
 # ── enrich(): guard blocks variety merge, true script-variant still merges ──
 def _run(coro):
     return asyncio.run(coro)
@@ -145,3 +160,22 @@ def test_edit_rejects_invalid_category():
 def test_edit_unknown_item_is_noop():
     _, res = op(type="edit", item_id=str(uuid.uuid4()), qty_note="x")
     assert res.status_code == 200 and res.json()["result"] == {"noop": True}
+
+
+def test_enrich_blocks_elbow_macaroni_into_pasta(monkeypatch):
+    orig_web, orig_chat = catalog.web_evidence, catalog.llm.chat_json
+    try:
+        tgt = db.get_or_create_catalog(appmod.conn, "パスタテスト")
+        appmod.conn.execute(
+            "UPDATE item_catalog SET category='pantry', aliases_json=?, llm_enriched_at='2026-01-01' WHERE id=?",
+            (json.dumps(["pasta-xyz"]), tgt),
+        )
+        appmod.conn.commit()
+        sid = _run(_enrich_with_fake_llm(None, "elbow macaroni-xyz", "パスタテスト", "パスタテスト"))
+        assert appmod.conn.execute("SELECT COUNT(*) FROM item_catalog WHERE id=?", (sid,)).fetchone()[0] == 1
+        aliases = json.loads(
+            appmod.conn.execute("SELECT aliases_json FROM item_catalog WHERE id=?", (tgt,)).fetchone()[0]
+        )
+        assert "elbow macaroni-xyz" not in aliases
+    finally:
+        catalog.web_evidence, catalog.llm.chat_json = orig_web, orig_chat

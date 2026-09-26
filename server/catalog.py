@@ -64,6 +64,20 @@ def _is_variety(source_canon: str, target_names: list[str]) -> bool:
     return False
 
 
+def _english_mismatch(source_canon: str, english_name, target_names: list[str]) -> bool:
+    """Second backstop, for varieties that do not spell out their parent:
+    'elbow macaroni' shares no word with 'pasta', so _is_variety lets it
+    through. An alias is the IDENTICAL product, so every English name the new
+    item has — as typed, and the LLM's own english_name — must be one the target
+    already goes by. When either side has no English name (たまねぎ → 玉ねぎ with
+    none on record) there is nothing to compare and this stays out of the way."""
+    target_en = {canonical(n) for n in target_names if n.strip() and n.isascii()}
+    if not target_en:
+        return False
+    source_en = [n for n in (source_canon, english_name) if isinstance(n, str) and n.strip() and n.isascii()]
+    return any(canonical(n) not in target_en for n in source_en)
+
+
 def item_context(row) -> str:
     """The item's own text — what disambiguates a bare LLM token ("pepper" on
     `bell pepper bag` is a capsicum; on `Amys frozen pizza` it is the spice)."""
@@ -165,8 +179,17 @@ async def enrich(conn, write_lock, catalog_id: int) -> bool:
                 "SELECT id, aliases_json FROM item_catalog WHERE canonical_name=?",
                 (alias_of,),
             ).fetchone()
-        if target and _is_variety(row["canonical_name"], [alias_of] + json.loads(target["aliases_json"])):
+        target_names = [alias_of] + json.loads(target["aliases_json"]) if target else []
+        if target and _is_variety(row["canonical_name"], target_names):
             log.info("merge blocked (variety/brand): %r kept distinct from %r", row["canonical_name"], alias_of)
+            target = None
+        elif target and _english_mismatch(row["canonical_name"], res.get("english_name"), target_names):
+            log.info(
+                "merge blocked (english name %r): %r kept distinct from %r",
+                res.get("english_name"),
+                row["canonical_name"],
+                alias_of,
+            )
             target = None
         if target:
             # merge: repoint history + live items, record alias, drop this row
