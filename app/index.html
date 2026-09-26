@@ -510,7 +510,6 @@
 <div id="trip-panel">
   <header>
     <h1 id="trip-h1"></h1>
-    <button class="topbtn" id="trip-sync"></button>
     <button class="topbtn" id="trip-close">✕</button>
   </header>
   <div class="body">
@@ -711,17 +710,15 @@ const STR = {
     // the cycles panel counts in-town days, so it must not say "days ago"
     cyc_since:d=>`${d}d at home since`,
     trip_title:'✈️ Travel',
-    trip_sync:'↻ sync',
     trip_add_h:'Mark a day away by hand',
     trip_add_go:'Away',
     trip_h_pending:'Detected — were you away? (not counted yet)',
     trip_h_settled:'Already reviewed',
     trip_yes:'Away', trip_no:'I was home',
     trip_none:'No trips detected yet.',
-    trip_unlinked:'No calendar linked yet. On the server, run: /home/korety/miniconda3/bin/python3 calendar_sync.py --authorize',
-    trip_synced:t=>`Calendar synced ${t}.`,
-    trip_never:'Calendar linked — not synced yet.',
-    trip_error:e=>`Last sync failed: ${e}`,
+    trip_never:'Calendar not read yet. Open ThinCart on the Pixel and allow calendar access — it reads the calendar each time the app opens.',
+    trip_synced:(t,n)=>`Calendar read from the Pixel ${t} (${n} all-day events).`,
+    trip_nocal:t=>`The Pixel read no calendars (${t}). Allow calendar access: Android Settings → Apps → ThinCart → Permissions → Calendar.`,
     trip_days:n=>n === 1 ? '1 day' : `${n} days`,
     trip_manual:'marked by hand',
     trip_note:'Purchase cycles are measured in days at home, so a week away does not read as a week of groceries. Detected trips do NOT count until you confirm them — until then they are only shown here, and your cycles are unchanged. Days you confirm or reject are never overwritten by a later calendar sync.',
@@ -839,17 +836,15 @@ const STR = {
     last_bought:d=>`${d}日前に購入`,
     cyc_since:d=>`在宅${d}日経過`,
     trip_title:'✈️ 旅行',
-    trip_sync:'↻ 同期',
     trip_add_h:'手動で不在日を登録',
     trip_add_go:'不在',
     trip_h_pending:'検出されました — 不在でしたか？（未反映）',
     trip_h_settled:'確認済み',
     trip_yes:'不在だった', trip_no:'在宅だった',
     trip_none:'旅行はまだ検出されていません。',
-    trip_unlinked:'カレンダー未連携です。サーバーで /home/korety/miniconda3/bin/python3 calendar_sync.py --authorize を実行してください。',
-    trip_synced:t=>`カレンダー同期: ${t}`,
-    trip_never:'カレンダー連携済み — まだ同期していません。',
-    trip_error:e=>`前回の同期に失敗: ${e}`,
+    trip_never:'カレンダーはまだ読み込まれていません。PixelでThinCartを開き、カレンダーへのアクセスを許可してください。アプリを開くたびに読み込みます。',
+    trip_synced:(t,n)=>`Pixelからカレンダーを読み込み: ${t}（終日の予定 ${n}件）`,
+    trip_nocal:t=>`Pixelがカレンダーを1つも読み込めませんでした（${t}）。Androidの設定 → アプリ → ThinCart → 権限 → カレンダー で許可してください。`,
     trip_days:n=>`${n}日間`,
     trip_manual:'手動で登録',
     trip_note:'購入サイクルは在宅日数で測るため、1週間の旅行が「1週間分の買い物」として扱われることはありません。検出された旅行は、確認するまでサイクルに反映されません（表示のみ）。確認・却下した日は、以降のカレンダー同期で上書きされません。',
@@ -973,7 +968,6 @@ function applyLang() {
   $('hist-h1').textContent = T().hist_title;
   $('hist-note').textContent = T().hist_note;
   $('trip-h1').textContent = T().trip_title;
-  $('trip-sync').textContent = T().trip_sync;
   $('trip-add-h').textContent = T().trip_add_h;
   $('trip-day-go').textContent = T().trip_add_go;
   $('trip-note').textContent = T().trip_note;
@@ -1212,20 +1206,6 @@ async function openHistory() {
 $('trips').onclick = openTrips;
 $('trip-close').onclick = () => $('trip-panel').style.display = 'none';
 
-$('trip-sync').onclick = async () => {
-  const btn = $('trip-sync');
-  btn.disabled = true; btn.textContent = '…';
-  try {
-    const res = await fetch('/api/calendar/sync', { method:'POST' });
-    if (!res.ok) throw new Error((await res.json()).detail || res.status);
-    await openTrips();
-  } catch (e) {
-    setTripStatus(T().trip_error(e.message), true);
-  } finally {
-    btn.disabled = false; btn.textContent = T().trip_sync;
-  }
-};
-
 $('trip-day-go').onclick = async () => {
   const day = $('trip-day').value;
   if (!day) return;
@@ -1272,10 +1252,12 @@ async function openTrips() {
     return;
   }
 
-  if (!data.linked) setTripStatus(T().trip_unlinked, true);
-  else if (data.last_error) setTripStatus(T().trip_error(data.last_error), true);
-  else if (data.last_sync) setTripStatus(T().trip_synced(new Date(data.last_sync).toLocaleString()), false);
-  else setTripStatus(T().trip_never, false);
+  // The calendar is read by the Pixel app when it opens (PLAN.md §2026-09-26);
+  // this page cannot read it, so there is no sync button — only the last read.
+  const last = data.last_sync;
+  if (!last) setTripStatus(T().trip_never, false);
+  else if (!last.calendars) setTripStatus(T().trip_nocal(new Date(last.at).toLocaleString()), true);
+  else setTripStatus(T().trip_synced(new Date(last.at).toLocaleString(), last.events), false);
 
   box.innerHTML = '';
   if (!data.trips.length) { box.innerHTML = `<div class="trip-note">${T().trip_none}</div>`; return; }

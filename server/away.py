@@ -1,9 +1,14 @@
 """
-away.py — the Travel feature's HTTP surface and its calendar poller.
+away.py — the Travel feature's HTTP surface.
 
-PLAN.md §Intelligence layer 1b. Split out of app.py because it is a whole
-self-contained feature — a poller, three endpoints and a review model — and
-because app.py had grown past the size the repo's quality ceiling allows.
+PLAN.md §Intelligence layer 1b, and §2026-09-26 for where the events come from:
+the Pixel app reads the calendar Android already syncs and POSTs it here. There
+is no Google client on the server any more — the OAuth app could not be
+published, and a Testing-mode token dies every 7 days.
+
+Split out of app.py because it is a whole self-contained feature — its
+endpoints and a review model — and because app.py had grown past the size the
+repo's quality ceiling allows.
 
 Shared server state (the SQLite connection, the write lock, the broadcast) is
 handed over by `bind()` at startup rather than imported from app.py, which
@@ -11,6 +16,7 @@ would be circular. Nothing here touches those objects before binding.
 """
 
 import asyncio
+import json
 import logging
 import sqlite3
 from collections.abc import Awaitable, Callable
@@ -21,18 +27,27 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-import calendar_sync
 import db
 import travel
 
 log = logging.getLogger("thincart.away")
 router = APIRouter()
 
-SYNC_EVERY_H = 6
+# How much calendar a sync covers. Purchase cycles are estimated from a few
+# months of events at most, so reading further back would be waste. The phone
+# asks for this window; the server clamps whatever it is sent to it.
+WINDOW_BACK_DAYS = 180
+WINDOW_AHEAD_DAYS = 30
 
-# Last sync outcome, surfaced in the Travel panel. A calendar that silently
-# stopped syncing would leave cycles drifting with nothing on screen to say why.
-state: dict = {"at": None, "error": None, "detected": 0}
+# A posted window further out than this is not a clock skew, it is garbage.
+WINDOW_SANITY_DAYS = 400
+
+MAX_EVENTS = 5000
+MAX_TEXT = 300  # summary/location as shown in the Travel panel, never more
+
+# Last sync, persisted so a restart does not make the Travel panel claim the
+# calendar has never been read.
+META_KEY = "calendar_sync"
 
 
 @dataclass
@@ -69,8 +84,78 @@ class AwayOp(BaseModel):
     status: Literal["confirmed", "rejected"]
 
 
-async def sync_calendar() -> dict:
-    """Pull the calendar window, write away-day proposals, tell the phones.
+class CalendarWindow(BaseModel):
+    start: datetime
+    end: datetime
+
+
+class CalendarPush(BaseModel):
+    """What the Pixel sends: the window it read, how many calendars it read it
+    from, and the events, already in the Google shape `travel.detect` takes."""
+
+    window: CalendarWindow
+    calendars: int = Field(..., ge=0, le=500)
+    events: list[dict] = Field(default_factory=list, max_length=MAX_EVENTS)
+
+
+def _clip(value) -> str:
+    return value[:MAX_TEXT] if isinstance(value, str) else ""
+
+
+def _bound(value) -> dict:
+    """Only the two keys the detector reads, and only as short strings."""
+    if not isinstance(value, dict):
+        return {}
+    return {k: value[k][:40] for k in ("date", "dateTime") if isinstance(value.get(k), str)}
+
+
+def clean_event(raw: dict) -> dict:
+    """Keep exactly the fields `travel.detect` reads. Anything else a client
+    sends is dropped rather than trusted — this endpoint is open on the tailnet."""
+    ev = {
+        "id": _clip(raw.get("id")),
+        "summary": _clip(raw.get("summary")),
+        "location": _clip(raw.get("location")),
+        "start": _bound(raw.get("start")),
+        "end": _bound(raw.get("end")),
+    }
+    if raw.get("status") == "cancelled":
+        ev["status"] = "cancelled"
+    if any(isinstance(a, dict) and a.get("self") and a.get("responseStatus") == "declined"
+           for a in raw.get("attendees") or []):
+        ev["attendees"] = [{"self": True, "responseStatus": "declined"}]
+    return ev
+
+
+def clamp_window(start: datetime, end: datetime, now: datetime) -> tuple[datetime, datetime]:
+    """The posted window, checked and narrowed to the server's own.
+
+    Pruning deletes unreviewed days the calendar no longer claims INSIDE the
+    window, so a window wider than what was actually read would delete trips
+    nobody looked for. Clamping to [now-180 d, now+30 d] means a phone can only
+    ever prune what it could have read.
+    """
+    if start.tzinfo is None or end.tzinfo is None:
+        raise ValueError("window bounds need a timezone")
+    if not start < end:
+        raise ValueError("window start must be before its end")
+    sanity = timedelta(days=WINDOW_SANITY_DAYS)
+    if not (now - sanity <= start and end <= now + sanity):
+        raise ValueError("window is outside any plausible calendar read")
+    return (
+        max(start, now - timedelta(days=WINDOW_BACK_DAYS)),
+        min(end, now + timedelta(days=WINDOW_AHEAD_DAYS)),
+    )
+
+
+def last_sync(conn: sqlite3.Connection) -> dict | None:
+    row = conn.execute("SELECT value FROM meta WHERE key=?", (META_KEY,)).fetchone()
+    return json.loads(row[0]) if row else None
+
+
+async def ingest(push: CalendarPush) -> dict:
+    """Detect away days in what the phone read, write them as proposals, tell
+    the phones.
 
     Detection only ever proposes: `record_away_candidates` will not overwrite a
     day the user has already confirmed or rejected, and pruning is limited to
@@ -78,9 +163,8 @@ async def sync_calendar() -> dict:
     """
     ctx = _need()
     now = datetime.now(UTC)
-    time_min = now - timedelta(days=calendar_sync.WINDOW_BACK_DAYS)
-    time_max = now + timedelta(days=calendar_sync.WINDOW_AHEAD_DAYS)
-    events = await asyncio.to_thread(calendar_sync.fetch_events, None, time_min, time_max)
+    time_min, time_max = clamp_window(push.window.start, push.window.end, now)
+    events = [clean_event(e) for e in push.events if isinstance(e, dict)]
     found = travel.detect(events)
 
     # away_days is keyed by HOME-LOCAL dates, so the pruning window has to be
@@ -94,31 +178,26 @@ async def sync_calendar() -> dict:
     )
     async with ctx.write_lock:
         ts = ctx.now_iso()
-        db.record_away_candidates(ctx.conn, found, ts)
-        dropped = db.prune_away_candidates(
-            ctx.conn,
-            *window,
-            {c.day.isoformat() for c in found},
+        dropped = 0
+        # Zero calendars read means the phone saw nothing — access revoked,
+        # sync switched off, the calendar hidden — not that every trip was
+        # cancelled. Pruning on that would wipe every proposal awaiting review.
+        if push.calendars > 0:
+            db.record_away_candidates(ctx.conn, found, ts)
+            dropped = db.prune_away_candidates(ctx.conn, *window, {c.day.isoformat() for c in found})
+        summary = {"at": ts, "calendars": push.calendars, "events": len(events), "away_days": len(found)}
+        ctx.conn.execute(
+            "INSERT INTO meta(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (META_KEY, json.dumps(summary)),
         )
         db.bump_revision(ctx.conn)
         ctx.conn.commit()
-    state.update(at=ts, error=None, detected=len(found))
-    log.info("calendar sync: %d events, %d away days, %d stale dropped", len(events), len(found), dropped)
+    log.info(
+        "calendar sync from phone: %d calendars, %d events, %d away days, %d stale dropped",
+        push.calendars, len(events), len(found), dropped,
+    )
     await ctx.broadcast()
-    return {"events": len(events), "away_days": len(found), "dropped": dropped, "at": ts}
-
-
-async def sweeper() -> None:
-    """Poll the calendar. A failure is logged and retried next cycle — the
-    shopping list keeps working with the away days it already has."""
-    while True:
-        if calendar_sync.is_linked():
-            try:
-                await sync_calendar()
-            except Exception as exc:
-                state.update(error=str(exc))
-                log.warning("calendar sync failed: %s", exc)
-        await asyncio.sleep(SYNC_EVERY_H * 3600)
+    return {**summary, "dropped": dropped}
 
 
 @router.get("/api/away")
@@ -154,10 +233,9 @@ async def get_away():
             }
         )
     return {
-        "linked": calendar_sync.is_linked(),
         "timezone": str(travel.HOME_TZ),
-        "last_sync": state["at"],
-        "last_error": state["error"],
+        # None until the Pixel app has read the calendar once
+        "last_sync": last_sync(conn),
         "trips": trips,
         "rejected": [r["day"] for r in rows if r["status"] == "rejected"],
     }
@@ -182,13 +260,10 @@ async def post_away(op: AwayOp):
     return {"ok": True, **result, "revision": db.get_revision(ctx.conn)}
 
 
-@router.post("/api/calendar/sync")
-async def post_calendar_sync():
-    """Sync now, instead of waiting for the 6-hourly poll."""
-    if not calendar_sync.is_linked():
-        raise HTTPException(400, "no calendar linked — run calendar_sync.py --authorize on the server")
+@router.post("/api/calendar/events")
+async def post_calendar_events(push: CalendarPush):
+    """The Pixel app's calendar read. Sent from native code, so no CORS."""
     try:
-        return await sync_calendar()
-    except calendar_sync.CalendarError as exc:
-        state.update(error=str(exc))
-        raise HTTPException(502, str(exc)) from exc
+        return await ingest(push)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc

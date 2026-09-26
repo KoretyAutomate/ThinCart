@@ -467,8 +467,8 @@ def test_prune_window_is_in_home_local_dates(tmp_path, monkeypatch):
     assert len(dbmod.away_rows(conn)) == 1
 
     # the window a sync computes, expressed the way the rows are keyed
-    time_max = now + timedelta(days=awaymod.calendar_sync.WINDOW_AHEAD_DAYS)
-    time_min = now - timedelta(days=awaymod.calendar_sync.WINDOW_BACK_DAYS)
+    time_max = now + timedelta(days=awaymod.WINDOW_AHEAD_DAYS)
+    time_min = now - timedelta(days=awaymod.WINDOW_BACK_DAYS)
     dropped = dbmod.prune_away_candidates(
         conn,
         time_min.astimezone(travel.HOME_TZ).date().isoformat(),

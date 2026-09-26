@@ -2267,3 +2267,141 @@ the bill arrives as rounds of confident, wrong diagnosis. The `window.onerror`
 hook added this same round would have named it on the first trace.
 
 Suites: 243 python, **219 web**, 89 launcher.
+
+## 2026-09-26 — calendar read on the Pixel, not pulled from Google (supersedes "Where away days come from")
+
+**Why.** The Google pull never ran: the OAuth app is in Testing, the owner is
+not on its tester list (`403 access_denied`), and publishing demands Branding
+work. Even once in Testing, Google expires the refresh token after 7 days.
+OutfitAdvisor reads the same calendar with no Google app at all — the Pixel
+already syncs it, and Android's `READ_CALENDAR` exposes that copy. ThinCart's
+Pixel shell is the same Capacitor 6 stack, so it can do the same.
+
+**Constraint that shapes it.** The native bridge is injected for the bundled
+launcher page only (`AppUpdatePlugin.java:39`); the tailnet page cannot call
+plugins. So the read happens in the launcher, before handoff.
+
+### Shape
+
+1. **Native reader — `CalendarPlugin.java`** (Java, beside `AppUpdatePlugin`;
+   registered in `MainActivity`). NOT `@ebarooni/capacitor-calendar`: its
+   `listEventsInRange` queries `Events` with `DTSTART>=from AND DTEND<=to`, so
+   a recurring event arrives once (or not at all — its DTEND is null), an event
+   already under way is dropped, and its all-day epochs are UTC midnight that
+   OutfitAdvisor converts in local time (a day early in New York). Ours:
+   - `@Permission(alias="calendar", strings=READ_CALENDAR)`;
+     `checkPermissions` / `requestPermissions` come free from Capacitor.
+     Manifest gets `READ_CALENDAR` (read only — never WRITE).
+   - Calendars: query `CalendarContract.Calendars` for `_ID, ACCOUNT_NAME,
+     OWNER_ACCOUNT, CALENDAR_ACCESS_LEVEL, VISIBLE`; keep calendars the user
+     OWNS (`access >= CAL_ACCESS_OWNER` and `OWNER_ACCOUNT == ACCOUNT_NAME`).
+     Shared/subscribed calendars (holidays, contacts' birthdays, a colleague's
+     calendar) are excluded — same fail-closed rule as OutfitAdvisor.
+   - Events: `CalendarContract.Instances` over [now−180 d, now+30 d] (the
+     current server window) — expands recurrences and returns anything that
+     OVERLAPS the window. Columns: `EVENT_ID, BEGIN, END, ALL_DAY, TITLE,
+     EVENT_LOCATION, STATUS, SELF_ATTENDEE_STATUS, CALENDAR_ID`.
+   - Emitted in the Google shape `travel.detect` already consumes, so the
+     detector is untouched: all-day → `{"start":{"date":…},"end":{"date":…}}`
+     formatted in **UTC** (Android stores all-day bounds at UTC midnight; end
+     stays exclusive, as Google's is); timed → `dateTime` ISO-8601 UTC.
+     `STATUS_CANCELED` → `"status":"cancelled"`; `SELF_ATTENDEE_STATUS ==
+     DECLINED` → `attendees:[{self:true,responseStatus:"declined"}]`.
+     `id` = `<event_id>:<begin>` so each recurrence instance is distinct.
+   - `push({url})`: read + HTTP POST to `<url>/api/calendar/events` **from Java
+     on a background executor**. Native HTTP means no CORS, and the request
+     survives the launcher navigating away — so handoff is never delayed.
+     Resolves immediately with `{queued:true}`; no result needed by the page.
+2. **Launcher (`mobile/www/index.html`).** On cold start, after the probe
+   succeeds and before `launch()`: if `Plugins.Calendar` exists — check
+   permission; if `prompt`, request (the one dialog, first run only); if
+   granted, `push({url})`. Denied or no plugin (browser) → skip silently and
+   launch. Never a gate, same posture as `/version`.
+3. **Server.** `POST /api/calendar/events` `{window:{start,end}, events:[…]}`:
+   validate (≤ 5000 events, window ≤ 400 days, strings clipped), then the
+   existing `sync_calendar` body — `travel.detect` → `record_away_candidates`
+   → `prune_away_candidates` over the POSTED window → bump + broadcast. Last
+   sync time/event count persist in `meta` (today it is in-memory and lost on
+   restart). Remove: `calendar_sync.py`, the 6-hourly `sweeper`,
+   `POST /api/calendar/sync`, `is_linked`, the README OAuth section. The
+   credentials file on disk is left alone (owner can delete it).
+4. **Travel panel (`app/index.html`).** Status line becomes "Calendar read from
+   the Pixel <time> (N events)" / never: "Open ThinCart on the Pixel once and
+   allow calendar access". The `↻ sync` button goes — the served page cannot
+   read a calendar; reopening the app is the sync.
+
+### Known losses vs the Google pull (accepted)
+- **OUT_OF_OFFICE** is not exposed by Android's provider; a timed OOO event is
+  therefore not detected. All-day and wording rules are unaffected, and the
+  Boston trip (Gmail "Stay at …", all-day) is still caught. Manual entry covers
+  the rest.
+- Sync cadence is "whenever the Pixel app cold-starts", not every 6 h. The
+  iPhone never syncs — it doesn't need to; away days are household-wide.
+- Event titles/locations travel phone → DGX over Tailscale (same data the
+  Google pull fetched). The endpoint is unauthenticated like every other on
+  the tailnet; a forged POST can only create PROPOSALS, which count for nothing
+  until reviewed.
+
+### Tests & verification
+- Python: endpoint happy path (Google-shaped events → proposals), window
+  pruning uses the posted bounds, reviewed days untouched, validation rejects
+  oversize, meta persists last sync across a fresh app import.
+- Launcher (node --test/jsdom): permission granted → push then launch;
+  prompt → request → push; denied / plugin absent / push throws → launch
+  anyway; push never awaited past launch.
+- Java is not unit-testable here; the all-day UTC formatting and ownership
+  filter are small pure helpers kept static for readability.
+- Real path: build APK (versionCode 3 → 4, 1.2 → 1.3), `publish_apk.py`, owner
+  installs via the in-app offer, opens app, allows calendar → server journal
+  shows `calendar sync from phone: N events, M away days`, Travel panel shows
+  proposals. Not "done" until that log line exists.
+
+### Review deltas (agent review, 2026-09-26 — applied; these override the text above)
+
+1. **Which calendars.** `access >= CAL_ACCESS_OWNER` AND (`OWNER_ACCOUNT`
+   equalsIgnoreCase `ACCOUNT_NAME` — the primary — OR `OWNER_ACCOUNT` ends in
+   `@group.calendar.google.com` — a calendar the user created). A colleague's
+   calendar shared with manage rights has the colleague's email as owner and
+   stays out. Holidays/birthdays are read-only and stay out. Verify on device.
+2. **The bridge may reach the tailnet page after all.** `Bridge.java:242`
+   turns `allowNavigation` into origin rules that `addWebMessageListener` may
+   reject, falling back to `addJavascriptInterface` for every origin. So
+   `push` must not be a "send my calendar anywhere" primitive: Java checks the
+   `url` host against `bridge.getAppAllowNavigationMask()` and hardcodes the
+   path `/api/calendar/events`. Check `typeof androidBridge` on the tailnet
+   page via chrome://inspect during device verification and record the answer.
+3. **An empty read must not wipe proposals.** The phone posts
+   `{window, calendars: N, events}`; with `calendars == 0` the server records
+   the sync but does NOT prune. The posted window is validated (start < end,
+   both within ±400 d of now), clamped to the server's own [now−180 d,
+   now+30 d], and converted to home-local dates as `away.py:84-90` does. One
+   syncing device is assumed; a second Pixel would prune the first's rows —
+   documented, not built for.
+4. **Permission asked once.** `granted` → push; `prompt` → request once;
+   `prompt-with-rationale` or `denied` → skip (no dialog on every cold start).
+   The Travel panel says where to turn it on (Android Settings → Apps →
+   ThinCart → Permissions). Java `push` re-checks `READ_CALENDAR` itself.
+5. **Where in the launcher.** In `tryLaunch`, after a successful probe and
+   before `checkUpdate` — so it runs on cold start and on Open/Fresh/Connect,
+   never between `showUpdate` and `launch`. The refusal timer starts inside
+   `launch()`, so awaiting the dialog first is safe; the whole calendar step
+   still has a 30 s cap so "Connecting…" can never hang on it.
+6. **Server removals, completely.** Move `WINDOW_BACK_DAYS/AHEAD_DAYS` into
+   `away.py` (`tests/test_travel.py:470-471` use them); drop `calendar_sync`
+   from `away.py` imports and the exempt set/docstring in
+   `tests/test_chains.py:481-484`; delete `away.sweeper()` at `app.py:426`.
+7. **Travel panel, fully.** `get_away` returns `last_sync`, `events`,
+   `calendars` from `meta` instead of `linked`/`last_error`; `app/index.html`
+   drops the `trip-sync` button (`:513`, `:976`, `:1219`) and rewrites the
+   EN (`:714`, `:721-724`) and JA (`:842`, `:849-852`) strings; README lines
+   25-26 and 106-135 rewritten for the phone path.
+8. **All-day only on the wire.** Without OOO a timed event can never be
+   travel, so the phone sends `ALL_DAY=1` instances only — less private data,
+   far from the 5000 cap.
+9. **Release path.** `READ_CALENDAR` in the manifest; `registerPlugin(
+   CalendarPlugin.class)` before `super.onCreate`. The DGX does not build
+   APKs: CI (`build-apk.yml`) builds on a push to master touching `mobile/`;
+   after merge, `server/publish_latest_apk.sh` publishes it for the in-app
+   update offer. versionCode 3 → 4, 1.2 → 1.3.
+10. **Launcher tests.** The helper at `mobile/tests/launcher.test.js:49` gains a
+    `Calendar` mock; existing handoff tests get the extra microtask flushes.

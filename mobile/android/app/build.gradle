@@ -11,8 +11,8 @@ android {
         // The in-app updater compares versionCode: a build that forgets to raise
         // it is invisible to every phone. publish_apk.py reads the value back out
         // of the built APK, so what is published is what was built.
-        versionCode 3
-        versionName "1.2"
+        versionCode 4
+        versionName "1.3"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

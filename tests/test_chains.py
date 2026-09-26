@@ -476,12 +476,12 @@ def test_only_lookup_py_reaches_outward():
     this app sends anywhere. A request from anywhere else — httpx, curl_cffi,
     a browser — is a review failure.
 
-    Three modules are exempt and named, with the reason: llm.py talks to vLLM
+    Two modules are exempt and named, with the reason: llm.py talks to vLLM
     and catalog.py to SearXNG, both on the loopback interface, which never
-    leaves the box; calendar_sync.py is the travel feature's Google Calendar
-    client, which carries dates and nothing about what the household buys.
-    Anything new must be added HERE, with its reason, rather than slipping in."""
-    exempt = {"lookup.py", "llm.py", "catalog.py", "calendar_sync.py"}
+    leaves the box. (The calendar is pushed IN by the Pixel app now; nothing
+    here fetches it.) Anything new must be added HERE, with its reason, rather
+    than slipping in."""
+    exempt = {"lookup.py", "llm.py", "catalog.py"}
     offenders = []
     for f in SERVER.glob("*.py"):
         if f.name in exempt:
