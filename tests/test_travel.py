@@ -384,7 +384,9 @@ def test_api_refuses_to_un_review_a_day(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
     import app as appmod
+    import db as dbmod
 
+    importlib.reload(dbmod)  # re-read THINCART_DB: an earlier import froze DB_PATH
     importlib.reload(appmod)
     client = TestClient(appmod.app)
 
@@ -418,7 +420,9 @@ def test_snooze_deadline_is_stored_comparable_to_now(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
     import app as appmod
+    import db as dbmod
 
+    importlib.reload(dbmod)  # re-read THINCART_DB: an earlier import froze DB_PATH
     importlib.reload(appmod)
     client = TestClient(appmod.app)
 

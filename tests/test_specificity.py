@@ -72,6 +72,15 @@ def test_english_mismatch_blocks_unnamed_varieties():
     assert catalog._english_mismatch("マカロニ", "macaroni", ["パスタ", "pasta"]) is True
 
 
+def test_english_mismatch_lets_curated_synonyms_merge():
+    # Codex review 2026-09-26: enrich_prompt names these as aliases, so the
+    # guard must not split their histories.
+    assert catalog._english_mismatch("aubergine", "eggplant", ["eggplant"]) is False
+    assert catalog._english_mismatch("coriander", "coriander", ["パクチー", "cilantro"]) is False
+    # a synonym group does not make a variety of one member equal to it
+    assert catalog._english_mismatch("baby eggplant", "baby eggplant", ["eggplant"]) is True
+
+
 def test_english_mismatch_allows_matching_or_uncomparable_names():
     assert catalog._english_mismatch("たまねぎ", "onion", ["玉ねぎ", "たまねぎ", "onion"]) is False
     assert catalog._english_mismatch("たまねぎ", None, ["玉ねぎ", "onion"]) is False  # no English given

@@ -128,7 +128,7 @@ public class CalendarPlugin extends Plugin {
     }
 
     /** Calendars the user owns: their primary, and calendars they created. */
-    private List<Long> ownedCalendars() {
+    private List<Long> ownedCalendars() throws Exception {
         List<Long> ids = new ArrayList<>();
         String[] cols = {
             CalendarContract.Calendars._ID,
@@ -138,7 +138,8 @@ public class CalendarPlugin extends Plugin {
         };
         try (Cursor c = getContext().getContentResolver().query(
                 CalendarContract.Calendars.CONTENT_URI, cols, null, null, null)) {
-            if (c == null) return ids;
+            // no cursor is a failed read, not "no calendars" — abort the push
+            if (c == null) throw new IllegalStateException("calendar provider returned no cursor");
             while (c.moveToNext()) {
                 if (isOwned(c.getInt(3), c.getString(2), c.getString(1))) ids.add(c.getLong(0));
             }
@@ -176,11 +177,18 @@ public class CalendarPlugin extends Plugin {
         for (Long id : calendars) in.append(in.length() == 0 ? "" : ",").append(id);
         String where = CalendarContract.Instances.ALL_DAY + "=1 AND "
                 + CalendarContract.Instances.CALENDAR_ID + " IN (" + in + ")";
+        // The server prunes unreviewed trips the calendar no longer shows, so an
+        // incomplete read must never be sent as if it were the whole window:
+        // a failed query would erase the review queue, a truncated one would
+        // drop every trip past the cut. Both abort the push instead.
         JSONArray out = new JSONArray();
         try (Cursor c = getContext().getContentResolver().query(b.build(), cols, where, null,
                 CalendarContract.Instances.BEGIN)) {
-            if (c == null) return out;
-            while (c.moveToNext() && out.length() < MAX_EVENTS) {
+            if (c == null) throw new IllegalStateException("calendar provider returned no cursor");
+            if (c.getCount() > MAX_EVENTS) {
+                throw new IllegalStateException(c.getCount() + " all-day events exceed " + MAX_EVENTS);
+            }
+            while (c.moveToNext()) {
                 long begin = c.getLong(1);
                 JSONObject ev = new JSONObject();
                 // one id per occurrence: a weekly all-day event is many trips, not one

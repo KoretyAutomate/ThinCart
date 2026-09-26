@@ -41,10 +41,17 @@ def _trip(first: date, nights: int = 3, eid: str = "hotel:1") -> dict:
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
+    """A throwaway DB, bound BEFORE the app connects. `import away` above has
+    already imported `db`, freezing DB_PATH and connect()'s default at whatever
+    THINCART_DB was then — the live household DB when this file runs alone.
+    Reloading only `app` would reuse that; reloading `db` first re-reads it."""
     monkeypatch.setenv("THINCART_DB", str(tmp_path / "phone.db"))
     import app as appmod
+    import db as dbmod
 
+    importlib.reload(dbmod)
     importlib.reload(appmod)
+    assert Path(appmod.conn.execute("PRAGMA database_list").fetchone()[2]) == tmp_path / "phone.db"
     return TestClient(appmod.app)
 
 
@@ -145,6 +152,9 @@ def test_clean_event_keeps_only_what_the_detector_reads():
 def test_last_sync_survives_a_restart(client, tmp_path):
     _push(client, [_trip(date.today() - timedelta(days=20))])
     import app as appmod
+    import db as dbmod
 
+    importlib.reload(dbmod)
     importlib.reload(appmod)  # same THINCART_DB, fresh process state
+    assert Path(appmod.conn.execute("PRAGMA database_list").fetchone()[2]) == tmp_path / "phone.db"
     assert TestClient(appmod.app).get("/api/away").json()["last_sync"]["away_days"] == 3
