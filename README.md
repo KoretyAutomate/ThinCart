@@ -121,8 +121,10 @@ With no away days recorded the arithmetic is identical to before.
    {"client_id": "….apps.googleusercontent.com", "client_secret": "…",
     "calendar_ids": ["primary"]}
    ```
-5. `python3 server/calendar_sync.py --authorize` — open the printed URL in any
+5. `/home/korety/miniconda3/bin/python3 server/calendar_sync.py --authorize` — open the printed URL in any
    browser; if the browser is on another machine, paste the redirect URL back.
+   Use the interpreter from `thincart.service`'s `ExecStart`: the bare `python3`
+   on PATH is `/usr/bin/python3`, which has no `httpx` and fails on import.
 
 Then `--calendars` lists what the link can read and `--check` prints what reads
 as travel without writing anything.

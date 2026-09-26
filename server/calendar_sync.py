@@ -19,7 +19,10 @@ One-time setup, from the DGX:
     2. OAuth consent screen → External → add yourself as a test user
     3. Credentials → OAuth client ID → **Desktop app** → note id + secret
     4. write those two into the file above, then:
-       python3 calendar_sync.py --authorize
+       /home/korety/miniconda3/bin/python3 calendar_sync.py --authorize
+
+    Use the interpreter thincart.service runs (its ExecStart), not the bare
+    `python3` on PATH: that is /usr/bin/python3, which has no httpx.
 
 Sync failure is never fatal to ThinCart: the caller logs it and keeps the away
 days it already has. A shopping list that cannot reach Google is still a
