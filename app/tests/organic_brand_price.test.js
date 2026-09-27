@@ -52,10 +52,13 @@ function boot({ items, queue = [], where = null, stores = STORES, fetchImpl = nu
     return Promise.resolve({ ok: true, status: 200, json: async () => ({}), text: async () => "" });
   };
   if (fetchImpl) w.fetch = fetchImpl;                 // a test that drives the network itself
-  w.WebSocket = function () { this.close = () => {}; };
+  const sockets = [];
+  w.WebSocket = function () { this.close = () => {}; sockets.push(this); };
   w.eval(SCRIPT);
   const doc = w.document;
-  return { w, doc, calls,
+  // what the other phone, or the server's enrichment, pushes over the socket
+  const push = next => sockets[sockets.length - 1].onmessage({ data: JSON.stringify(next) });
+  return { w, doc, calls, push,
            rows: () => [...doc.querySelectorAll("#list li.item")],
            // what the phone has queued or sent: the queue is where an edit lands first
            ops: () => {
@@ -238,6 +241,82 @@ function openEditor(b, i) {
     await settle(); await settle(); await settle();
     check("after the ACK the list is asked about again, milk included",
       asked.some(a => JSON.stringify(a) === "[1,2]"), asked);
+  }
+
+  console.log("\n--- 4f. the answer is tied to its input (Codex code review, round 3)");
+  {
+    // one fetch that counts asks and can hold the next answer
+    const mk = (items, stores = STORES) => {
+      const t = { asked: [], hold: false, release: null,
+        state: { revision: 1, items, stores, picks: {}, suggestions: [], away_pending: 0 },
+        answer: () => ({ partial: false, items: {
+        "1": { cheapest: { store: "Wegmans", amount: 3, unit_price: "$0.03/fl oz", product: "Milk",
+               exact: false, fetched_at: "" }, quotes: [{}], comparable: true } } }) };
+      t.fetch = (url, opts) => {
+        const u = String(url);
+        if (u === "/api/where") {
+          t.asked.push(JSON.parse(opts.body).catalog_ids);
+          const body = t.answer();
+          const ok = { ok: true, status: 200, json: async () => body };
+          if (t.hold) return new Promise(r => { t.release = () => r(ok); });
+          return Promise.resolve(ok);
+        }
+        if (u === "/api/op") return new Promise(() => {});
+        if (u.startsWith("/api/state")) return Promise.resolve({ ok: true, status: 200, json: async () => t.state });
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({}), text: async () => "" });
+      };
+      t.push = (b, next) => { t.state = next; b.push(next); };
+      return t;
+    };
+    const st = (items, stores = STORES, revision = 1) =>
+      ({ revision, items, stores, picks: {}, suggestions: [], away_pending: 0 });
+
+    // (a) enrichment names an item in English WITHOUT a revision bump: ask again
+    let t = mk([item(1, "牛乳")]);
+    let b = boot({ items: t.state.items, fetchImpl: t.fetch });
+    await settle();
+    b.doc.getElementById("stores-btn").click(); b.doc.getElementById("plan-byprice").click();
+    await settle(); await settle();
+    t.push(b, st([item(1, "牛乳", { name_en: "milk" })]));
+    await settle(); await settle();
+    check("(a) a new English name is a new question", t.asked.length === 2, t.asked);
+
+    // (b) the other phone turns organic on: the old answer is not shown meanwhile
+    t = mk([item(1, "milk")]);
+    b = boot({ items: t.state.items, fetchImpl: t.fetch });
+    await settle();
+    b.doc.getElementById("stores-btn").click(); b.doc.getElementById("plan-byprice").click();
+    await settle(); await settle();
+    t.hold = true;
+    t.push(b, st([item(1, "milk", { organic: true })]));
+    await settle();
+    const during = b.doc.getElementById("plan-price-note").textContent
+      + [...b.doc.querySelectorAll("#plan-groups .plangroup")].map(g => g.textContent).join("|");
+    check("(b) while re-asking, the old answer is not shown", /Checking prices/.test(during) && !/\$3\.00/.test(during), during);
+    t.release(); await settle(); await settle();
+
+    // (c) price mode on before any store is linked; linking one asks
+    t = mk([item(1, "milk")], []);
+    b = boot({ items: t.state.items, stores: [], fetchImpl: t.fetch });
+    await settle();
+    b.doc.getElementById("stores-btn").click(); b.doc.getElementById("plan-byprice").click();
+    await settle();
+    check("(c) no store yet: nothing asked", t.asked.length === 0, t.asked);
+    t.push(b, st([item(1, "milk")], STORES, 2));
+    await settle(); await settle();
+    check("(c) the first linked store triggers an ask", t.asked.length === 1, t.asked);
+
+    // (d) a half-typed store note survives an answer arriving
+    t = mk([item(1, "milk")]); t.hold = true;
+    b = boot({ items: t.state.items, fetchImpl: t.fetch });
+    await settle();
+    b.doc.getElementById("stores-btn").click(); b.doc.getElementById("plan-byprice").click();
+    await settle();
+    const ta = b.doc.querySelector("#store-rows textarea");
+    ta.focus(); ta.value = "half-typed note";
+    t.release(); await settle(); await settle();
+    const now = b.doc.querySelector("#store-rows textarea");
+    check("(d) the unsaved note is still there", now && now.value === "half-typed note", now && now.value);
   }
 
   console.log("\n--- 5. no priced store: say what to do ------------------------------");

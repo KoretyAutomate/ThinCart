@@ -1497,15 +1497,28 @@ $('set-close').onclick = () => $('set-panel').style.display = 'none';
 
 /* ============ stores panel: where-to-buy plan + store management ============ */
 $('stores-btn').onclick = () => {
-  $('stores-panel').style.display = 'flex'; renderStores();
-  if (byPrice) loadWhere();    // prices age; a reopened panel asks again
+  // prices age: a reopened panel asks again rather than show the last answer
+  whereResult = null; whereAsking = null;
+  $('stores-panel').style.display = 'flex'; renderStores(); whereTick();
 };
 
 /* ============ where to buy, by price (PLAN.md Phase 7C) ============
    A VIEW over the plan, never a saved preference: nothing here enqueues an op.
-   The server names a store cheapest only on comparable unit prices. */
-let byPrice = false, whereData = null, whereMsg = '', whereKey = null, whereGen = 0;
-const WHERE_PAGE = 30;          // the server's per-request cap
+   The server names a store cheapest only on comparable unit prices.
+
+   Every answer is tied to the INPUT it was computed for — whereInput().key:
+   the priced stores, and for every item its name, English name (enrichment
+   changes it without a revision bump), 🌱, brand and picked product, plus which
+   items are held back as unsettled. An answer is shown only while its key is
+   still today's; otherwise the panel says it is checking. Any change to the
+   input, from this phone or the other, asks again (whereTick) — whether or not
+   an earlier answer exists. Background repaints go through refreshStores so a
+   half-typed store note is never rebuilt away. */
+let byPrice = false;
+let whereResult = null;   // { key, items, partial } or { key, msg }
+let whereAsking = null;   // the key of the ask in flight
+let whereGen = 0;         // numbers each ask; a superseded answer is dropped
+const WHERE_PAGE = 30;    // the server's per-request cap
 
 /* Items whose price question the SERVER would answer with stale preferences:
  * a queued 🌱 / brand / rename / product-pick edit — or a queued "organic X"
@@ -1527,48 +1540,57 @@ function unsettledItems() {
   return it => ids.has(it.id) || cats.has(it.catalog_id) || (!it.pending && organicNames.has(canon(it.name)));
 }
 
-/* What a price answer was asked AT: the list revision plus which items were
- * held back as unsettled. An edit's ACK can arrive after the revision it
- * caused, so the revision alone would miss the moment the item became askable. */
-function whereKeyNow() {
+function whereInput() {
   const unsettled = unsettledItems();
-  const held = view().filter(i => unsettled(i) || i.pending).map(i => i.catalog_id || i.id).sort();
-  return base.revision + '|' + held.join(',');
+  const items = view();
+  const ask = items.filter(i => !i.pending && i.catalog_id && !unsettled(i));
+  const picks = base.picks || {};
+  const key = JSON.stringify([
+    pricedStores().map(s => s.id + ':' + s.chain_store_id),
+    ask.map(i => [i.catalog_id, i.name, i.name_en || '', !!i.organic, i.brand || '',
+                  picks[String(i.catalog_id)] || '']),
+    items.filter(i => i.pending || unsettled(i)).map(i => i.catalog_id || i.id),
+  ]);
+  return { key, ids: ask.map(i => i.catalog_id) };
+}
+
+/* The last answer, if it answers the question as it stands now. */
+function whereCurrent() {
+  return whereResult && whereResult.key === whereInput().key ? whereResult : null;
+}
+
+/* Ask if the input moved and nobody is already asking about it. */
+function whereTick() {
+  if (!byPrice || $('stores-panel').style.display !== 'flex') return;
+  const { key } = whereInput();
+  if ((!whereResult || whereResult.key !== key) && whereAsking !== key) loadWhere();
 }
 
 async function loadWhere() {
-  const gen = ++whereGen;          // a later ask supersedes this one
-  if (!pricedStores().length) { whereData = null; whereMsg = T().byprice_none; renderStores(); return; }
-  // only items the server knows: a queued add has no catalog_id to price yet
-  const unsettled = unsettledItems();
-  const ids = view().filter(i => !i.pending && i.catalog_id && !unsettled(i)).map(i => i.catalog_id);
-  const key = whereKeyNow();
-  whereKey = key;
-  whereMsg = T().byprice_searching; renderStores();
-  const merged = { items:{}, partial:false };
+  const { key, ids } = whereInput();
+  const gen = ++whereGen;
+  whereAsking = key;
+  const done = result => {
+    if (gen !== whereGen) return;               // superseded: never shown
+    whereResult = result; whereAsking = null;
+    refreshStores();                            // repaints, and asks again if the input moved
+  };
+  if (!pricedStores().length) { done({ key, msg: T().byprice_none }); return; }
+  refreshStores();                              // "checking…"
+  const merged = { key, items:{}, partial:false };
   try {
     for (let k = 0; k < ids.length; k += WHERE_PAGE) {
       const res = await fetch('/api/where', { method:'POST', headers:{ 'Content-Type':'application/json' },
         body: JSON.stringify({ catalog_ids: ids.slice(k, k + WHERE_PAGE) }) });
-      if (gen !== whereGen) return;                 // superseded: its answer is not shown
-      if (res.status === 503) {
-        whereData = null; whereMsg = await why503(res, T().cmp_off, T().cmp_fail); renderStores(); return;
-      }
+      if (gen !== whereGen) return;
+      if (res.status === 503) { done({ key, msg: await why503(res, T().cmp_off, T().cmp_fail) }); return; }
       if (!res.ok) throw new Error('where ' + res.status);
       const d = await res.json();
-      if (gen !== whereGen) return;
       Object.assign(merged.items, d.items);
       merged.partial = merged.partial || d.partial;
     }
-    whereData = merged;
-    whereMsg = merged.partial ? T().byprice_partial : T().byprice_note;
-  } catch (e) {
-    if (gen !== whereGen) return;
-    whereData = null; whereMsg = T().cmp_fail;
-  }
-  if (byPrice) renderStores();
-  // the list moved while we were asking: this answer is for an older list
-  if (byPrice && whereKeyNow() !== key) loadWhere();
+    done(merged);
+  } catch (e) { done({ key, msg: T().cmp_fail }); }
 }
 
 function whereLine(it, w, unsettled) {
@@ -1590,7 +1612,8 @@ function whereLine(it, w, unsettled) {
 
 $('plan-byprice').onclick = () => {
   byPrice = !byPrice;
-  if (byPrice) loadWhere(); else renderStores();
+  renderStores();
+  whereTick();
 };
 $('stores-close').onclick = () => $('stores-panel').style.display = 'none';
 
@@ -1636,10 +1659,9 @@ function refreshStores() {
   const typing = focused && $('stores-panel').contains(focused)
     && (focused.tagName === 'TEXTAREA' || focused.tagName === 'INPUT');
   if ($('stores-panel').style.display === 'flex' && !typing) renderStores();
-  // prices shown were asked at an older revision (an edit synced, the other
-  // phone changed something): ask again rather than show a stale answer
-  if (byPrice && whereData && whereKey !== whereKeyNow() && $('stores-panel').style.display === 'flex')
-    loadWhere();
+  // the price answer was for an older list (an edit synced, enrichment named
+  // an item, the other phone changed a preference): ask again
+  whereTick();
 }
 
 function renderStores() {
@@ -1667,10 +1689,12 @@ function renderStores() {
   // over view() so it works offline and reflects pending ops (review delta 6)
   const items = view();
   $('plan-byprice').textContent = byPrice ? T().byprice_off : T().byprice;
-  $('plan-price-note').textContent = byPrice ? whereMsg : '';
-  const priced = byPrice && whereData;
+  const ans = byPrice ? whereCurrent() : null;
+  $('plan-price-note').textContent = !byPrice ? '' : !ans ? T().byprice_searching
+    : ans.msg || (ans.partial ? T().byprice_partial : T().byprice_note);
+  const priced = ans && ans.items ? ans : null;
   const unsettled = unsettledItems();
-  const wOf = it => (priced && it.catalog_id && !unsettled(it)) ? whereData.items[String(it.catalog_id)] : null;
+  const wOf = it => (priced && it.catalog_id && !unsettled(it)) ? priced.items[String(it.catalog_id)] : null;
   const groups = new Map();
   for (const it of items) {
     const w = wOf(it);
