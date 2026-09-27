@@ -8,13 +8,19 @@ survives a restart.
 """
 
 import importlib
+import os
 import sys
+import uuid
 from datetime import date, datetime, timedelta, UTC
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
+# Like every other server-importing test module: point THINCART_DB at a
+# throwaway file BEFORE the first import, or `import away` → `import db` freezes
+# DB_PATH onto the live household DB when this file runs on its own.
+os.environ["THINCART_DB"] = str(Path(os.environ.get("PYTEST_TMP", "/tmp")) / f"thincart_test_{uuid.uuid4().hex}.db")
 sys.path.insert(0, str(Path(__file__).parent.parent / "server"))
 
 import away
@@ -28,7 +34,7 @@ def _window(now=None):
     }
 
 
-def _trip(first: date, nights: int = 3, eid: str = "hotel:1") -> dict:
+def _trip(first: date, nights: int = 3, eid: str = "7:1:0") -> dict:
     """A Gmail-style hotel stay, as the Pixel sends it: all-day, end exclusive."""
     return {
         "id": eid,
@@ -46,19 +52,20 @@ def client(tmp_path, monkeypatch):
     THINCART_DB was then — the live household DB when this file runs alone.
     Reloading only `app` would reuse that; reloading `db` first re-reads it."""
     monkeypatch.setenv("THINCART_DB", str(tmp_path / "phone.db"))
-    import app as appmod
     import db as dbmod
 
-    importlib.reload(dbmod)
+    importlib.reload(dbmod)  # before app is first imported, so it never opens another DB
+    import app as appmod
+
     importlib.reload(appmod)
     assert Path(appmod.conn.execute("PRAGMA database_list").fetchone()[2]) == tmp_path / "phone.db"
     return TestClient(appmod.app)
 
 
-def _push(client, events, calendars=1, window=None):
+def _push(client, events, calendars=("7",), window=None):
     return client.post(
         "/api/calendar/events",
-        json={"window": window or _window(), "calendars": calendars, "events": events},
+        json={"window": window or _window(), "calendars": list(calendars), "events": events},
     )
 
 
@@ -87,7 +94,7 @@ def test_reading_zero_calendars_never_wipes_the_review_queue(client):
     """Access revoked or the calendar hidden looks like 'no events' — it is not
     'every trip was cancelled'."""
     _push(client, [_trip(date.today() - timedelta(days=20))])
-    r = _push(client, [], calendars=0)
+    r = _push(client, [], calendars=())
     assert r.status_code == 200 and r.json()["dropped"] == 0
     assert len(_pending_days(client)) == 3
     assert client.get("/api/away").json()["last_sync"]["calendars"] == 0
@@ -113,7 +120,7 @@ def test_pruning_stays_inside_the_servers_own_window(client):
     # an older proposal, from a sync made months ago when this day was in range
     dbmod.record_away_candidates(
         appmod.conn,
-        [away.travel.AwayCandidate(old + timedelta(days=n), "hotel:old", "Stay", "", "3-day all-day event")
+        [away.travel.AwayCandidate(old + timedelta(days=n), "7:old:0", "Stay", "", "3-day all-day event")
          for n in range(3)],
         "2026-01-01T00:00:00+00:00",
     )
@@ -173,7 +180,7 @@ def test_last_sync_survives_a_restart(client, tmp_path):
 def test_an_endless_event_is_dropped_not_expanded(client):
     """Codex review 2026-09-26: one event spanning 1900→2100 inside a valid
     window was expanded into 73,049 proposals."""
-    endless = {"id": "x", "summary": "trip", "start": {"date": "1900-01-01"}, "end": {"date": "2100-01-01"}}
+    endless = {"id": "7:x:0", "summary": "trip", "start": {"date": "1900-01-01"}, "end": {"date": "2100-01-01"}}
     r = _push(client, [endless])
     assert r.status_code == 200 and r.json()["away_days"] == 0
     assert _pending_days(client) == []
@@ -186,5 +193,38 @@ def test_only_days_inside_the_window_are_recorded(client):
     r = _push(client, [_trip(edge, nights=6)])
     assert r.status_code == 200
     days = _pending_days(client)
-    assert days and min(days) >= (now - timedelta(days=away.WINDOW_BACK_DAYS)).astimezone(away.travel.HOME_TZ).date().isoformat()
+    window_start = (now - timedelta(days=away.WINDOW_BACK_DAYS)).astimezone(away.travel.HOME_TZ).date()
+    assert days and min(days) >= window_start.isoformat()
     assert len(days) < 6
+
+
+def test_a_calendar_not_read_this_time_keeps_its_trips(client):
+    """Codex review 2026-09-26: two accounts on the Pixel, one calendar hidden
+    — its trips were pruned though nothing about them changed."""
+    a, b = date.today() - timedelta(days=40), date.today() - timedelta(days=20)
+    _push(client, [_trip(a, eid="7:1:0"), _trip(b, eid="9:2:0")], calendars=("7", "9"))
+    assert len(_pending_days(client)) == 6
+    r = _push(client, [_trip(a, eid="7:1:0")], calendars=("7",))  # calendar 9 hidden
+    assert r.json()["dropped"] == 0
+    assert len(_pending_days(client)) == 6
+
+
+def test_an_event_cannot_speak_for_a_calendar_that_was_not_read(client):
+    r = _push(client, [_trip(date.today() - timedelta(days=20), eid="99:1:0")], calendars=("7",))
+    assert r.json()["events"] == 0 and _pending_days(client) == []
+
+
+def test_a_boundary_day_the_phone_only_partly_read_is_not_pruned(client):
+    """Codex review 2026-09-26: on a New York evening the window's first local
+    date is only partly covered by the phone's read."""
+    import app as appmod
+    import db as dbmod
+
+    now = datetime.now(UTC)
+    first = (now - timedelta(days=away.WINDOW_BACK_DAYS)).astimezone(away.travel.HOME_TZ).date()
+    edge = away.travel.AwayCandidate(first, "7:edge:0", "Stay", "", "travel booking")
+    dbmod.record_away_candidates(appmod.conn, [edge], "2026-01-01T00:00:00+00:00")
+    appmod.conn.commit()
+    r = _push(client, [])
+    assert r.json()["dropped"] == 0
+    assert first.isoformat() in _pending_days(client)

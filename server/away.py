@@ -94,11 +94,12 @@ class CalendarWindow(BaseModel):
 
 
 class CalendarPush(BaseModel):
-    """What the Pixel sends: the window it read, how many calendars it read it
-    from, and the events, already in the Google shape `travel.detect` takes."""
+    """What the Pixel sends: the window it read, the calendars it read it from,
+    and the events, already in the Google shape `travel.detect` takes. Each
+    event id starts with its calendar's id: `<calendar>:<event>:<begin>`."""
 
     window: CalendarWindow
-    calendars: int = Field(..., ge=0, le=500)
+    calendars: list[str] = Field(..., max_length=50)
     events: list[dict] = Field(default_factory=list, max_length=MAX_EVENTS)
 
 
@@ -193,17 +194,28 @@ async def ingest(push: CalendarPush) -> dict:
     ctx = _need()
     now = datetime.now(UTC)
     time_min, time_max = clamp_window(push.window.start, push.window.end, now)
-    events = bounded([clean_event(e) for e in push.events if isinstance(e, dict)])
+    read = {c[:64] for c in push.calendars if c}
+    # an event may only speak for a calendar the phone says it read
+    events = bounded(
+        [
+            clean_event(e)
+            for e in push.events
+            if isinstance(e, dict) and str(e.get("id", "")).split(":", 1)[0] in read
+        ]
+    )
 
     # away_days is keyed by HOME-LOCAL dates, so the pruning window has to be
     # expressed in them too. Taking .date() off the UTC bounds shifts the window
     # by a day whenever the two calendars disagree — after 20:00 in New York —
     # and a proposal sitting on that boundary escapes pruning, outliving the
     # calendar event that produced it.
-    window = (
-        time_min.astimezone(travel.HOME_TZ).date().isoformat(),
-        time_max.astimezone(travel.HOME_TZ).date().isoformat(),
-    )
+    first = time_min.astimezone(travel.HOME_TZ).date()
+    last = time_max.astimezone(travel.HOME_TZ).date()
+    window = (first.isoformat(), last.isoformat())
+    # Prune one day inside each edge. The phone's read starts at an instant and
+    # the window at a home-local date; on a New York evening the first date is
+    # only partly read, and an all-day trip ending on it would look cancelled.
+    prune_window = ((first + timedelta(days=1)).isoformat(), (last - timedelta(days=1)).isoformat())
     # Record only what the window covers: a trip reaching past it is proposed
     # for its in-window days, and nothing outside is written that a later sync
     # could never prune.
@@ -214,10 +226,12 @@ async def ingest(push: CalendarPush) -> dict:
         # Zero calendars read means the phone saw nothing — access revoked,
         # sync switched off, the calendar hidden — not that every trip was
         # cancelled. Pruning on that would wipe every proposal awaiting review.
-        if push.calendars > 0:
+        if read:
             db.record_away_candidates(ctx.conn, found, ts)
-            dropped = db.prune_away_candidates(ctx.conn, *window, {c.day.isoformat() for c in found})
-        summary = {"at": ts, "calendars": push.calendars, "events": len(events), "away_days": len(found)}
+            dropped = db.prune_away_candidates(
+                ctx.conn, *prune_window, {c.day.isoformat() for c in found}, calendars=read
+            )
+        summary = {"at": ts, "calendars": len(read), "events": len(events), "away_days": len(found)}
         ctx.conn.execute(
             "INSERT INTO meta(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             (META_KEY, json.dumps(summary)),
@@ -226,7 +240,7 @@ async def ingest(push: CalendarPush) -> dict:
         ctx.conn.commit()
     log.info(
         "calendar sync from phone: %d calendars, %d events, %d away days, %d stale dropped",
-        push.calendars, len(events), len(found), dropped,
+        len(read), len(events), len(found), dropped,
     )
     await ctx.broadcast()
     return {**summary, "dropped": dropped}

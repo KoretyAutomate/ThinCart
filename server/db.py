@@ -349,21 +349,29 @@ def record_away_candidates(conn: sqlite3.Connection, candidates, detected_at: st
     return n
 
 
-def prune_away_candidates(conn: sqlite3.Connection, start: str, end: str, keep: set) -> int:
+def prune_away_candidates(
+    conn: sqlite3.Connection, start: str, end: str, keep: set, calendars: set | None = None
+) -> int:
     """Drop unreviewed calendar days in [start, end] the calendar no longer claims.
 
     A deleted or rescheduled trip has to stop counting, but only unreviewed
     ('auto') calendar rows are eligible — a manual entry or a confirmed day
     outlives whatever the calendar currently says.
+
+    `calendars`, when given, limits pruning to rows proposed from those
+    calendars (event ids are `<calendar>:<event>:<begin>`): a calendar the phone
+    did not read this time — hidden, sync off, a second account — says nothing
+    about whether its trips were cancelled.
     """
     stale = [
         r["day"]
         for r in conn.execute(
-            """SELECT day FROM away_days
+            """SELECT day, event_id FROM away_days
                WHERE status='auto' AND source='calendar' AND day BETWEEN ? AND ?""",
             (start, end),
         )
         if r["day"] not in keep
+        and (calendars is None or (r["event_id"] or "").split(":", 1)[0] in calendars)
     ]
     conn.executemany("DELETE FROM away_days WHERE day=?", [(d,) for d in stale])
     return len(stale)

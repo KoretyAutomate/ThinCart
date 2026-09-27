@@ -2423,3 +2423,10 @@ plugins. So the read happens in the launcher, before handoff.
 - **Test isolation**: API tests reload `db` before `app`; an earlier import had
   frozen `DB_PATH`, so a file run alone could reach the live DB. It did not
   (checked: no calendar meta, no away rows), but it could have.
+- **(round 3) Pruning is scoped to the calendars read.** The phone sends the
+  ids of the calendars it read and each event id is `<calendar>:<event>:<begin>`;
+  only rows proposed from a calendar read this time can be pruned, and an event
+  naming an unread calendar is ignored. A hidden second account keeps its trips.
+- **(round 3) Prune one day inside each window edge.** The phone reads from an
+  instant, the window starts at a home-local date; a partly-read edge day is
+  never treated as empty.

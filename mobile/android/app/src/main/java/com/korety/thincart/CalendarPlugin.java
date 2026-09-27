@@ -124,7 +124,10 @@ public class CalendarPlugin extends Plugin {
                 JSONArray events = calendars.isEmpty() ? new JSONArray() : allDayEvents(calendars, from, to);
                 JSONObject body = new JSONObject();
                 body.put("window", new JSONObject().put("start", isoUtc(from)).put("end", isoUtc(to)));
-                body.put("calendars", calendars.size());
+                // which calendars were read, so the server prunes only their trips
+                JSONArray read = new JSONArray();
+                for (Long id : calendars) read.put(String.valueOf(id));
+                body.put("calendars", read);
                 body.put("events", events);
                 int status = post(target, body.toString());
                 Log.i(TAG, "pushed " + events.length() + " events from " + calendars.size()
@@ -200,6 +203,7 @@ public class CalendarPlugin extends Plugin {
             CalendarContract.Instances.EVENT_LOCATION,
             CalendarContract.Instances.STATUS,
             CalendarContract.Instances.SELF_ATTENDEE_STATUS,
+            CalendarContract.Instances.CALENDAR_ID,
         };
         StringBuilder in = new StringBuilder();
         for (Long id : calendars) in.append(in.length() == 0 ? "" : ",").append(id);
@@ -219,8 +223,10 @@ public class CalendarPlugin extends Plugin {
             while (c.moveToNext()) {
                 long begin = c.getLong(1);
                 JSONObject ev = new JSONObject();
-                // one id per occurrence: a weekly all-day event is many trips, not one
-                ev.put("id", c.getLong(0) + ":" + begin);
+                // <calendar>:<event>:<begin> — one id per occurrence (a weekly
+                // all-day event is many trips, not one), led by the calendar so
+                // the server can tell which calendar proposed a day
+                ev.put("id", c.getLong(7) + ":" + c.getLong(0) + ":" + begin);
                 ev.put("summary", nz(c.getString(3)));
                 ev.put("location", nz(c.getString(4)));
                 ev.put("start", new JSONObject().put("date", allDayDate(begin)));
