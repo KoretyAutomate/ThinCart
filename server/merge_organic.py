@@ -81,9 +81,20 @@ def merge_into(conn: sqlite3.Connection, src: int, dst: int) -> None:
 
 
 def rename_in_place(conn: sqlite3.Connection, src: int, base: str) -> None:
+    """No plain row exists: this row becomes it. Its aliases lose the qualifier
+    too — an enriched オーガニックケール carries "organic kale", which would go on
+    naming and searching the item as organic, and leave a later "kale" to
+    create a second row."""
+    row = conn.execute("SELECT aliases_json FROM item_catalog WHERE id=?", (src,)).fetchone()
+    canon = db.canonical(base)
+    aliases: list[str] = []
+    for a in json.loads(row["aliases_json"] or "[]"):
+        plain = db.canonical(db.split_organic(a)[0])
+        if plain != canon and plain not in aliases:
+            aliases.append(plain)
     conn.execute(
-        "UPDATE item_catalog SET canonical_name=?, display_name=? WHERE id=?",
-        (db.canonical(base), base, src),
+        "UPDATE item_catalog SET canonical_name=?, display_name=?, aliases_json=? WHERE id=?",
+        (canon, base, json.dumps(aliases, ensure_ascii=False), src),
     )
 
 

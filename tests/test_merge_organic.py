@@ -7,6 +7,7 @@ matters is what `--apply` does to a database, and what a dry run does NOT.
 import contextlib
 import importlib.util
 import io
+import json
 import sqlite3
 import sys
 from pathlib import Path
@@ -140,3 +141,18 @@ def test_two_variants_with_no_plain_row_become_one_item(tmp_path):
     rows = conn.execute("SELECT id, display_name FROM item_catalog").fetchall()
     assert [r["display_name"] for r in rows] == ["Kale"]
     assert conn.execute("SELECT COUNT(*) FROM purchase_events WHERE catalog_id=?", (rows[0]["id"],)).fetchone()[0] == 2
+
+
+def test_an_in_place_rename_drops_the_qualifier_from_aliases_too(tmp_path):
+    """Codex review 2026-09-27: an enriched オーガニックケール carries the alias
+    "organic kale"; left alone it names and searches the item as organic and
+    a later "kale" creates a second row."""
+    conn = db.connect(tmp_path / "a.db")
+    conn.execute("INSERT INTO item_catalog(canonical_name, display_name, aliases_json) VALUES(?,?,?)",
+                 (db.canonical("オーガニックケール"), "オーガニックケール", '["organic kale"]'))
+    conn.commit()
+    _run(tmp_path / "a.db", "--apply")
+    conn = db.connect(tmp_path / "a.db")
+    row = conn.execute("SELECT display_name, aliases_json FROM item_catalog").fetchone()
+    assert row["display_name"] == "ケール" and json.loads(row["aliases_json"]) == ["kale"]
+    assert db.get_or_create_catalog(conn, "kale") == conn.execute("SELECT id FROM item_catalog").fetchone()[0]

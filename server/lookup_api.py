@@ -406,10 +406,20 @@ async def where_to_buy(req: WhereRequest) -> dict:
     items = _where_items(req.catalog_ids)
     organic = db.organic_setting(_db())
     out, partial = await _ask_all(stores, items, organic)
+    # Nothing answered at all: an outage, not an absence. Judged on this first
+    # pass — a failed fallback after answered organic searches is not one.
+    if partial and items and not any(o["quotes"] for o in out.values()) and all(
+        s == "unasked" for o in out.values() for s in o["stores"].values()
+    ):
+        raise HTTPException(503, {"code": UNAVAILABLE})
     fallback: set[int] = set()
     if organic:
+        # Only a genuine "no store has it organic": every store answered
+        # no_match. A saved conventional pick is a CONFLICT with the setting —
+        # retrying without it would quietly price the pick as a fallback, even
+        # where the store had an organic one.
         retry = {cid: it for cid, it in items.items()
-                 if not out[cid]["quotes"] and "unasked" not in out[cid]["stores"].values()}
+                 if not out[cid]["quotes"] and set(out[cid]["stores"].values()) <= {"no_match"}}
         if retry:
             again, more = await _ask_all(stores, retry, False)
             partial = partial or more
@@ -417,10 +427,12 @@ async def where_to_buy(req: WhereRequest) -> dict:
                 if o["quotes"]:
                     out[cid] = o
                     fallback.add(cid)
-    if partial and items and not any(o["quotes"] for o in out.values()) and all(
-        s == "unasked" for o in out.values() for s in o["stores"].values()
-    ):
-        raise HTTPException(503, {"code": UNAVAILABLE})
+                else:
+                    # a store that could not be asked the second time is
+                    # unasked, not "has nothing" — keep that honest
+                    for sid, st in o["stores"].items():
+                        if st == "unasked":
+                            out[cid]["stores"][sid] = "unasked"
     result = {}
     for cid, o in out.items():
         o["quotes"].sort(key=lambda q: q["amount"])

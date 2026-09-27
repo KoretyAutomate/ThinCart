@@ -665,7 +665,9 @@ const canon = s => s.normalize('NFKC').toLowerCase().trim().replace(/\s+/g,' ');
 /* Mirror of server db.split_organic (PLAN.md Phase 7A): "organic onion" is the
  * Onion — one item, one history. A LEADING qualifier only; one that is the
  * whole name is not split. Used so a queued add does not flash a second Onion. */
-const ORGANIC_RE = /^\s*(?:organic\b|オーガニック|有機)[\s・]*/i;
+// explicit boundary, not \b (ASCII-only in JS, Unicode in Python): "organic卵"
+// is one word on both sides — parity with server db.split_organic
+const ORGANIC_RE = /^\s*(?:organic(?![\p{L}\p{N}_])|オーガニック|有機)[\s・]*/iu;
 /* The household's organic preference (PLAN.md Phase 7A, revised 2026-09-27):
  * one shared setting. A queued change wins until the server has it. */
 function organicSetting() {
@@ -1987,6 +1989,8 @@ $('storelink').addEventListener('keydown', e => { if (e.key === 'Enter') { e.pre
  * exercising a function the browser never calls. tests/page_scope.test.js now
  * boots the page the way a browser does, for exactly this class of fault. */
 window.openSheet = openSheet;
+// the parity test runs the shared split_organic cases through this function
+window.splitOrganic = splitOrganic;
 
 $('set-organic').onchange = () => enqueue({ type:'settings', organic: $('set-organic').checked });
 

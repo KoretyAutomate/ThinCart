@@ -91,6 +91,17 @@ function openEditor(b, i) {
     check("the switch shows the server's setting", c.doc.getElementById("set-organic").checked === true);
   }
 
+  console.log("\n--- 1b. the phone splits 'organic X' exactly as the server does -----");
+  {
+    const cases = JSON.parse(fs.readFileSync(
+      path.join(__dirname, "..", "..", "tests", "fixtures", "split_organic_cases.json"), "utf8"));
+    const b = boot({ items: [] });
+    for (const [typed, base, organic] of cases) {
+      const got = b.w.splitOrganic(typed);
+      check(`splitOrganic(${JSON.stringify(typed)})`, got[0] === base && got[1] === organic, got);
+    }
+  }
+
   console.log("\n--- 2. the editor sends the brand, only when changed ----------------");
   {
     const b = boot({ items: [item(1, "milk")] });

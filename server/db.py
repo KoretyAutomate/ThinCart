@@ -470,7 +470,10 @@ def suggestions(conn: sqlite3.Connection, now) -> list[dict]:
 # "organic onion" is the Onion — one item, one history — whatever the household
 # setting. A LEADING qualifier only: mid-name "organic" belongs to a product's
 # own name ("simple mills organic seed flour crackers") and is left alone.
-_ORGANIC_PREFIX = re.compile(r"^\s*(?:organic\b|オーガニック|有機)[\s・]*", re.IGNORECASE)
+# The boundary after "organic" is spelled out — not \b — because Python's \b is
+# Unicode-aware and JavaScript's is ASCII-only: "organic卵" must be ONE word on
+# both sides (the phone mirrors this in splitOrganic, app/index.html).
+_ORGANIC_PREFIX = re.compile(r"^\s*(?:organic(?!\w)|オーガニック|有機)[\s・]*", re.IGNORECASE)
 
 
 def split_organic(name: str) -> tuple[str, bool]:

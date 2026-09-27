@@ -231,3 +231,36 @@ def test_no_fallback_while_a_store_could_not_be_asked(monkeypatch, stores, organ
     stub(monkeypatch, {"901": {"organic where oats": []}}, fail={"902"})
     it = client.post("/api/where", json={"catalog_ids": [cid]}).json()["items"][str(cid)]
     assert it["organic_fallback"] is False and it["reason"] == "unasked"
+
+
+def test_a_saved_conventional_pick_is_a_conflict_not_a_fallback(monkeypatch, stores, organic_on):
+    """Codex review 2026-09-27: with organic on, a saved conventional pick used
+    to be retried without the setting and priced as 'no organic found' — even
+    where the store had an organic product."""
+    cid = add("where yogurt")
+    appmod.conn.execute(
+        "INSERT INTO product_picks(catalog_id, chain, sku, name, brand, pack_size, picked_at) "
+        "VALUES(?, 'wegmans', 'CONV', 'Plain Yogurt', '', '', '2026-09-27')", (cid,))
+    appmod.conn.commit()
+    stub(monkeypatch, {s: {"Plain Yogurt": [rec("Plain Yogurt", 3.0, "$0.10/oz", sku="CONV"),
+                                            rec("Organic Yogurt", 4.0, "$0.13/oz", sku="ORG")]}
+                       for s in ("901", "902")})
+    it = client.post("/api/where", json={"catalog_ids": [cid]}).json()["items"][str(cid)]
+    assert it["organic_fallback"] is False and it["quotes"] == [] and it["reason"] == "conflict"
+
+
+def test_a_fallback_that_could_not_be_asked_says_unasked(monkeypatch, stores, organic_on):
+    """Codex review 2026-09-27: the regular-product pass failing was reported
+    as 'no match' — a claim about the shop, when it was a failure to ask."""
+    cid = add("where flour")
+    calls = []
+
+    async def fake(chain, terms, store, prefer=None, max_age=None, place=True):
+        calls.append(list(terms))
+        if any(t.startswith("organic") for t in terms):
+            return {t: [] for t in terms}, True      # asked: nobody has it organic
+        return {}, False                             # the regular pass fails
+
+    monkeypatch.setattr(lookup_api, "products_many", fake)
+    it = client.post("/api/where", json={"catalog_ids": [cid]}).json()["items"][str(cid)]
+    assert it["reason"] == "unasked" and "unasked" in it["stores"].values()

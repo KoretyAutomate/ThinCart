@@ -7,6 +7,7 @@ flag; the brand is a standing per-item preference (PLAN.md §Phase 7). Names
 are suffixed per test: the app module and its DB are shared across this process.
 """
 
+import json
 import os
 import sys
 import uuid
@@ -61,6 +62,15 @@ def catalog_row(name):
 )
 def test_split_organic(typed, base, organic):
     assert db.split_organic(typed) == (base, organic)
+
+
+def test_split_organic_shared_cases():
+    """The same cases app/tests/organic_brand_price.test.js runs through the
+    phone's splitOrganic — the two must agree, or the phone's optimistic view
+    hides an add the server then files as a different item."""
+    cases = json.loads((Path(__file__).parent / "fixtures" / "split_organic_cases.json").read_text())
+    for typed, base, organic in cases:
+        assert db.split_organic(typed) == (base, organic), typed
 
 
 def settings():
