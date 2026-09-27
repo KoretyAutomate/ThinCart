@@ -36,8 +36,14 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      # packages: '' — the action's default list includes the legacy "tools"
+      # package, which the runner's cmdline-tools 16 no longer carries, so the
+      # step failed before anything was built (2026-09-27). The next step
+      # installs exactly what the build needs.
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: ''
 
       - name: Install SDK packages
         run: sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
