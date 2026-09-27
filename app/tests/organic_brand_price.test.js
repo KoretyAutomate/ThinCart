@@ -119,7 +119,9 @@ function openEditor(b, i) {
     const where = { partial: false, items: {
       "1": { cheapest: { store: "Whole Foods", amount: 3.49, unit_price: "$0.05/fl oz", product: "365 Organic Milk",
                          exact: false, fetched_at: new Date().toISOString() }, quotes: [{}], comparable: true },
-      "2": { cheapest: null, quotes: [{}, {}], comparable: false, reason: null },
+      "2": { cheapest: null, comparable: false, reason: null, quotes: [
+               { store: "Wegmans", amount: 3.99, unit_price: "$0.25/oz" },
+               { store: "Whole Foods", amount: 6.29, unit_price: "$6.29/count" }] },
       "3": { cheapest: null, quotes: [], comparable: false, reason: "unasked" },
     } };
     const b = boot({ items: [item(1, "milk", { store: "Wegmans", store_source: "history" }), item(2, "bread"),
@@ -136,7 +138,9 @@ function openEditor(b, i) {
     const wf = groups.find(g => /Whole Foods/.test(g)) || "";
     check("milk moved to its cheapest store", /milk/.test(wf) && /\$3\.49/.test(wf) && /best match/.test(wf), groups);
     const all = groups.join("|");
-    check("different units are not called cheapest", /different units/.test(all), all);
+    check("different units are not called cheapest", /not ranked/.test(all), all);
+    check("the prices found are still shown, unranked",
+      /Wegmans \$3\.99 \(\$0\.25\/oz\)/.test(all) && /Whole Foods \$6\.29/.test(all), all);
     check("an unreachable store is named as the reason", /unreachable/.test(all), all);
     check("a queued item says it is not synced", /not synced/.test(all), all);
     check("nothing was saved", !b.ops().some(o => o.type === "edit"), b.ops());
@@ -144,6 +148,22 @@ function openEditor(b, i) {
     await settle();
     const back = [...b.doc.querySelectorAll("#plan-groups .plangroup")].map(g => g.textContent).join("|");
     check("toggling back restores the usual grouping", /Wegmans/.test(back) && !/\$3\.49/.test(back), back);
+  }
+
+  console.log("\n--- 4b. an unsynced preference edit is not priced on stale wishes -");
+  {
+    const where = { partial: false, items: {} };
+    const b = boot({ items: [item(1, "milk"), item(2, "bread")], where,
+                     queue: [{ op_id: "e1", type: "edit", item_id: "i1", catalog_id: 1, organic: true, actor: "t" }] });
+    await settle();
+    b.doc.getElementById("stores-btn").click();
+    b.doc.getElementById("plan-byprice").click();
+    await settle(); await settle();
+    const req = b.calls.find(c => c.url === "/api/where");
+    check("the item with a queued 🌱 edit is not asked about",
+      req && JSON.stringify(req.body.catalog_ids) === "[2]", req && req.body);
+    const all = [...b.doc.querySelectorAll("#plan-groups .plangroup")].map(g => g.textContent).join("|");
+    check("and says it is not synced yet", /milk 🌱[^|]*not synced/.test(all), all);
   }
 
   console.log("\n--- 5. no priced store: say what to do ------------------------------");

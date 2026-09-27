@@ -101,6 +101,16 @@ def choose(recs: list[dict], pick_sku: str | None, organic: bool, brand: str) ->
     return None, "no_match", False
 
 
+def _per_package(unit: tuple[str, float], quote: dict) -> bool:
+    """A count unit price equal to the shelf price is a price per PACKAGE —
+    Whole Foods quotes a 64 oz milk as "$6.29/count" at $6.29 — and two
+    packages of different sizes are not comparable by it. "$0.30/each" on a
+    $1.49 bag of five is a real per-item price and stays comparable."""
+    dim, value = unit
+    amount = quote.get("amount")
+    return dim == "count" and amount is not None and abs(value - float(amount)) < 0.005
+
+
 def rank(quotes: list[dict]) -> tuple[dict | None, bool]:
     """(cheapest, comparable). Cheapest per unit, and only when every quote has
     a unit price in one dimension — otherwise there is no honest winner."""
@@ -109,7 +119,7 @@ def rank(quotes: list[dict]) -> tuple[dict | None, bool]:
     valued: list[tuple[str, float, dict]] = []
     for q in quotes:
         u = unit_value(q.get("unit_price", ""))
-        if u is None:
+        if u is None or _per_package(u, q):
             return None, False
         valued.append((u[0], u[1], q))
     if len({dim for dim, _, _ in valued}) != 1:

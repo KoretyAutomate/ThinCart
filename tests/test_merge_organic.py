@@ -122,3 +122,22 @@ def test_dry_run_reports_list_and_pick_exposure(tmp_path):
     _seed(tmp_path / "t.db")
     out = _run(tmp_path / "t.db")
     assert "'organic walnuts' (#2, 1 purchases, on list: yes, picks: 1)" in out
+
+
+def test_two_variants_with_no_plain_row_become_one_item(tmp_path):
+    """Codex review 2026-09-27: both used to be renamed to the base, and the
+    second rename hit the UNIQUE name and rolled the whole fold back."""
+    conn = db.connect(tmp_path / "k.db")
+    for name in ("Organic Kale", "オーガニックKale"):
+        conn.execute("INSERT INTO item_catalog(canonical_name, display_name) VALUES(?,?)",
+                     (db.canonical(name), name))
+    ids = [r["id"] for r in conn.execute("SELECT id FROM item_catalog ORDER BY id")]
+    for cid in ids:
+        conn.execute("INSERT INTO purchase_events(catalog_id, bought_at) VALUES(?, '2026-09-01T00:00:00+00:00')",
+                     (cid,))
+    conn.commit()
+    _run(tmp_path / "k.db", "--apply")
+    conn = db.connect(tmp_path / "k.db")
+    rows = conn.execute("SELECT id, display_name, organic FROM item_catalog").fetchall()
+    assert [(r["display_name"], r["organic"]) for r in rows] == [("Kale", 1)]
+    assert conn.execute("SELECT COUNT(*) FROM purchase_events WHERE catalog_id=?", (rows[0]["id"],)).fetchone()[0] == 2

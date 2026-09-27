@@ -86,6 +86,23 @@ def test_rank_compares_unit_prices_in_one_dimension_only():
     assert where.rank([a, {"unit_price": "", "amount": 1.0}]) == (None, False)
 
 
+def test_a_per_package_count_price_is_not_compared():
+    """Codex review 2026-09-27: Whole Foods quotes 64 oz milk as "$6.29/count"
+    at $6.29 — a price per bottle. Against a 128 oz bottle at "$8/count" the
+    smaller one would have won though it costs more per ounce."""
+    small = {"unit_price": "$6.29/count", "amount": 6.29}
+    big = {"unit_price": "$8.00/count", "amount": 8.0}
+    assert where.rank([small, big]) == (None, False)
+    # a real per-item price inside a multi-pack still compares...
+    bag5 = {"unit_price": "$0.30/each", "amount": 1.49}
+    bag4 = {"unit_price": "$0.45/each", "amount": 1.79}
+    assert where.rank([bag5, bag4]) == (bag5, True)
+    # ...but a single loose item's "each" looks exactly like a whole bottle's
+    # "count" (unit price = shelf price), so it is conservatively not ranked
+    loose = {"unit_price": "$0.50 each", "amount": 0.5}
+    assert where.rank([bag5, loose]) == (None, False)
+
+
 # --- the endpoint ---------------------------------------------------------------
 
 def op(**fields):

@@ -760,7 +760,7 @@ const STR = {
     why_unasked:'price not checked — store unreachable', why_no_match:'no matching product found',
     why_conflict:'your chosen product no longer matches (🌱 / brand / stock)',
     why_pick_missing:'your chosen product was not found',
-    why_uncomparable:'prices found, but in different units — not compared',
+    why_uncomparable:'different sizes/units — not ranked',
     best_match:'best match', not_synced:'not synced yet',
     store_none:'no preference', new_store_inline:'new store…',
     stores_title:'🏬 Stores & plan', at_h:'I’m at… (tags purchases for 6 h)',
@@ -897,7 +897,7 @@ const STR = {
     why_unasked:'価格未確認 — 店に接続できません', why_no_match:'合う商品が見つかりません',
     why_conflict:'選んだ商品が条件に合いません（🌱・ブランド・在庫）',
     why_pick_missing:'選んだ商品が見つかりません',
-    why_uncomparable:'価格はありますが単位が違うため比較していません',
+    why_uncomparable:'サイズ・単位が違うため順位なし',
     best_match:'近い商品', not_synced:'未同期',
     store_none:'指定なし', new_store_inline:'新しい店…',
     stores_title:'🏬 店舗とプラン', at_h:'いまいる店（6時間有効）',
@@ -1504,13 +1504,30 @@ $('stores-btn').onclick = () => {
 /* ============ where to buy, by price (PLAN.md Phase 7C) ============
    A VIEW over the plan, never a saved preference: nothing here enqueues an op.
    The server names a store cheapest only on comparable unit prices. */
-let byPrice = false, whereData = null, whereMsg = '';
+let byPrice = false, whereData = null, whereMsg = '', whereRev = null;
 const WHERE_PAGE = 30;          // the server's per-request cap
+
+/* Items whose price question the SERVER would answer with stale preferences:
+ * a queued 🌱 / brand / rename / product-pick edit has not reached it yet, so
+ * /api/where would price the old wish while the row shows the new one. They
+ * are left out and shown as not synced; the revision bump that follows their
+ * sync triggers a fresh ask (refreshStores). */
+function unsettledItems() {
+  const ids = new Set(), cats = new Set();
+  for (const op of queue) {
+    if (op.type === 'edit' && (op.organic !== undefined || op.brand !== undefined || op.name !== undefined))
+      ids.add(op.item_id);
+    if (op.type === 'product_pick') cats.add(op.catalog_id);
+  }
+  return it => ids.has(it.id) || cats.has(it.catalog_id);
+}
 
 async function loadWhere() {
   if (!pricedStores().length) { whereData = null; whereMsg = T().byprice_none; renderStores(); return; }
   // only items the server knows: a queued add has no catalog_id to price yet
-  const ids = view().filter(i => !i.pending && i.catalog_id).map(i => i.catalog_id);
+  const unsettled = unsettledItems();
+  const ids = view().filter(i => !i.pending && i.catalog_id && !unsettled(i)).map(i => i.catalog_id);
+  whereRev = base.revision;
   whereMsg = T().byprice_searching; renderStores();
   const merged = { items:{}, partial:false };
   try {
@@ -1531,15 +1548,19 @@ async function loadWhere() {
   if (byPrice) renderStores();
 }
 
-function whereLine(it, w) {
-  if (it.pending) return T().not_synced;
+function whereLine(it, w, unsettled) {
+  if (it.pending || unsettled(it)) return T().not_synced;
   if (!w) return '';
   if (w.cheapest) {
     const q = w.cheapest;
     return [`$${q.amount.toFixed(2)}`, q.unit_price, q.product,
             q.exact ? '' : '(' + T().best_match + ')', agoLabel(q.fetched_at)].filter(Boolean).join(' · ');
   }
-  if (w.quotes && w.quotes.length) return T().why_uncomparable;
+  // No honest winner — but the prices found are still worth seeing, side by side.
+  if (w.quotes && w.quotes.length)
+    return T().why_uncomparable + ': ' + w.quotes.map(q =>
+      `${q.store} $${q.amount.toFixed(2)}` + (q.unit_price || q.pack_size ? ` (${q.unit_price || q.pack_size})` : '')
+    ).join(' · ');
   return ({ unasked:T().why_unasked, conflict:T().why_conflict, pick_missing:T().why_pick_missing })[w.reason]
     || T().why_no_match;
 }
@@ -1592,6 +1613,10 @@ function refreshStores() {
   const typing = focused && $('stores-panel').contains(focused)
     && (focused.tagName === 'TEXTAREA' || focused.tagName === 'INPUT');
   if ($('stores-panel').style.display === 'flex' && !typing) renderStores();
+  // prices shown were asked at an older revision (an edit synced, the other
+  // phone changed something): ask again rather than show a stale answer
+  if (byPrice && whereData && whereRev !== base.revision && $('stores-panel').style.display === 'flex')
+    loadWhere();
 }
 
 function renderStores() {
@@ -1621,7 +1646,8 @@ function renderStores() {
   $('plan-byprice').textContent = byPrice ? T().byprice_off : T().byprice;
   $('plan-price-note').textContent = byPrice ? whereMsg : '';
   const priced = byPrice && whereData;
-  const wOf = it => (priced && it.catalog_id) ? whereData.items[String(it.catalog_id)] : null;
+  const unsettled = unsettledItems();
+  const wOf = it => (priced && it.catalog_id && !unsettled(it)) ? whereData.items[String(it.catalog_id)] : null;
   const groups = new Map();
   for (const it of items) {
     const w = wOf(it);
@@ -1653,7 +1679,7 @@ function renderStores() {
       p.querySelector('.pnm').textContent =
         (ico ? ico + ' ' : '') + disp(i) + (i.organic ? ' 🌱' : '') + (i.note ? ' · ' + i.note : '');
       if (priced) p.querySelector('.pmeta').classList.add('price');
-      p.querySelector('.pmeta').textContent = priced ? whereLine(i, wOf(i)) : [
+      p.querySelector('.pmeta').textContent = priced ? whereLine(i, wOf(i), unsettled) : [
         i.qty_note, i.budget != null ? fmtYen(i.budget) : '',
         i.store_source === 'history' ? T().src_hist : '',
       ].filter(Boolean).join(' ');

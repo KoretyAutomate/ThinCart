@@ -131,8 +131,13 @@ def main() -> int:
     try:
         steps = plan(conn)
         for s in steps:
-            if s["target"]:
-                merge_into(conn, s["id"], s["target"])
+            # Resolved again at each step, not from the plan: two variants of an
+            # item with no plain row ("Organic Kale", "オーガニックKale") — the
+            # first is renamed to Kale, and the second must then fold INTO it
+            # rather than try to become a second Kale.
+            target = find_base(conn, s["base"], s["id"])
+            if target:
+                merge_into(conn, s["id"], target)
             else:
                 rename_in_place(conn, s["id"], s["base"])
         db.bump_revision(conn)
