@@ -80,8 +80,20 @@ def merge_into(conn: sqlite3.Connection, src: int, dst: int) -> None:
     )
     conn.execute("UPDATE product_picks SET catalog_id=? WHERE catalog_id=?", (dst, src))
     s = conn.execute(
-        "SELECT note, budget, preferred_store_id, brand, snoozed_until FROM item_catalog WHERE id=?", (src,)
+        "SELECT display_name, aliases_json, note, budget, preferred_store_id, brand, snoozed_until "
+        "FROM item_catalog WHERE id=?", (src,)
     ).fetchone()
+    # The source's names, qualifier stripped, become the target's aliases: folding
+    # オーガニックケール into Kale must leave "ケール" finding Kale, not a new row.
+    t = conn.execute("SELECT canonical_name, aliases_json FROM item_catalog WHERE id=?", (dst,)).fetchone()
+    aliases = json.loads(t["aliases_json"] or "[]")
+    known = {t["canonical_name"], *(db.canonical(a) for a in aliases)}
+    for name in [s["display_name"], *json.loads(s["aliases_json"] or "[]")]:
+        plain = db.canonical(db.split_organic(name)[0])
+        if plain and plain not in known:
+            aliases.append(plain)
+            known.add(plain)
+    conn.execute("UPDATE item_catalog SET aliases_json=? WHERE id=?", (json.dumps(aliases, ensure_ascii=False), dst))
     conn.execute(
         "UPDATE item_catalog SET "
         "note = CASE WHEN note='' THEN ? ELSE note END, "

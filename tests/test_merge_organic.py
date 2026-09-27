@@ -173,3 +173,6 @@ def test_an_aliased_organic_row_folds_into_the_existing_english_row(tmp_path):
     rows = conn.execute("SELECT id, display_name FROM item_catalog").fetchall()
     assert [r["display_name"] for r in rows] == ["Kale"]
     assert conn.execute("SELECT COUNT(*) FROM purchase_events WHERE catalog_id=?", (rows[0]["id"],)).fetchone()[0] == 1
+    # its Japanese name now finds Kale, qualifier or not (Codex review, next round)
+    assert db.get_or_create_catalog(conn, "ケール") == rows[0]["id"]
+    assert db.get_or_create_catalog(conn, db.split_organic("オーガニックケール")[0]) == rows[0]["id"]
