@@ -105,9 +105,19 @@ def test_a_reviewed_day_survives_the_event_disappearing(client):
 def test_pruning_stays_inside_the_servers_own_window(client):
     """A phone posting a year-wide window must not prune proposals older than
     anything the server would have read itself."""
+    import app as appmod
+    import db as dbmod
+
     now = datetime.now(UTC)
     old = (now - timedelta(days=away.WINDOW_BACK_DAYS + 30)).date()
-    _push(client, [_trip(old)], window={"start": (now - timedelta(days=390)).isoformat(), "end": now.isoformat()})
+    # an older proposal, from a sync made months ago when this day was in range
+    dbmod.record_away_candidates(
+        appmod.conn,
+        [away.travel.AwayCandidate(old + timedelta(days=n), "hotel:old", "Stay", "", "3-day all-day event")
+         for n in range(3)],
+        "2026-01-01T00:00:00+00:00",
+    )
+    appmod.conn.commit()
     assert len(_pending_days(client)) == 3
     r = _push(client, [], window={"start": (now - timedelta(days=390)).isoformat(), "end": now.isoformat()})
     assert r.json()["dropped"] == 0
@@ -158,3 +168,23 @@ def test_last_sync_survives_a_restart(client, tmp_path):
     importlib.reload(appmod)  # same THINCART_DB, fresh process state
     assert Path(appmod.conn.execute("PRAGMA database_list").fetchone()[2]) == tmp_path / "phone.db"
     assert TestClient(appmod.app).get("/api/away").json()["last_sync"]["away_days"] == 3
+
+
+def test_an_endless_event_is_dropped_not_expanded(client):
+    """Codex review 2026-09-26: one event spanning 1900→2100 inside a valid
+    window was expanded into 73,049 proposals."""
+    endless = {"id": "x", "summary": "trip", "start": {"date": "1900-01-01"}, "end": {"date": "2100-01-01"}}
+    r = _push(client, [endless])
+    assert r.status_code == 200 and r.json()["away_days"] == 0
+    assert _pending_days(client) == []
+
+
+def test_only_days_inside_the_window_are_recorded(client):
+    """A trip that starts before the window is proposed for its in-window days only."""
+    now = datetime.now(UTC)
+    edge = (now - timedelta(days=away.WINDOW_BACK_DAYS + 2)).date()
+    r = _push(client, [_trip(edge, nights=6)])
+    assert r.status_code == 200
+    days = _pending_days(client)
+    assert days and min(days) >= (now - timedelta(days=away.WINDOW_BACK_DAYS)).astimezone(away.travel.HOME_TZ).date().isoformat()
+    assert len(days) < 6

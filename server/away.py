@@ -43,6 +43,10 @@ WINDOW_AHEAD_DAYS = 30
 WINDOW_SANITY_DAYS = 400
 
 MAX_EVENTS = 5000
+# The detector expands an event into every day it covers. An all-day event
+# longer than this is not a trip (a "semester", a mis-set end year) — and one
+# spanning 1900→2100 would be 73,000 proposals and a blocked event loop.
+MAX_EVENT_DAYS = 120
 MAX_TEXT = 300  # summary/location as shown in the Travel panel, never more
 
 # Last sync, persisted so a restart does not make the Travel panel claim the
@@ -127,6 +131,31 @@ def clean_event(raw: dict) -> dict:
     return ev
 
 
+def _span_days(ev: dict) -> int | None:
+    """How many days an event covers, without expanding it; None if unreadable."""
+    try:
+        start, end = ev["start"], ev["end"]
+        if "date" in start:
+            first = travel._parse_day(start["date"])
+            last = travel._parse_day(end["date"]) if "date" in end else first
+        else:
+            first = travel._parse_dt(start["dateTime"]).date()
+            last = travel._parse_dt(end["dateTime"]).date() if "dateTime" in end else first
+    except (KeyError, ValueError, TypeError):
+        return None
+    return (last - first).days + 1
+
+
+def bounded(events: list[dict]) -> list[dict]:
+    """Events safe to hand to `travel.detect`: parseable, and not absurdly long."""
+    out = []
+    for ev in events:
+        span = _span_days(ev)
+        if span is not None and 0 < span <= MAX_EVENT_DAYS + 1:  # +1: an all-day end is exclusive
+            out.append(ev)
+    return out
+
+
 def clamp_window(start: datetime, end: datetime, now: datetime) -> tuple[datetime, datetime]:
     """The posted window, checked and narrowed to the server's own.
 
@@ -164,8 +193,7 @@ async def ingest(push: CalendarPush) -> dict:
     ctx = _need()
     now = datetime.now(UTC)
     time_min, time_max = clamp_window(push.window.start, push.window.end, now)
-    events = [clean_event(e) for e in push.events if isinstance(e, dict)]
-    found = travel.detect(events)
+    events = bounded([clean_event(e) for e in push.events if isinstance(e, dict)])
 
     # away_days is keyed by HOME-LOCAL dates, so the pruning window has to be
     # expressed in them too. Taking .date() off the UTC bounds shifts the window
@@ -176,6 +204,10 @@ async def ingest(push: CalendarPush) -> dict:
         time_min.astimezone(travel.HOME_TZ).date().isoformat(),
         time_max.astimezone(travel.HOME_TZ).date().isoformat(),
     )
+    # Record only what the window covers: a trip reaching past it is proposed
+    # for its in-window days, and nothing outside is written that a later sync
+    # could never prune.
+    found = [c for c in travel.detect(events) if window[0] <= c.day.isoformat() <= window[1]]
     async with ctx.write_lock:
         ts = ctx.now_iso()
         dropped = 0

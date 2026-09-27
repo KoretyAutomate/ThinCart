@@ -46,14 +46,15 @@ import java.util.concurrent.Executors;
  * dropped. Instances expands recurrences and returns whatever OVERLAPS the
  * window.
  *
- * What leaves the phone: ALL-DAY events only, from calendars the user owns.
- * A timed event is never travel to the server's detector, so sending one would
- * be private data for nothing.
+ * What leaves the phone: ALL-DAY events only, from the account's PRIMARY
+ * calendar. A timed event is never travel to the server's detector, so sending
+ * one would be private data for nothing.
  *
- * push() only posts to a host the app is already allowed to navigate to, and
- * only to /api/calendar/events. The Capacitor bridge may be reachable from the
- * tailnet page as well as the launcher, so this must not be a "send my
- * calendar anywhere" primitive.
+ * push() must not be a "send my calendar anywhere" primitive — the Capacitor
+ * bridge may be reachable from the tailnet page as well as the launcher. So it
+ * answers only while the WebView is showing the bundled launcher (whose server
+ * address the owner typed), posts only to a host the app may navigate to, and
+ * only to /api/calendar/events.
  */
 @CapacitorPlugin(
     name = "Calendar",
@@ -92,9 +93,28 @@ public class CalendarPlugin extends Plugin {
             call.reject("calendar permission not granted");
             return;
         }
-        // Resolve now: the launcher is about to hand over to the server, and
-        // nothing on the page needs the result — the server records it.
-        call.resolve(new JSObject().put("queued", true));
+        // WebView.getUrl() is main-thread only; plugin methods are not.
+        getActivity().runOnUiThread(() -> {
+            if (!fromLauncher()) {
+                call.reject("push is only available to the launcher page");
+                return;
+            }
+            // Resolve now: the launcher is about to hand over to the server, and
+            // nothing on the page needs the result — the server records it.
+            call.resolve(new JSObject().put("queued", true));
+            upload(target);
+        });
+    }
+
+    /** The page on screen is the bundled launcher, not anything it handed over to. */
+    private boolean fromLauncher() {
+        String current = getBridge().getWebView().getUrl();
+        String local = getBridge().getLocalUrl();
+        return current != null && local != null
+                && (current.equals(local) || current.startsWith(local + "/"));
+    }
+
+    private void upload(final URL target) {
         executor.execute(() -> {
             try {
                 long now = System.currentTimeMillis();
@@ -127,7 +147,7 @@ public class CalendarPlugin extends Plugin {
         return new URL(scheme, u.getHost(), u.getPort(), PATH);
     }
 
-    /** Calendars the user owns: their primary, and calendars they created. */
+    /** Each account's primary calendar, if it is synced and shown. */
     private List<Long> ownedCalendars() throws Exception {
         List<Long> ids = new ArrayList<>();
         String[] cols = {
@@ -135,29 +155,37 @@ public class CalendarPlugin extends Plugin {
             CalendarContract.Calendars.ACCOUNT_NAME,
             CalendarContract.Calendars.OWNER_ACCOUNT,
             CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL,
+            CalendarContract.Calendars.SYNC_EVENTS,
+            CalendarContract.Calendars.VISIBLE,
         };
         try (Cursor c = getContext().getContentResolver().query(
                 CalendarContract.Calendars.CONTENT_URI, cols, null, null, null)) {
             // no cursor is a failed read, not "no calendars" — abort the push
             if (c == null) throw new IllegalStateException("calendar provider returned no cursor");
             while (c.moveToNext()) {
-                if (isOwned(c.getInt(3), c.getString(2), c.getString(1))) ids.add(c.getLong(0));
+                // A calendar with event sync off (or hidden) has no events on the
+                // phone. Counting it as read would send an empty snapshot that
+                // prunes every pending trip — so it is not a calendar we read.
+                boolean readable = c.getInt(4) == 1 && c.getInt(5) == 1;
+                if (readable && isOwned(c.getInt(3), c.getString(2), c.getString(1))) ids.add(c.getLong(0));
             }
         }
         return ids;
     }
 
     /**
-     * Owner access, AND either the account's own calendar (owner == account) or
-     * one the user created (Google gives those a group-calendar id as owner).
-     * A colleague's calendar shared with "make changes and manage sharing" also
-     * reaches owner access, but its owner is the colleague's address — out.
-     * Holidays and contacts' birthdays are read-only — out.
+     * Owner access AND owner == account: the account's primary calendar.
+     *
+     * Calendars the user created are NOT included: Google gives them a
+     * group-calendar id as owner, and so does a colleague's calendar shared
+     * with "make changes and manage sharing" — the two cannot be told apart
+     * here, and uploading a colleague's trips as the household's is worse than
+     * missing a trip on a secondary calendar. Holidays and contacts' birthdays
+     * are read-only — out.
      */
     static boolean isOwned(int access, String owner, String account) {
-        if (access < CalendarContract.Calendars.CAL_ACCESS_OWNER || owner == null) return false;
-        return owner.equalsIgnoreCase(account == null ? "" : account)
-                || owner.toLowerCase(Locale.ROOT).endsWith("@group.calendar.google.com");
+        if (access < CalendarContract.Calendars.CAL_ACCESS_OWNER || owner == null || account == null) return false;
+        return owner.equalsIgnoreCase(account);
     }
 
     private JSONArray allDayEvents(List<Long> calendars, long from, long to) throws Exception {

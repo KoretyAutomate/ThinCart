@@ -2405,3 +2405,21 @@ plugins. So the read happens in the launcher, before handoff.
    update offer. versionCode 3 → 4, 1.2 → 1.3.
 10. **Launcher tests.** The helper at `mobile/tests/launcher.test.js:49` gains a
     `Calendar` mock; existing handoff tests get the extra microtask flushes.
+
+### Pre-push review deltas (Codex, 2026-09-26 — applied; override the above)
+
+- **Primary calendar only.** A calendar the user created and a colleague's
+  calendar shared with manage rights both carry a `@group.calendar.google.com`
+  owner — indistinguishable on the phone. Uploading someone else's trips is
+  worse than missing one on a secondary calendar, so delta 1's second branch is
+  dropped. Calendars with `SYNC_EVENTS=0` or hidden are not counted as read.
+- **Incomplete reads abort the push** (null cursor, > 5000 rows) — the server
+  would prune against them.
+- **`push` answers the launcher only**: it checks the WebView is on the bundled
+  local URL, so a script on any other page cannot aim the calendar elsewhere.
+- **Event spans bounded server-side**: events over 120 days are dropped before
+  detection (1900→2100 had expanded to 73,049 proposals), and only days inside
+  the clamped window are recorded.
+- **Test isolation**: API tests reload `db` before `app`; an earlier import had
+  frozen `DB_PATH`, so a file run alone could reach the live DB. It did not
+  (checked: no calendar meta, no away rows), but it could have.
