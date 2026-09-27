@@ -2436,3 +2436,7 @@ plugins. So the read happens in the launcher, before handoff.
   `away_days.claims` (additive migration, JSON list) records every claimant;
   a read replaces only the claims of the calendars it read, and a day is
   dropped only when no calendar claims it, inside the fully-read window.
+- **(round 5) Legacy Google rows are reconciled by any phone read.** Their event
+  ids name no phone calendar, so they are treated as claimed by whatever the
+  phone reads. (The live DB has none — the Google pull never ran — but a clone
+  that did sync must not keep them pending forever.)

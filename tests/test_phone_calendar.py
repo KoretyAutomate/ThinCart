@@ -242,3 +242,17 @@ def test_a_day_two_calendars_share_survives_one_going_quiet(client):
     # and once 9 is read again without the trip, nothing claims them
     r = _push(client, [], calendars=("7", "9"))
     assert r.json()["dropped"] == 3
+
+
+def test_a_legacy_google_proposal_is_reconciled_by_a_phone_read(client):
+    """Codex review 2026-09-26: rows from the old Google pull have Google event
+    ids, which name no phone calendar — they must not become unprunable."""
+    import app as appmod
+    import db as dbmod
+
+    first = date.today() - timedelta(days=30)
+    legacy = away.travel.AwayCandidate(first, "lj2rnl3q6knq6ustu8tqj495s0", "Stay", "", "3-day all-day event")
+    dbmod.record_away_candidates(appmod.conn, [legacy], "2026-08-11T00:00:00+00:00")
+    appmod.conn.commit()
+    assert _push(client, []).json()["dropped"] == 1
+    assert _pending_days(client) == []

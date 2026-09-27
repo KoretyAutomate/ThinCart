@@ -8,6 +8,7 @@ by an asyncio.Lock in app.py serializes all writes. SQLite WAL keeps readers che
 import contextlib
 import json
 import os
+import re
 import sqlite3
 import unicodedata
 from pathlib import Path
@@ -373,13 +374,18 @@ def prune_away_candidates(conn: sqlite3.Connection, start: str, end: str, keep: 
     return len(stale)
 
 
-def _claims_of(row) -> set[str]:
-    """A row's claimant calendars; rows from before the column fall back to the
-    calendar their event id names (`<calendar>:<event>:<begin>`)."""
+_PHONE_EVENT_ID = re.compile(r"^(\d+):\d+:-?\d+$")
+
+
+def _claims_of(row) -> set[str] | None:
+    """A row's claimant calendars. None for a LEGACY row — proposed by the old
+    Google pull, whose event ids name no phone calendar — which any phone read
+    may therefore speak for; otherwise it could never be pruned at all."""
     claims = set(json.loads(row["claims"] or "[]"))
-    if not claims and row["event_id"]:
-        claims = {row["event_id"].split(":", 1)[0]}
-    return claims
+    if claims:
+        return claims
+    m = _PHONE_EVENT_ID.match(row["event_id"] or "")
+    return {m.group(1)} if m else None
 
 
 def sync_away_claims(
@@ -405,7 +411,8 @@ def sync_away_claims(
         now = claims_now.get(day, set())
         if not now and not (start <= day <= end):
             continue  # outside what was fully read: this read says nothing about it
-        claims = (_claims_of(r) - read) | now
+        old = _claims_of(r)
+        claims = now if old is None else (old - read) | now
         if claims:
             conn.execute("UPDATE away_days SET claims=? WHERE day=?", (json.dumps(sorted(claims)), day))
         else:
