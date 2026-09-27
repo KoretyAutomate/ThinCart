@@ -176,3 +176,19 @@ def test_an_aliased_organic_row_folds_into_the_existing_english_row(tmp_path):
     # its Japanese name now finds Kale, qualifier or not (Codex review, next round)
     assert db.get_or_create_catalog(conn, "ケール") == rows[0]["id"]
     assert db.get_or_create_catalog(conn, db.split_organic("オーガニックケール")[0]) == rows[0]["id"]
+
+
+def test_the_backup_is_the_database_before_any_migration(tmp_path):
+    """Codex review 2026-09-27: db.connect() ran first and dropped the retired
+    per-item organic column, so the backup was already migrated."""
+    conn = _seed(tmp_path / "m.db")
+    conn.execute("ALTER TABLE item_catalog ADD COLUMN organic INTEGER NOT NULL DEFAULT 0")
+    conn.execute("UPDATE item_catalog SET organic=1 WHERE display_name='walnuts'")
+    conn.commit()
+    conn.close()
+    _run(tmp_path / "m.db", "--apply")
+    backup = next(tmp_path.glob("m.pre-organic-*.db"))
+    raw = sqlite3.connect(backup)
+    cols = [r[1] for r in raw.execute("PRAGMA table_info(item_catalog)")]
+    assert "organic" in cols
+    assert raw.execute("SELECT organic FROM item_catalog WHERE display_name='walnuts'").fetchone()[0] == 1

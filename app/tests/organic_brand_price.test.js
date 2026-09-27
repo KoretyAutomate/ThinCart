@@ -359,6 +359,9 @@ function openEditor(b, i) {
     t.release(); await settle(); await settle();
     const now = b.doc.querySelector("#store-rows textarea");
     check("(d) the unsaved note is still there", now && now.value === "half-typed note", now && now.value);
+    const plan = [...b.doc.querySelectorAll("#plan-groups .plangroup")].map(g => g.textContent).join("|");
+    check("(d) and the price answer is shown anyway", /\$3\.00/.test(plan)
+      && !/Checking prices/.test(b.doc.getElementById("plan-price-note").textContent), plan);
   }
 
   console.log("\n--- 4g. a failed ask is retried on request, not remembered --------");

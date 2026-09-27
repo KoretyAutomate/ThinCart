@@ -1589,10 +1589,11 @@ async function loadWhere() {
   const done = result => {
     if (gen !== whereGen) return;               // superseded: never shown
     whereResult = result; whereAsking = null;
-    refreshStores();                            // repaints, and asks again if the input moved
+    renderPlan();                               // the plan only: never under a half-typed note
+    whereTick();                                // asks again if the input moved meanwhile
   };
   if (!pricedStores().length) { done({ key, msg: T().byprice_none }); return; }
-  refreshStores();                              // "checking…"
+  renderPlan();                                 // "checking…"
   const merged = { key, items:{}, partial:false };
   try {
     for (let k = 0; k < ids.length; k += WHERE_PAGE) {
@@ -1710,6 +1711,14 @@ function renderStores() {
   mkAt(T().at_none, '');
   (base.stores || []).forEach(s => mkAt('🏬 ' + s.name, s.name));
 
+  renderPlan();
+  renderStoreRows();
+}
+
+/* The plan: the list grouped by store. Split out of renderStores because it has
+ * no text fields — a price answer can repaint it at any moment, even while a
+ * store note is half-typed below it (refreshStores guards only the editors). */
+function renderPlan() {
   // the plan: current list grouped by recommended store — computed client-side
   // over view() so it works offline and reflects pending ops (review delta 6)
   const items = view();
@@ -1761,6 +1770,9 @@ function renderStores() {
     pg.appendChild(div);
   }
 
+}
+
+function renderStoreRows() {
   // store management: notes (shared household knowledge) + delete
   const sr = $('store-rows'); sr.innerHTML = '';
   for (const s of (base.stores || [])) {

@@ -154,13 +154,17 @@ def main() -> int:
         print("\ndry run — nothing changed; re-run with --apply")
         return 0
 
-    conn = db.connect(args.db)
-
+    # The backup is taken through a PLAIN connection, before db.connect(): that
+    # runs the schema migrations, and a backup taken after them is not the
+    # database as it was.
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     backup = args.db.with_name(f"{args.db.stem}.pre-organic-{stamp}.db")
+    raw = sqlite3.connect(args.db)
     with sqlite3.connect(backup) as dst:
-        conn.backup(dst)
+        raw.backup(dst)
+    raw.close()
     print(f"\nbackup: {backup}")
+    conn = db.connect(args.db)
     # One write transaction, taken up front: the plan is re-derived inside it so
     # nothing the service wrote since the dry run is folded on stale ids.
     conn.isolation_level = None
