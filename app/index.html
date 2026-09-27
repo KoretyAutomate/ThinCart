@@ -1504,48 +1504,71 @@ $('stores-btn').onclick = () => {
 /* ============ where to buy, by price (PLAN.md Phase 7C) ============
    A VIEW over the plan, never a saved preference: nothing here enqueues an op.
    The server names a store cheapest only on comparable unit prices. */
-let byPrice = false, whereData = null, whereMsg = '', whereRev = null;
+let byPrice = false, whereData = null, whereMsg = '', whereKey = null, whereGen = 0;
 const WHERE_PAGE = 30;          // the server's per-request cap
 
 /* Items whose price question the SERVER would answer with stale preferences:
- * a queued 🌱 / brand / rename / product-pick edit has not reached it yet, so
- * /api/where would price the old wish while the row shows the new one. They
- * are left out and shown as not synced; the revision bump that follows their
- * sync triggers a fresh ask (refreshStores). */
+ * a queued 🌱 / brand / rename / product-pick edit — or a queued "organic X"
+ * add that turns an existing X organic — has not reached it yet, so /api/where
+ * would price the old wish while the row shows the new one. They are left out
+ * and shown as not synced; once their op is acknowledged the set shrinks, the
+ * key below changes, and refreshStores asks again. */
 function unsettledItems() {
-  const ids = new Set(), cats = new Set();
+  const ids = new Set(), cats = new Set(), organicNames = new Set();
   for (const op of queue) {
     if (op.type === 'edit' && (op.organic !== undefined || op.brand !== undefined || op.name !== undefined))
       ids.add(op.item_id);
     if (op.type === 'product_pick') cats.add(op.catalog_id);
+    if (op.type === 'add') {
+      const [nm, org] = splitOrganic(op.name);
+      if (org) organicNames.add(canon(nm));
+    }
   }
-  return it => ids.has(it.id) || cats.has(it.catalog_id);
+  return it => ids.has(it.id) || cats.has(it.catalog_id) || (!it.pending && organicNames.has(canon(it.name)));
+}
+
+/* What a price answer was asked AT: the list revision plus which items were
+ * held back as unsettled. An edit's ACK can arrive after the revision it
+ * caused, so the revision alone would miss the moment the item became askable. */
+function whereKeyNow() {
+  const unsettled = unsettledItems();
+  const held = view().filter(i => unsettled(i) || i.pending).map(i => i.catalog_id || i.id).sort();
+  return base.revision + '|' + held.join(',');
 }
 
 async function loadWhere() {
+  const gen = ++whereGen;          // a later ask supersedes this one
   if (!pricedStores().length) { whereData = null; whereMsg = T().byprice_none; renderStores(); return; }
   // only items the server knows: a queued add has no catalog_id to price yet
   const unsettled = unsettledItems();
   const ids = view().filter(i => !i.pending && i.catalog_id && !unsettled(i)).map(i => i.catalog_id);
-  whereRev = base.revision;
+  const key = whereKeyNow();
+  whereKey = key;
   whereMsg = T().byprice_searching; renderStores();
   const merged = { items:{}, partial:false };
   try {
     for (let k = 0; k < ids.length; k += WHERE_PAGE) {
       const res = await fetch('/api/where', { method:'POST', headers:{ 'Content-Type':'application/json' },
         body: JSON.stringify({ catalog_ids: ids.slice(k, k + WHERE_PAGE) }) });
+      if (gen !== whereGen) return;                 // superseded: its answer is not shown
       if (res.status === 503) {
         whereData = null; whereMsg = await why503(res, T().cmp_off, T().cmp_fail); renderStores(); return;
       }
       if (!res.ok) throw new Error('where ' + res.status);
       const d = await res.json();
+      if (gen !== whereGen) return;
       Object.assign(merged.items, d.items);
       merged.partial = merged.partial || d.partial;
     }
     whereData = merged;
     whereMsg = merged.partial ? T().byprice_partial : T().byprice_note;
-  } catch (e) { whereData = null; whereMsg = T().cmp_fail; }
+  } catch (e) {
+    if (gen !== whereGen) return;
+    whereData = null; whereMsg = T().cmp_fail;
+  }
   if (byPrice) renderStores();
+  // the list moved while we were asking: this answer is for an older list
+  if (byPrice && whereKeyNow() !== key) loadWhere();
 }
 
 function whereLine(it, w, unsettled) {
@@ -1615,7 +1638,7 @@ function refreshStores() {
   if ($('stores-panel').style.display === 'flex' && !typing) renderStores();
   // prices shown were asked at an older revision (an edit synced, the other
   // phone changed something): ask again rather than show a stale answer
-  if (byPrice && whereData && whereRev !== base.revision && $('stores-panel').style.display === 'flex')
+  if (byPrice && whereData && whereKey !== whereKeyNow() && $('stores-panel').style.display === 'flex')
     loadWhere();
 }
 

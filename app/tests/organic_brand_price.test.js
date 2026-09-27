@@ -34,7 +34,7 @@ function item(id, name, extra = {}) {
 const STORES = [{ id: 7, name: "Wegmans", chain: "wegmans", chain_store_id: "93" },
                 { id: 8, name: "Whole Foods", chain: "wholefoods", chain_store_id: "10738" }];
 
-function boot({ items, queue = [], where = null, stores = STORES }) {
+function boot({ items, queue = [], where = null, stores = STORES, fetchImpl = null }) {
   const dom = new JSDOM(HTML, { runScripts: "outside-only", url: "https://s.ts.net/" });
   const w = dom.window;
   w.localStorage.setItem("pc_name", "tester");
@@ -51,6 +51,7 @@ function boot({ items, queue = [], where = null, stores = STORES }) {
       return Promise.resolve({ ok: true, status: 200, json: async () => where });
     return Promise.resolve({ ok: true, status: 200, json: async () => ({}), text: async () => "" });
   };
+  if (fetchImpl) w.fetch = fetchImpl;                 // a test that drives the network itself
   w.WebSocket = function () { this.close = () => {}; };
   w.eval(SCRIPT);
   const doc = w.document;
@@ -164,6 +165,79 @@ function openEditor(b, i) {
       req && JSON.stringify(req.body.catalog_ids) === "[2]", req && req.body);
     const all = [...b.doc.querySelectorAll("#plan-groups .plangroup")].map(g => g.textContent).join("|");
     check("and says it is not synced yet", /milk 🌱[^|]*not synced/.test(all), all);
+  }
+
+  console.log("\n--- 4c. a queued 'organic milk' on a listed milk is unsettled too --");
+  {
+    const b = boot({ items: [item(1, "milk"), item(2, "bread")], where: { partial: false, items: {} },
+                     queue: [{ op_id: "a1", type: "add", name: "organic milk", item_id: "n9", actor: "t" }] });
+    await settle();
+    b.doc.getElementById("stores-btn").click();
+    b.doc.getElementById("plan-byprice").click();
+    await settle(); await settle();
+    const req = b.calls.find(c => c.url === "/api/where");
+    check("milk is not priced on its old conventional wish",
+      req && JSON.stringify(req.body.catalog_ids) === "[2]", req && req.body);
+  }
+
+  console.log("\n--- 4d. an older answer never overwrites a newer one ---------------");
+  {
+    let release = null;
+    const b = boot({ items: [item(1, "milk")], where: null });
+    const answers = [];
+    b.w.fetch = (url, opts) => {
+      if (String(url) !== "/api/where")
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({}), text: async () => "" });
+      const n = answers.length;
+      const body = { partial: false, items: { "1": { cheapest: { store: n === 0 ? "OLD" : "NEW", amount: 1,
+        unit_price: "$0.10/oz", product: "p", exact: true, fetched_at: "" }, quotes: [{}], comparable: true } } };
+      answers.push(body);
+      if (n === 0) return new Promise(r => { release = () => r({ ok: true, status: 200, json: async () => body }); });
+      return Promise.resolve({ ok: true, status: 200, json: async () => body });
+    };
+    await settle();
+    b.doc.getElementById("stores-btn").click();
+    b.doc.getElementById("plan-byprice").click();     // first ask: held
+    await settle();
+    b.doc.getElementById("stores-btn").click();       // reopen: second ask answers at once
+    await settle(); await settle();
+    release();                                        // the first answer arrives late
+    await settle(); await settle();
+    const all = [...b.doc.querySelectorAll("#plan-groups .plangroup")].map(g => g.textContent).join("|");
+    check("the newer answer stands", /NEW/.test(all) && !/OLD/.test(all), all);
+  }
+
+  console.log("\n--- 4e. once the edit is acknowledged, its item is priced ---------");
+  {
+    // Codex review: the server's revision can arrive BEFORE the op's ACK, so a
+    // refresh keyed on the revision alone never asked about the item again.
+    const items = [item(1, "milk"), item(2, "bread")];
+    let ack = null;
+    const asked = [];
+    const state = { revision: 1, items, stores: STORES, picks: {}, suggestions: [], away_pending: 0 };
+    const fetchImpl = (url, opts) => {
+      const u = String(url);
+      if (u === "/api/op") return new Promise(r => { ack = () => r({ ok: true, status: 200,
+        json: async () => ({ result: { edited: "i1", changed: true } }) }); });
+      if (u.startsWith("/api/state")) return Promise.resolve({ ok: true, status: 200, json: async () => state });
+      if (u === "/api/where") {
+        asked.push(JSON.parse(opts.body).catalog_ids);
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ partial: false, items: {} }) });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({}), text: async () => "" });
+    };
+    // the startup flush sends the edit; its ACK is held until ack()
+    const b = boot({ items, fetchImpl,
+                     queue: [{ op_id: "e2", type: "edit", item_id: "i1", catalog_id: 1, organic: true, actor: "t" }] });
+    await settle();
+    b.doc.getElementById("stores-btn").click();
+    b.doc.getElementById("plan-byprice").click();
+    await settle(); await settle();
+    check("while unacknowledged, milk is held back", JSON.stringify(asked[0]) === "[2]", asked);
+    ack();                                            // same revision comes back with the resync
+    await settle(); await settle(); await settle();
+    check("after the ACK the list is asked about again, milk included",
+      asked.some(a => JSON.stringify(a) === "[1,2]"), asked);
   }
 
   console.log("\n--- 5. no priced store: say what to do ------------------------------");
