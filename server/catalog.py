@@ -216,10 +216,31 @@ async def enrich(conn, write_lock, catalog_id: int) -> bool:
                 alias_of,
             )
             target = None
-        if target:
-            # merge: repoint history + live items, record alias, drop this row
+        # The LLM call above awaited without the lock, so `row` may be stale: the
+        # user can have set a note, brand or organic — or picked a product — on
+        # it meanwhile. Re-read what is carried over now, under the lock.
+        cur = (
+            conn.execute(
+                "SELECT note, budget, preferred_store_id, brand, organic FROM item_catalog WHERE id=?",
+                (row["id"],),
+            ).fetchone()
+            if target
+            else None
+        )
+        if target and cur is None:
+            target = None  # the row went away while we waited; nothing to merge
+        if target and cur is not None:
+            # merge: repoint history + live items + product picks, record alias, drop this row
             conn.execute("UPDATE items SET catalog_id=? WHERE catalog_id=?", (target["id"], row["id"]))
             conn.execute("UPDATE purchase_events SET catalog_id=? WHERE catalog_id=?", (target["id"], row["id"]))
+            # one pick per (item, chain): the target's own wins; the rest move
+            # rather than cascade away with the deleted row
+            conn.execute(
+                "DELETE FROM product_picks WHERE catalog_id=? AND chain IN "
+                "(SELECT chain FROM product_picks WHERE catalog_id=?)",
+                (row["id"], target["id"]),
+            )
+            conn.execute("UPDATE product_picks SET catalog_id=? WHERE catalog_id=?", (target["id"], row["id"]))
             aliases = json.loads(target["aliases_json"])
             if row["canonical_name"] not in aliases:
                 aliases.append(row["canonical_name"])
@@ -228,13 +249,16 @@ async def enrich(conn, write_lock, catalog_id: int) -> bool:
                 (json.dumps(aliases, ensure_ascii=False), target["id"]),
             )
             # criteria the user set on the doomed row before this async merge ran
-            # must survive it — carry note/budget/preferred store (target wins)
+            # must survive it — carry note/budget/preferred store/brand (target
+            # wins), and organic if either side was set
             conn.execute(
                 "UPDATE item_catalog SET "
                 "note = CASE WHEN note='' THEN ? ELSE note END, "
                 "budget = COALESCE(budget, ?), "
-                "preferred_store_id = COALESCE(preferred_store_id, ?) WHERE id=?",
-                (row["note"], row["budget"], row["preferred_store_id"], target["id"]),
+                "preferred_store_id = COALESCE(preferred_store_id, ?), "
+                "brand = CASE WHEN brand='' THEN ? ELSE brand END, "
+                "organic = MAX(organic, ?) WHERE id=?",
+                (cur["note"], cur["budget"], cur["preferred_store_id"], cur["brand"], cur["organic"], target["id"]),
             )
             conn.execute("DELETE FROM item_catalog WHERE id=?", (row["id"],))
             log.info("alias-merged %r into %r", row["canonical_name"], alias_of)

@@ -33,6 +33,7 @@ from fastapi.testclient import TestClient
 
 import app as appmod
 import chains
+import chain_lookup
 import lookup
 import shoprite
 import wholefoods
@@ -157,11 +158,11 @@ def test_wholefoods_empty_search_is_retried_and_never_cached_as_none_stocked(mon
 
     monkeypatch.setattr(lookup, "_chrome_get", fake)
     monkeypatch.setattr(asyncio, "sleep", _no_sleep)
-    recs = asyncio.run(lookup.products("wholefoods", "milk retry", "10187"))
+    recs = asyncio.run(chain_lookup.products("wholefoods", "milk retry", "10187"))
     assert recs and len(recs) == 3 and len(calls) == 2 + 1     # two searches, then the top hit's page
 
     calls.clear()
-    recs = asyncio.run(lookup.products("wholefoods", "nothing ever", "10187"))
+    recs = asyncio.run(chain_lookup.products("wholefoods", "nothing ever", "10187"))
     assert recs is None and len(calls) == 3                     # three tries, then unavailable
     assert lookup.cache_get("product", "wholefoods:10187|nothing ever|8") is None   # and nothing cached
 
@@ -406,7 +407,7 @@ def test_placing_a_cached_search_does_not_make_its_prices_young_again(monkeypatc
         "INSERT OR REPLACE INTO lookup_cache(kind, key, payload_json, fetched_at) VALUES(?,?,?,?)",
         ("product", key, json.dumps(old), (datetime.now(UTC) - timedelta(days=5)).isoformat()))
     lookup._conn.commit()
-    recs = asyncio.run(lookup.products("shoprite", "old milk", "3002", prefer_sku="00041190467242"))
+    recs = asyncio.run(chain_lookup.products("shoprite", "old milk", "3002", prefer_sku="00041190467242"))
     assert recs and recs[0]["aisle"] == "9"                    # placed, from the five-day-old search
     assert lookup.cache_get("product", key, lookup.TTL["price"]) is None   # ...which is still stale for a price
 
@@ -415,10 +416,10 @@ def test_an_unplaced_product_is_unknown_not_invented(monkeypatch):
     search = (FIX / "shoprite_search.json").read_text()
     calls = _stub_chrome(monkeypatch, {"/search": (200, search),
                                        "/products/00041190467242": (200, json.dumps({"productLocation": None}))})
-    recs = asyncio.run(lookup.products("shoprite", "milk unplaced", "3000"))
+    recs = asyncio.run(chain_lookup.products("shoprite", "milk unplaced", "3000"))
     assert recs and recs[0]["aisle"] == "" and chains.aisle_label(recs[0]) == ""
     n = len(calls)
-    asyncio.run(lookup.products("shoprite", "milk unplaced", "3000"))
+    asyncio.run(chain_lookup.products("shoprite", "milk unplaced", "3000"))
     assert len(calls) == n                       # "has no place" was an answer, and is cached
 
 
@@ -426,10 +427,10 @@ def test_a_failed_placement_is_asked_again_next_time(monkeypatch):
     search = (FIX / "shoprite_search.json").read_text()
     calls = _stub_chrome(monkeypatch, {"/search": (200, search)})     # product read fails
     # A branch no other test places at, so no cached position can leak in.
-    recs = asyncio.run(lookup.products("shoprite", "milk failing", "3001"))
+    recs = asyncio.run(chain_lookup.products("shoprite", "milk failing", "3001"))
     assert recs and recs[0]["aisle"] == ""
     n = len(calls)
-    asyncio.run(lookup.products("shoprite", "milk failing", "3001"))
+    asyncio.run(chain_lookup.products("shoprite", "milk failing", "3001"))
     assert len(calls) == n + 1                   # the search was cached; the placement retried
 
 
@@ -440,7 +441,8 @@ def test_products_many_reports_what_it_could_not_ask(monkeypatch):
     async def fake(url, *, headers=None, cookies=None, params=None, timeout=25):
         return (200, search) if (params or {}).get("q") == "asked term" else None
     monkeypatch.setattr(lookup, "_chrome_get", fake)
-    got, complete = asyncio.run(lookup.products_many("shoprite", ["cached term", "asked term", "dead term"], "500"))
+    got, complete = asyncio.run(
+        chain_lookup.products_many("shoprite", ["cached term", "asked term", "dead term"], "500"))
     assert set(got) == {"cached term", "asked term"}
     assert complete is False
 
@@ -456,7 +458,7 @@ def test_two_picks_under_one_term_are_both_placed(monkeypatch):
         f"/products/{a}": (200, json.dumps({"productLocation": {"aisle": "3", "shelf": "1"}})),
         f"/products/{b}": (200, json.dumps({"productLocation": {"aisle": "4", "shelf": "2"}})),
     })
-    got, complete = asyncio.run(lookup.products_many("shoprite", ["shared words"], "3003",
+    got, complete = asyncio.run(chain_lookup.products_many("shoprite", ["shared words"], "3003",
                                                      {"shared words": [a, b]}))
     assert complete
     by_sku = {r["sku"]: r["aisle"] for r in got["shared words"]}
@@ -464,8 +466,8 @@ def test_two_picks_under_one_term_are_both_placed(monkeypatch):
 
 
 def test_an_unknown_chain_is_unavailable_not_wegmans():
-    assert asyncio.run(lookup.products("costco", "milk", "1")) is None
-    assert asyncio.run(lookup.products_many("costco", ["milk"], "1")) == ({}, False)
+    assert asyncio.run(chain_lookup.products("costco", "milk", "1")) is None
+    assert asyncio.run(chain_lookup.products_many("costco", ["milk"], "1")) == ({}, False)
 
 
 # --- the invariant that makes the outbound surface auditable ---------------------

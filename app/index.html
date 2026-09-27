@@ -174,9 +174,12 @@
     display:flex; flex-direction:column; align-items:center; gap:3px; }
   #sheet .catopt.sel { border-color:var(--green); background:#e9f5ec; color:var(--green-dark); }
   #sheet .catopt .em { font-size:1.15rem; }
-  #sheet #sheet-note-input, #sheet #sheet-budget { flex:1; padding:12px;
+  #sheet #sheet-note-input, #sheet #sheet-budget, #sheet #sheet-brand { flex:1; padding:12px;
     border:1.5px solid #d4dcd4; border-radius:10px; font-size:1rem; outline:none;
     min-width:0; }
+  #sheet .sheet-check { display:flex; align-items:center; gap:10px; margin:2px 0 14px;
+    font-weight:600; }
+  #sheet .sheet-check input { width:22px; height:22px; accent-color:var(--green); }
   /* a NOTE must be fully visible while editing — a single-line input clips it */
   #sheet #sheet-note-input { font-family:inherit; resize:none; line-height:1.35; }
   #sheet #sheet-stores { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
@@ -208,6 +211,8 @@
   .plangroup .pitem:last-child { border-bottom:none; }
   .plangroup .pitem .pnm { flex:1; overflow-wrap:anywhere; }
   .plangroup .pitem .pmeta { color:var(--muted); font-size:.8rem; white-space:nowrap; }
+  /* a price line names a product: let it wrap instead of pushing the item off-screen */
+  .plangroup .pitem .pmeta.price { white-space:normal; text-align:right; max-width:62%; }
   .storerow { background:var(--card); border-radius:12px; padding:12px 14px;
     margin-bottom:8px; box-shadow:0 1px 2px #0000000a; }
   .storerow .srhead { display:flex; align-items:center; gap:8px; }
@@ -547,6 +552,9 @@
     <textarea id="sheet-note-input" maxlength="200" rows="2"></textarea></label>
   <label class="sheet-field"><span id="sheet-budget-label"></span>
     <input id="sheet-budget" maxlength="20" inputmode="numeric"></label>
+  <label class="sheet-check"><input type="checkbox" id="sheet-organic"><span id="sheet-organic-label"></span></label>
+  <label class="sheet-field"><span id="sheet-brand-label"></span>
+    <input id="sheet-brand" maxlength="60"></label>
   <button id="sheet-compare" class="linkbtn"></button>
   <div id="sheet-prices"></div>
   <div class="sheet-field-label" id="sheet-store-label"></div>
@@ -585,6 +593,8 @@
     <h3 id="at-h"></h3>
     <div id="at-chips"></div>
     <h3 id="plan-h"></h3>
+    <button class="linkbtn" id="plan-byprice"></button>
+    <div class="stores-note" id="plan-price-note"></div>
     <div id="plan-groups"></div>
     <h3 id="manage-h"></h3>
     <div id="store-rows"></div>
@@ -650,6 +660,17 @@ const saveBase  = () => localStorage.setItem(LS.base, JSON.stringify(base));
 
 /* canonical() twin of server db.canonical — NFKC fold handles full-width JP */
 const canon = s => s.normalize('NFKC').toLowerCase().trim().replace(/\s+/g,' ');
+/* Mirror of server db.split_organic (PLAN.md Phase 7A): "organic onion" is the
+ * Onion, bought organic. A LEADING qualifier only; one that is the whole name
+ * is not split. Used so a queued add does not flash a second Onion. */
+const ORGANIC_RE = /^\s*(?:organic\b|オーガニック|有機)[\s・]*/i;
+function splitOrganic(name) {
+  const f = (name || '').normalize('NFKC');
+  const m = f.match(ORGANIC_RE);
+  if (!m) return [name, false];
+  const rest = f.slice(m[0].length).trim();
+  return rest ? [rest, true] : [name, false];
+}
 /* budget parse twin of server parse_budget: '' → null (clear), invalid →
  * undefined (ignore), else float — ３００円 / ¥1,200 all work */
 const budgetNum = s => {
@@ -730,6 +751,17 @@ const STR = {
     hist_restored:n=>`↩ ${n} back on the list`,
     cand_on:'✓ on list', cand_edit:'tap to edit',
     note_label:'Note', sheet_budget:'Budget 💰', sheet_store:'Where to buy',
+    organic_label:'🌱 Organic', sheet_brand:'Preferred brand', brand_any:'any brand is fine',
+    byprice:'💲 Compare by price', byprice_off:'🏬 Back to usual stores',
+    byprice_searching:'Checking prices…',
+    byprice_none:'No store can give prices yet — pin a Wegmans, Whole Foods or ShopRite below.',
+    byprice_note:'Cheapest per unit (per oz, fl oz or each), in stock, matching 🌱 and brand. Not saved — your usual stores stay as they are.',
+    byprice_partial:'Some stores could not be reached — their prices are missing.',
+    why_unasked:'price not checked — store unreachable', why_no_match:'no matching product found',
+    why_conflict:'your chosen product no longer matches (🌱 / brand / stock)',
+    why_pick_missing:'your chosen product was not found',
+    why_uncomparable:'prices found, but in different units — not compared',
+    best_match:'best match', not_synced:'not synced yet',
     store_none:'no preference', new_store_inline:'new store…',
     stores_title:'🏬 Stores & plan', at_h:'I’m at… (tags purchases for 6 h)',
     plan_h:'Where to buy today', manage_h:'Stores', at_none:'— none —',
@@ -856,6 +888,17 @@ const STR = {
     hist_restored:n=>`↩ ${n} をリストに戻しました`,
     cand_on:'✓ リストにあり', cand_edit:'タップで編集',
     note_label:'メモ', sheet_budget:'予算 💰', sheet_store:'購入する店',
+    organic_label:'🌱 オーガニック', sheet_brand:'好みのブランド', brand_any:'こだわりなし',
+    byprice:'💲 価格で比較', byprice_off:'🏬 いつもの店に戻す',
+    byprice_searching:'価格を確認中…',
+    byprice_none:'価格を取得できる店がまだありません — 下でWegmans・Whole Foods・ShopRiteを登録してください。',
+    byprice_note:'単位あたり（oz・fl oz・個）で最安、在庫あり、🌱とブランドに合う商品のみ。保存はされません — いつもの店はそのままです。',
+    byprice_partial:'一部の店に接続できず、その価格はありません。',
+    why_unasked:'価格未確認 — 店に接続できません', why_no_match:'合う商品が見つかりません',
+    why_conflict:'選んだ商品が条件に合いません（🌱・ブランド・在庫）',
+    why_pick_missing:'選んだ商品が見つかりません',
+    why_uncomparable:'価格はありますが単位が違うため比較していません',
+    best_match:'近い商品', not_synced:'未同期',
     store_none:'指定なし', new_store_inline:'新しい店…',
     stores_title:'🏬 店舗とプラン', at_h:'いまいる店（6時間有効）',
     plan_h:'今日どこで買う？', manage_h:'店舗リスト', at_none:'— なし —',
@@ -973,6 +1016,9 @@ function applyLang() {
   $('trip-note').textContent = T().trip_note;
   $('sheet-note-label').textContent = T().note_label;
   $('sheet-budget-label').textContent = T().sheet_budget;
+  $('sheet-organic-label').textContent = T().organic_label;
+  $('sheet-brand-label').textContent = T().sheet_brand;
+  $('sheet-brand').placeholder = T().brand_any;
   $('sheet-store-label').textContent = T().sheet_store;
   $('stores-h1').textContent = T().stores_title;
   $('at-h').textContent = T().at_h;
@@ -1008,15 +1054,23 @@ function view() {
   let items = base.items.map(i => ({...i}));
   for (const op of queue) {
     if (op.type === 'add') {
-      if (!items.some(i => canon(i.name) === canon(op.name)))
-        items.push({ id:op.item_id, name:op.name, qty_note:op.qty_note||'',
-                     added_by:op.actor, category:op.cat||null, pending:true });
+      const [nm, org] = splitOrganic(op.name);
+      const same = items.find(i => canon(i.name) === canon(nm));
+      if (same) { if (org) same.organic = true; }   // mirror server: flag set, no 2nd row
+      else items.push({ id:op.item_id, name:nm, qty_note:op.qty_note||'', organic:org,
+                        added_by:op.actor, category:op.cat||null, pending:true });
     } else if (op.type === 'checkoff' || op.type === 'remove' || op.type === 'skip') {
       items = items.filter(i => i.id !== op.item_id);
     } else if (op.type === 'edit') {
       const it = items.find(i => i.id === op.item_id);
       if (it) {
-        if (op.name !== undefined) { it.name = op.name; it.name_en = null; }
+        if (op.name !== undefined) {
+          const [nm, org] = splitOrganic(op.name);
+          it.name = nm; it.name_en = null;
+          if (org && op.organic === undefined) it.organic = true;
+        }
+        if (op.organic !== undefined) it.organic = op.organic;
+        if (op.brand !== undefined) it.brand = op.brand.trim();
         if (op.qty_note !== undefined) it.qty_note = op.qty_note;
         if (op.category !== undefined) it.category = op.category;
         if (op.note !== undefined) it.note = op.note;
@@ -1442,7 +1496,58 @@ $('gps-test').onclick = () => {
 $('set-close').onclick = () => $('set-panel').style.display = 'none';
 
 /* ============ stores panel: where-to-buy plan + store management ============ */
-$('stores-btn').onclick = () => { $('stores-panel').style.display = 'flex'; renderStores(); };
+$('stores-btn').onclick = () => {
+  $('stores-panel').style.display = 'flex'; renderStores();
+  if (byPrice) loadWhere();    // prices age; a reopened panel asks again
+};
+
+/* ============ where to buy, by price (PLAN.md Phase 7C) ============
+   A VIEW over the plan, never a saved preference: nothing here enqueues an op.
+   The server names a store cheapest only on comparable unit prices. */
+let byPrice = false, whereData = null, whereMsg = '';
+const WHERE_PAGE = 30;          // the server's per-request cap
+
+async function loadWhere() {
+  if (!pricedStores().length) { whereData = null; whereMsg = T().byprice_none; renderStores(); return; }
+  // only items the server knows: a queued add has no catalog_id to price yet
+  const ids = view().filter(i => !i.pending && i.catalog_id).map(i => i.catalog_id);
+  whereMsg = T().byprice_searching; renderStores();
+  const merged = { items:{}, partial:false };
+  try {
+    for (let k = 0; k < ids.length; k += WHERE_PAGE) {
+      const res = await fetch('/api/where', { method:'POST', headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ catalog_ids: ids.slice(k, k + WHERE_PAGE) }) });
+      if (res.status === 503) {
+        whereData = null; whereMsg = await why503(res, T().cmp_off, T().cmp_fail); renderStores(); return;
+      }
+      if (!res.ok) throw new Error('where ' + res.status);
+      const d = await res.json();
+      Object.assign(merged.items, d.items);
+      merged.partial = merged.partial || d.partial;
+    }
+    whereData = merged;
+    whereMsg = merged.partial ? T().byprice_partial : T().byprice_note;
+  } catch (e) { whereData = null; whereMsg = T().cmp_fail; }
+  if (byPrice) renderStores();
+}
+
+function whereLine(it, w) {
+  if (it.pending) return T().not_synced;
+  if (!w) return '';
+  if (w.cheapest) {
+    const q = w.cheapest;
+    return [`$${q.amount.toFixed(2)}`, q.unit_price, q.product,
+            q.exact ? '' : '(' + T().best_match + ')', agoLabel(q.fetched_at)].filter(Boolean).join(' · ');
+  }
+  if (w.quotes && w.quotes.length) return T().why_uncomparable;
+  return ({ unasked:T().why_unasked, conflict:T().why_conflict, pick_missing:T().why_pick_missing })[w.reason]
+    || T().why_no_match;
+}
+
+$('plan-byprice').onclick = () => {
+  byPrice = !byPrice;
+  if (byPrice) loadWhere(); else renderStores();
+};
 $('stores-close').onclick = () => $('stores-panel').style.display = 'none';
 
 /* A price link is a network round trip to the chain, and the panel can be
@@ -1513,9 +1618,14 @@ function renderStores() {
   // the plan: current list grouped by recommended store — computed client-side
   // over view() so it works offline and reflects pending ops (review delta 6)
   const items = view();
+  $('plan-byprice').textContent = byPrice ? T().byprice_off : T().byprice;
+  $('plan-price-note').textContent = byPrice ? whereMsg : '';
+  const priced = byPrice && whereData;
+  const wOf = it => (priced && it.catalog_id) ? whereData.items[String(it.catalog_id)] : null;
   const groups = new Map();
   for (const it of items) {
-    const k = it.store || '';
+    const w = wOf(it);
+    const k = (w && w.cheapest) ? w.cheapest.store : (it.store || '');
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k).push(it);
   }
@@ -1541,8 +1651,9 @@ function renderStores() {
       p.innerHTML = '<span class="pnm"></span><span class="pmeta"></span>';
       const ico = i.emoji || (i.category ? catEmoji(i.category) : '');
       p.querySelector('.pnm').textContent =
-        (ico ? ico + ' ' : '') + disp(i) + (i.note ? ' · ' + i.note : '');
-      p.querySelector('.pmeta').textContent = [
+        (ico ? ico + ' ' : '') + disp(i) + (i.organic ? ' 🌱' : '') + (i.note ? ' · ' + i.note : '');
+      if (priced) p.querySelector('.pmeta').classList.add('price');
+      p.querySelector('.pmeta').textContent = priced ? whereLine(i, wOf(i)) : [
         i.qty_note, i.budget != null ? fmtYen(i.budget) : '',
         i.store_source === 'history' ? T().src_hist : '',
       ].filter(Boolean).join(' ');
@@ -1860,8 +1971,8 @@ function render() {
       openSheet(it);
     });
     const ico = it.emoji || (it.category ? catEmoji(it.category) : '');
-    li.querySelector('.nm1').textContent = (ico ? ico + ' ' : '') + disp(it);
-    if (it.store || it.note) {   // criteria sub-line: store chip + note
+    li.querySelector('.nm1').textContent = (ico ? ico + ' ' : '') + disp(it) + (it.organic ? ' 🌱' : '');
+    if (it.store || it.note || it.brand) {   // criteria sub-line: store chip, brand, note
       const sub = document.createElement('span');
       sub.className = 'sub'; sub.style.display = 'block';
       if (it.store) {
@@ -1870,8 +1981,15 @@ function render() {
         sc.textContent = '🏬 ' + it.store;
         sub.appendChild(sc);
       }
+      if (it.brand) {
+        const bc = document.createElement('span');
+        bc.className = 'stchip';
+        bc.textContent = '🏷 ' + it.brand;
+        if (it.store) sub.appendChild(document.createTextNode(' '));
+        sub.appendChild(bc);
+      }
       if (it.note) sub.appendChild(document.createTextNode(
-        (it.store ? ' ' : '') + it.note));
+        (it.store || it.brand ? ' ' : '') + it.note));
       li.querySelector('.nm').appendChild(sub);
     }
     li.querySelector('.qty').textContent = it.qty_note || '';
@@ -2306,6 +2424,8 @@ function fillSheet(it) {
   $('sheet-qty').value = it.qty_note || '';
   $('sheet-note-input').value = it.note || '';
   $('sheet-budget').value = it.budget == null ? '' : String(it.budget);
+  $('sheet-organic').checked = !!it.organic;
+  $('sheet-brand').value = it.brand || '';
   // Prices are looked up on demand, never on open: opening the editor to change
   // a quantity must not fire a network request describing what you are buying.
   $('sheet-prices').innerHTML = '';
@@ -2341,6 +2461,9 @@ function saveSheet() {
   if (editState.category !== (it.category || 'other')) { fields.category = editState.category; changed = true; }
   if (note !== (it.note || ''))                    { fields.note = note;                 changed = true; }
   if (budget !== (it.budget == null ? '' : String(it.budget))) { fields.budget = budget; changed = true; }
+  const organic = $('sheet-organic').checked, brand = $('sheet-brand').value.trim();
+  if (organic !== !!it.organic)                    { fields.organic = organic;           changed = true; }
+  if (brand !== (it.brand || ''))                  { fields.brand = brand;               changed = true; }
   const origStore = it.store_source === 'preferred' ? it.store : '';
   if ((editState.store || '') !== origStore)       { fields.store = editState.store || ''; changed = true; }
   if (changed) enqueue(fields);

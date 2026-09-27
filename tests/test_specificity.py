@@ -188,3 +188,40 @@ def test_enrich_blocks_elbow_macaroni_into_pasta(monkeypatch):
         assert "elbow macaroni-xyz" not in aliases
     finally:
         catalog.web_evidence, catalog.llm.chat_json = orig_web, orig_chat
+
+
+def test_alias_merge_keeps_edits_and_picks_made_while_the_llm_was_asked(monkeypatch):
+    """Codex plan review 2026-09-27: enrich() read the row's criteria BEFORE
+    awaiting the LLM and merged them AFTER. A brand, organic flag or product
+    pick set in between was lost, and picks cascaded away with the row."""
+    orig_web, orig_chat = catalog.web_evidence, catalog.llm.chat_json
+    tgt = db.get_or_create_catalog(appmod.conn, "玉ねぎレース")
+    appmod.conn.execute("UPDATE item_catalog SET category='produce', llm_enriched_at='2026-01-01' WHERE id=?", (tgt,))
+    sid = db.get_or_create_catalog(appmod.conn, "たまねぎレース")
+    appmod.conn.commit()
+
+    async def fake_web(_name):
+        return None
+
+    async def fake_chat(prompt, **kw):
+        # the user edits the row while the model is thinking
+        appmod.conn.execute("UPDATE item_catalog SET brand='Vidalia', organic=1 WHERE id=?", (sid,))
+        appmod.conn.execute(
+            "INSERT INTO product_picks(catalog_id, chain, sku, name, brand, pack_size, picked_at) "
+            "VALUES(?, 'wegmans', 'SKU1', 'onion', '', '', '2026-09-27')",
+            (sid,),
+        )
+        appmod.conn.commit()
+        return {"is_real_item": True, "category": "produce", "is_edible": 1, "plants": ["onion"],
+                "english_name": "たまねぎレース", "alias_of": "玉ねぎレース"}
+
+    try:
+        catalog.web_evidence = fake_web
+        catalog.llm.chat_json = fake_chat
+        _run(catalog.enrich(appmod.conn, asyncio.Lock(), sid))
+    finally:
+        catalog.web_evidence, catalog.llm.chat_json = orig_web, orig_chat
+    row = appmod.conn.execute("SELECT brand, organic FROM item_catalog WHERE id=?", (tgt,)).fetchone()
+    assert (row["brand"], row["organic"]) == ("Vidalia", 1)
+    picks = appmod.conn.execute("SELECT catalog_id FROM product_picks WHERE sku='SKU1'").fetchall()
+    assert [p["catalog_id"] for p in picks] == [tgt]

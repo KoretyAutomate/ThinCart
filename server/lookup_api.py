@@ -20,6 +20,7 @@ allowed to be presented. Those rules are the load-bearing part:
 import sqlite3
 
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel, Field
 
 import lookup
 from lookup import (
@@ -31,11 +32,12 @@ from lookup import (
     cache_put,
     enabled,
     parse_store_results,
-    products,
-    products_many,
 )
+from chain_lookup import products, products_many
 from branches import resolve_branch, store_from_link
 from chains import aisle_label, detect
+import db
+import where
 
 router = APIRouter()
 
@@ -313,3 +315,109 @@ async def stores_search(
     results = parse_store_results(raw)
     cache_put("store", key, results)
     return {"results": results, "source": "openstreetmap", "cached": False}
+
+
+# --- where to buy, by price (PLAN.md Phase 7C) ---------------------------------
+
+WHERE_MAX_ITEMS = 30  # per request: the phone pages through a longer list
+
+
+class WhereRequest(BaseModel):
+    catalog_ids: list[int] = Field(..., max_length=WHERE_MAX_ITEMS)
+
+
+def _where_items(ids: list[int]) -> dict[int, dict]:
+    items = {}
+    for cid in dict.fromkeys(ids):
+        r = _db().execute(
+            "SELECT id, display_name, aliases_json, organic, brand FROM item_catalog WHERE id=?", (cid,)
+        ).fetchone()
+        if r is None:
+            continue
+        base = db.name_en(r["aliases_json"], r["display_name"]) or r["display_name"]
+        organic = bool(r["organic"])
+        if organic and not where.is_organic({"name": base}):
+            base = f"organic {base}"
+        items[cid] = {"term": base, "organic": organic, "brand": r["brand"]}
+    return items
+
+
+def _quote(store: dict, rec: dict, exact: bool) -> dict:
+    return {
+        "store_id": store["id"], "store": store["name"], "product": rec["name"],
+        "brand": rec["brand"], "pack_size": rec["pack_size"], "amount": rec["amount"],
+        "unit_price": rec["unit_price"], "available": rec["available"], "exact": exact,
+        "source": rec["source"], "source_url": rec.get("source_url", ""),
+        "fetched_at": rec.get("fetched_at", ""),
+    }
+
+
+async def _ask_store(store: dict, items: dict[int, dict], out: dict[int, dict]) -> bool:
+    """One batch for one store; fills each item's per-store status and quote.
+    False when the store could not be asked about at least one item."""
+    terms: dict[int, str] = {}
+    picks: dict[int, str | None] = {}
+    prefer: dict[str, list[str]] = {}
+    for cid, it in items.items():
+        pick = _pick_for(cid, store["chain"])
+        terms[cid] = pick["name"] if pick else it["term"]
+        picks[cid] = pick["sku"] if pick else None
+        if pick:
+            prefer.setdefault(terms[cid], []).append(pick["sku"])
+    found, complete = await products_many(
+        store["chain"], list(terms.values()), store["chain_store_id"], prefer,
+        max_age=TTL["price"], place=False,
+    )
+    for cid, term in terms.items():
+        if term not in found:
+            out[cid]["stores"][str(store["id"])] = "unasked"
+            continue
+        rec, status, exact = where.choose(found[term], picks[cid], items[cid]["organic"], items[cid]["brand"])
+        out[cid]["stores"][str(store["id"])] = status
+        if rec is not None:
+            out[cid]["quotes"].append(_quote(store, rec, exact))
+    return complete
+
+
+@router.post("/api/where")
+async def where_to_buy(req: WhereRequest) -> dict:
+    """Cheapest priced store for each item, honouring organic and brand.
+
+    A VIEW, never a saved preference: nothing here writes preferred_store_id.
+    Prices are fresh within TTL["price"], asked without shelf placement, one
+    batch per store. A store is named cheapest only on comparable unit prices
+    (where.rank); every quote carries its own source and age.
+    """
+    _require("price")
+    stores = _priced_stores()
+    items = _where_items(req.catalog_ids)
+    out: dict[int, dict] = {cid: {"quotes": [], "stores": {}} for cid in items}
+    partial = False
+    for store in stores:
+        if items and not await _ask_store(store, items, out):
+            partial = True
+    if partial and items and not any(o["quotes"] for o in out.values()) and all(
+        s == "unasked" for o in out.values() for s in o["stores"].values()
+    ):
+        raise HTTPException(503, {"code": UNAVAILABLE})
+    result = {}
+    for cid, o in out.items():
+        o["quotes"].sort(key=lambda q: q["amount"])
+        cheapest, comparable = where.rank(o["quotes"])
+        statuses = set(o["stores"].values())
+        # "nothing here fits" is only claimed when every store answered
+        reason = None
+        if not o["quotes"]:
+            reason = "unasked" if "unasked" in statuses else (
+                "conflict" if "conflict" in statuses else
+                "pick_missing" if "pick_missing" in statuses else "no_match")
+        result[str(cid)] = {
+            "cheapest": cheapest, "comparable": comparable, "quotes": o["quotes"],
+            "stores": o["stores"], "reason": reason,
+            "organic": items[cid]["organic"], "brand": items[cid]["brand"],
+        }
+    return {
+        "stores": [{"id": s["id"], "name": s["name"]} for s in stores],
+        "items": result,
+        "partial": partial,
+    }

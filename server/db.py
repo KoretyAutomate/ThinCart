@@ -167,6 +167,11 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
         # event_id keeps only the first claimant's details for display; pruning
         # needs them all, or a hidden calendar's claim dies with a visible one's.
         "ALTER TABLE away_days ADD COLUMN claims TEXT NOT NULL DEFAULT '[]'",
+        # Phase 7: standing purchase preferences. Organic is a property of the
+        # item, not a different item — "organic onion" is the Onion, bought
+        # organic, with the Onion's history. Brand '' means any brand will do.
+        "ALTER TABLE item_catalog ADD COLUMN organic INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE item_catalog ADD COLUMN brand TEXT NOT NULL DEFAULT ''",
     ):
         with contextlib.suppress(sqlite3.OperationalError):
             conn.execute(ddl)
@@ -460,6 +465,22 @@ def suggestions(conn: sqlite3.Connection, now) -> list[dict]:
     return out
 
 
+# A LEADING organic qualifier only. Mid-name "organic" belongs to a product's
+# own name ("simple mills organic seed flour crackers") and is left alone.
+_ORGANIC_PREFIX = re.compile(r"^\s*(?:organic\b|オーガニック|有機)[\s・]*", re.IGNORECASE)
+
+
+def split_organic(name: str) -> tuple[str, bool]:
+    """("organic onion" → ("onion", True)); a name that is only the qualifier
+    is not split — "Organic" alone stays an item called Organic."""
+    folded = unicodedata.normalize("NFKC", name or "")
+    m = _ORGANIC_PREFIX.match(folded)
+    if not m:
+        return name, False
+    base = folded[m.end():].strip()
+    return (base, True) if base else (name, False)
+
+
 def state(conn: sqlite3.Connection, now=None) -> dict:
     """Full list state — small enough (tens of items) to always send whole."""
     from datetime import datetime
@@ -471,13 +492,14 @@ def state(conn: sqlite3.Connection, now=None) -> dict:
     items = []
     for r in conn.execute(
         """SELECT i.id, i.catalog_id, c.display_name AS name, c.aliases_json,
-                  c.category, c.emoji, c.note, c.budget,
+                  c.category, c.emoji, c.note, c.budget, c.organic, c.brand,
                   i.qty_note, i.added_by, i.added_at
            FROM items i JOIN item_catalog c ON c.id = i.catalog_id
            ORDER BY COALESCE(c.category, 'zzz'), i.added_at"""
     ):
         d = dict(r)
         d["name_en"] = name_en(d.pop("aliases_json"), d["name"])
+        d["organic"] = bool(d["organic"])
         sid, source = rec.get(d["catalog_id"], (None, None))
         d["store"] = store_names.get(sid)
         d["store_source"] = source if d["store"] else None

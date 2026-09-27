@@ -44,6 +44,10 @@ class Op(BaseModel):
     budget: str | None = Field(None, max_length=20)
     # edit / checkoff: store display name ("" clears the preference on edit)
     store: str | None = Field(None, max_length=60)
+    # edit (Phase 7): standing preferences. None = leave unchanged — phones with
+    # ops queued before this field existed send neither. brand "" = any brand.
+    organic: bool | None = None
+    brand: str | None = Field(None, max_length=60)
     # store_upsert
     store_name: str | None = Field(None, max_length=60)
     store_notes: str | None = Field(None, max_length=300)
