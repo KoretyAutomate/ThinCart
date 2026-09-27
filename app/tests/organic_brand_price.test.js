@@ -1,11 +1,12 @@
 /**
  * organic_brand_price.test.js — Phase 7 on the phone (PLAN.md §Phase 7).
  *
- * - The editor's 🌱 toggle and Brand field send exactly the edit op fields the
- *   server reads, and only when they changed.
- * - A row shows 🌱 and the brand.
- * - A queued "organic milk" lands on the Milk row (organic) instead of drawing
- *   a second Milk — the phone mirrors the server's split.
+ * - 🌱 Organic is ONE household setting in ⚙️ (the owner's call, 2026-09-27):
+ *   the switch sends a settings op, and By price waits until the server has it.
+ * - The editor's Brand field sends exactly the edit op field the server reads,
+ *   and only when it changed; the row shows the brand.
+ * - A queued "organic milk" lands on the Milk row instead of drawing a second
+ *   Milk — the phone mirrors the server's split.
  * - 💲 By price groups by the server's cheapest store, asks only for items the
  *   server knows, says why an item has no price, and never saves anything.
  *
@@ -27,18 +28,18 @@ const settle = () => new Promise(r => setTimeout(r, 20));
 
 function item(id, name, extra = {}) {
   return { id: `i${id}`, catalog_id: id, name, name_en: null, category: "dairy", emoji: "",
-           note: "", budget: null, qty_note: "", added_by: "t", organic: false, brand: "",
+           note: "", budget: null, qty_note: "", added_by: "t", brand: "",
            added_at: "2026-09-01T00:00:00+00:00", store: null, store_source: null, ...extra };
 }
 
 const STORES = [{ id: 7, name: "Wegmans", chain: "wegmans", chain_store_id: "93" },
                 { id: 8, name: "Whole Foods", chain: "wholefoods", chain_store_id: "10738" }];
 
-function boot({ items, queue = [], where = null, stores = STORES, fetchImpl = null }) {
+function boot({ items, queue = [], where = null, stores = STORES, fetchImpl = null, settings = { organic: false } }) {
   const dom = new JSDOM(HTML, { runScripts: "outside-only", url: "https://s.ts.net/" });
   const w = dom.window;
   w.localStorage.setItem("pc_name", "tester");
-  const state = { revision: 1, items, stores, picks: {}, suggestions: [], away_pending: 0 };
+  const state = { revision: 1, items, stores, settings, picks: {}, suggestions: [], away_pending: 0 };
   w.localStorage.setItem("pc_base", JSON.stringify(state));
   w.localStorage.setItem("pc_queue", JSON.stringify(queue));
   const calls = [];
@@ -73,37 +74,43 @@ function openEditor(b, i) {
 }
 
 (async () => {
-  console.log("\n--- 1. the editor sends organic and brand, only when changed --------");
+  console.log("\n--- 1. 🌱 is one household switch, in ⚙️ Settings ------------------");
+  {
+    const b = boot({ items: [item(1, "milk")] });
+    await settle();
+    check("no per-item organic toggle in the editor", b.doc.getElementById("sheet-organic") === null);
+    const sw = b.doc.getElementById("set-organic");
+    check("the switch starts off", sw && sw.checked === false);
+    sw.checked = true;
+    sw.dispatchEvent(new b.w.Event("change"));
+    await settle();
+    const op = b.ops().find(o => o.type === "settings");
+    check("turning it on sends a settings op", op && op.organic === true, b.ops());
+    const c = boot({ items: [item(1, "milk")], settings: { organic: true } });
+    await settle();
+    check("the switch shows the server's setting", c.doc.getElementById("set-organic").checked === true);
+  }
+
+  console.log("\n--- 2. the editor sends the brand, only when changed ----------------");
   {
     const b = boot({ items: [item(1, "milk")] });
     await settle();
     openEditor(b, 0); await settle();
-    check("toggle starts off", b.doc.getElementById("sheet-organic").checked === false);
-    b.doc.getElementById("sheet-organic").checked = true;
     b.doc.getElementById("sheet-brand").value = "  Horizon ";
     b.doc.getElementById("sheet-save").click();
     await settle();
     const edit = b.ops().find(o => o.type === "edit");
-    check("an edit op went out", !!edit, b.ops());
-    check("with organic and a trimmed brand", edit && edit.organic === true && edit.brand === "Horizon", edit);
+    check("an edit op with the trimmed brand", edit && edit.brand === "Horizon" && !("organic" in edit), edit);
 
-    const c = boot({ items: [item(1, "milk", { organic: true, brand: "Horizon" })] });
+    const c = boot({ items: [item(1, "milk", { brand: "Horizon" })] });
     await settle();
     openEditor(c, 0); await settle();
-    check("the sheet shows what is saved",
-      c.doc.getElementById("sheet-organic").checked && c.doc.getElementById("sheet-brand").value === "Horizon");
+    check("the sheet shows the saved brand", c.doc.getElementById("sheet-brand").value === "Horizon");
     c.doc.getElementById("sheet-save").click();
     await settle();
     check("nothing changed, nothing sent", !c.ops().some(o => o.type === "edit"), c.ops());
-  }
-
-  console.log("\n--- 2. a row says organic and names the brand ----------------------");
-  {
-    const b = boot({ items: [item(1, "milk", { organic: true, brand: "Horizon" })] });
-    await settle();
-    const text = b.rows()[0].textContent;
-    check("🌱 on the row", /milk 🌱/.test(text), text);
-    check("the brand in the sub-line", /🏷 Horizon/.test(text), text);
+    const text = c.rows()[0].textContent;
+    check("the row names the brand, and carries no per-item 🌱", /🏷 Horizon/.test(text) && !/🌱/.test(text), text);
   }
 
   console.log("\n--- 3. a queued 'organic milk' is the Milk row, not a second one ---");
@@ -112,10 +119,10 @@ function openEditor(b, i) {
     const b = boot({ items: [item(1, "milk")], queue: q });
     await settle();
     check("still one row", b.rows().length === 1, b.rows().map(r => r.textContent));
-    check("and it is organic now", /🌱/.test(b.rows()[0].textContent), b.rows()[0].textContent);
     const c = boot({ items: [], queue: [{ op_id: "q2", type: "add", name: "organic kale", item_id: "n2", actor: "t" }] });
     await settle();
-    check("a new one is drawn under its base name", /kale 🌱/.test(c.rows()[0].textContent), c.rows()[0].textContent);
+    check("a new one is drawn under its base name", /kale/.test(c.rows()[0].textContent)
+      && !/organic/i.test(c.rows()[0].textContent), c.rows()[0].textContent);
   }
 
   console.log("\n--- 4. 💲 By price groups by the cheapest store and saves nothing --");
@@ -158,29 +165,41 @@ function openEditor(b, i) {
   {
     const where = { partial: false, items: {} };
     const b = boot({ items: [item(1, "milk"), item(2, "bread")], where,
-                     queue: [{ op_id: "e1", type: "edit", item_id: "i1", catalog_id: 1, organic: true, actor: "t" }] });
+                     queue: [{ op_id: "e1", type: "edit", item_id: "i1", catalog_id: 1, brand: "Horizon", actor: "t" }] });
     await settle();
     b.doc.getElementById("stores-btn").click();
     b.doc.getElementById("plan-byprice").click();
     await settle(); await settle();
     const req = b.calls.find(c => c.url === "/api/where");
-    check("the item with a queued 🌱 edit is not asked about",
+    check("the item with a queued brand edit is not asked about",
       req && JSON.stringify(req.body.catalog_ids) === "[2]", req && req.body);
     const all = [...b.doc.querySelectorAll("#plan-groups .plangroup")].map(g => g.textContent).join("|");
-    check("and says it is not synced yet", /milk 🌱[^|]*not synced/.test(all), all);
+    check("and says it is not synced yet", /milk[^|]*not synced/.test(all), all);
   }
 
-  console.log("\n--- 4c. a queued 'organic milk' on a listed milk is unsettled too --");
+  console.log("\n--- 4c. a queued 🌱 change holds the whole ask back ----------------");
   {
-    const b = boot({ items: [item(1, "milk"), item(2, "bread")], where: { partial: false, items: {} },
-                     queue: [{ op_id: "a1", type: "add", name: "organic milk", item_id: "n9", actor: "t" }] });
+    const b = boot({ items: [item(1, "milk")], where: { partial: false, items: {} },
+                     queue: [{ op_id: "s1", type: "settings", organic: true, actor: "t" }] });
     await settle();
     b.doc.getElementById("stores-btn").click();
     b.doc.getElementById("plan-byprice").click();
     await settle(); await settle();
-    const req = b.calls.find(c => c.url === "/api/where");
-    check("milk is not priced on its old conventional wish",
-      req && JSON.stringify(req.body.catalog_ids) === "[2]", req && req.body);
+    check("nothing is asked while the server has the old setting",
+      !b.calls.some(c => c.url === "/api/where"), b.calls.map(c => c.url));
+    check("and the panel says why", /Waiting for the 🌱 setting/.test(b.doc.getElementById("plan-price-note").textContent),
+      b.doc.getElementById("plan-price-note").textContent);
+    const c = boot({ items: [item(1, "milk")], settings: { organic: true },
+                     where: { partial: false, items: { "1": { cheapest: null, comparable: false, reason: null,
+                       organic_fallback: true, quotes: [{ store: "Wegmans", amount: 9, unit_price: "" }] } } } });
+    await settle();
+    c.doc.getElementById("stores-btn").click();
+    c.doc.getElementById("plan-byprice").click();
+    await settle(); await settle();
+    const note = c.doc.getElementById("plan-price-note").textContent;
+    const all = [...c.doc.querySelectorAll("#plan-groups .plangroup")].map(g => g.textContent).join("|");
+    check("with 🌱 on, the note says organic", /🌱 Organic/.test(note), note);
+    check("an item nobody sells organic says it fell back", /no organic found/.test(all), all);
   }
 
   console.log("\n--- 4d. an older answer never overwrites a newer one ---------------");
@@ -231,7 +250,7 @@ function openEditor(b, i) {
     };
     // the startup flush sends the edit; its ACK is held until ack()
     const b = boot({ items, fetchImpl,
-                     queue: [{ op_id: "e2", type: "edit", item_id: "i1", catalog_id: 1, organic: true, actor: "t" }] });
+                     queue: [{ op_id: "e2", type: "edit", item_id: "i1", catalog_id: 1, brand: "Horizon", actor: "t" }] });
     await settle();
     b.doc.getElementById("stores-btn").click();
     b.doc.getElementById("plan-byprice").click();
@@ -281,14 +300,14 @@ function openEditor(b, i) {
     await settle(); await settle();
     check("(a) a new English name is a new question", t.asked.length === 2, t.asked);
 
-    // (b) the other phone turns organic on: the old answer is not shown meanwhile
+    // (b) the other phone sets a brand: the old answer is not shown meanwhile
     t = mk([item(1, "milk")]);
     b = boot({ items: t.state.items, fetchImpl: t.fetch });
     await settle();
     b.doc.getElementById("stores-btn").click(); b.doc.getElementById("plan-byprice").click();
     await settle(); await settle();
     t.hold = true;
-    t.push(b, st([item(1, "milk", { organic: true })]));
+    t.push(b, st([item(1, "milk", { brand: "Horizon" })]));
     await settle();
     const during = b.doc.getElementById("plan-price-note").textContent
       + [...b.doc.querySelectorAll("#plan-groups .plangroup")].map(g => g.textContent).join("|");

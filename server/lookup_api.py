@@ -330,15 +330,13 @@ def _where_items(ids: list[int]) -> dict[int, dict]:
     items = {}
     for cid in dict.fromkeys(ids):
         r = _db().execute(
-            "SELECT id, display_name, aliases_json, organic, brand FROM item_catalog WHERE id=?", (cid,)
+            "SELECT id, display_name, aliases_json, brand FROM item_catalog WHERE id=?", (cid,)
         ).fetchone()
         if r is None:
             continue
-        base = db.name_en(r["aliases_json"], r["display_name"]) or r["display_name"]
-        organic = bool(r["organic"])
-        if organic and not where.is_organic({"name": base}):
-            base = f"organic {base}"
-        items[cid] = {"term": base, "organic": organic, "brand": r["brand"]}
+        plain = db.name_en(r["aliases_json"], r["display_name"]) or r["display_name"]
+        organic = plain if where.is_organic({"name": plain}) else f"organic {plain}"
+        items[cid] = {"plain": plain, "organic": organic, "brand": r["brand"]}
     return items
 
 
@@ -352,7 +350,7 @@ def _quote(store: dict, rec: dict, exact: bool) -> dict:
     }
 
 
-async def _ask_store(store: dict, items: dict[int, dict], out: dict[int, dict]) -> bool:
+async def _ask_store(store: dict, items: dict[int, dict], out: dict[int, dict], organic: bool) -> bool:
     """One batch for one store; fills each item's per-store status and quote.
     False when the store could not be asked about at least one item."""
     terms: dict[int, str] = {}
@@ -360,7 +358,7 @@ async def _ask_store(store: dict, items: dict[int, dict], out: dict[int, dict]) 
     prefer: dict[str, list[str]] = {}
     for cid, it in items.items():
         pick = _pick_for(cid, store["chain"])
-        terms[cid] = pick["name"] if pick else it["term"]
+        terms[cid] = pick["name"] if pick else it["organic" if organic else "plain"]
         picks[cid] = pick["sku"] if pick else None
         if pick:
             prefer.setdefault(terms[cid], []).append(pick["sku"])
@@ -372,30 +370,53 @@ async def _ask_store(store: dict, items: dict[int, dict], out: dict[int, dict]) 
         if term not in found:
             out[cid]["stores"][str(store["id"])] = "unasked"
             continue
-        rec, status, exact = where.choose(found[term], picks[cid], items[cid]["organic"], items[cid]["brand"])
+        rec, status, exact = where.choose(found[term], picks[cid], organic, items[cid]["brand"])
         out[cid]["stores"][str(store["id"])] = status
         if rec is not None:
             out[cid]["quotes"].append(_quote(store, rec, exact))
     return complete
 
 
+async def _ask_all(stores: list[dict], items: dict[int, dict], organic: bool) -> tuple[dict[int, dict], bool]:
+    out: dict[int, dict] = {cid: {"quotes": [], "stores": {}} for cid in items}
+    partial = False
+    for store in stores:
+        if items and not await _ask_store(store, items, out, organic):
+            partial = True
+    return out, partial
+
+
 @router.post("/api/where")
 async def where_to_buy(req: WhereRequest) -> dict:
-    """Cheapest priced store for each item, honouring organic and brand.
+    """Cheapest priced store for each item, honouring the household's organic
+    setting and each item's preferred brand.
 
     A VIEW, never a saved preference: nothing here writes preferred_store_id.
     Prices are fresh within TTL["price"], asked without shelf placement, one
     batch per store. A store is named cheapest only on comparable unit prices
     (where.rank); every quote carries its own source and age.
+
+    With organic on, an item that no store carries organic — every store
+    answered, none had one — is asked again for the regular product, and says
+    so (`organic_fallback`), rather than showing nothing: some things (paper
+    towels) do not come organic.
     """
     _require("price")
     stores = _priced_stores()
     items = _where_items(req.catalog_ids)
-    out: dict[int, dict] = {cid: {"quotes": [], "stores": {}} for cid in items}
-    partial = False
-    for store in stores:
-        if items and not await _ask_store(store, items, out):
-            partial = True
+    organic = db.organic_setting(_db())
+    out, partial = await _ask_all(stores, items, organic)
+    fallback: set[int] = set()
+    if organic:
+        retry = {cid: it for cid, it in items.items()
+                 if not out[cid]["quotes"] and "unasked" not in out[cid]["stores"].values()}
+        if retry:
+            again, more = await _ask_all(stores, retry, False)
+            partial = partial or more
+            for cid, o in again.items():
+                if o["quotes"]:
+                    out[cid] = o
+                    fallback.add(cid)
     if partial and items and not any(o["quotes"] for o in out.values()) and all(
         s == "unasked" for o in out.values() for s in o["stores"].values()
     ):
@@ -413,11 +434,12 @@ async def where_to_buy(req: WhereRequest) -> dict:
                 "pick_missing" if "pick_missing" in statuses else "no_match")
         result[str(cid)] = {
             "cheapest": cheapest, "comparable": comparable, "quotes": o["quotes"],
-            "stores": o["stores"], "reason": reason,
-            "organic": items[cid]["organic"], "brand": items[cid]["brand"],
+            "stores": o["stores"], "reason": reason, "brand": items[cid]["brand"],
+            "organic_fallback": cid in fallback,
         }
     return {
         "stores": [{"id": s["id"], "name": s["name"]} for s in stores],
         "items": result,
         "partial": partial,
+        "organic": organic,
     }

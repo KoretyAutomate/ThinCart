@@ -97,7 +97,6 @@ def test_apply_folds_history_list_and_picks_onto_the_base(tmp_path):
     names = {r["display_name"]: r for r in conn.execute("SELECT * FROM item_catalog")}
     assert "organic walnuts" not in names and "Organic Egg" not in names
     walnuts, egg = names["walnuts"], names["卵"]
-    assert walnuts["organic"] == 1 and egg["organic"] == 1
     assert walnuts["note"] == "raw, unsalted" and walnuts["brand"] == "Diamond"   # carried over
     n = conn.execute("SELECT COUNT(*) FROM purchase_events WHERE catalog_id=?", (walnuts["id"],)).fetchone()[0]
     assert n == 2                                                                 # both histories
@@ -105,9 +104,9 @@ def test_apply_folds_history_list_and_picks_onto_the_base(tmp_path):
     assert [r["id"] for r in conn.execute("SELECT id FROM items")] == ["a"]      # one list entry
     assert [r["sku"] for r in conn.execute("SELECT sku FROM product_picks")] == ["BASE"]
     # no base row existed: renamed in place
-    assert names["Kale"]["organic"] == 1
+    assert "Kale" in names and "Organic Kale" not in names
     # a product whose NAME contains organic is not touched
-    assert names["simple mills organic seed flour crackers"]["organic"] == 0
+    assert "simple mills organic seed flour crackers" in names
 
 
 def test_apply_twice_is_a_no_op(tmp_path):
@@ -138,6 +137,6 @@ def test_two_variants_with_no_plain_row_become_one_item(tmp_path):
     conn.commit()
     _run(tmp_path / "k.db", "--apply")
     conn = db.connect(tmp_path / "k.db")
-    rows = conn.execute("SELECT id, display_name, organic FROM item_catalog").fetchall()
-    assert [(r["display_name"], r["organic"]) for r in rows] == [("Kale", 1)]
+    rows = conn.execute("SELECT id, display_name FROM item_catalog").fetchall()
+    assert [r["display_name"] for r in rows] == ["Kale"]
     assert conn.execute("SELECT COUNT(*) FROM purchase_events WHERE catalog_id=?", (rows[0]["id"],)).fetchone()[0] == 2

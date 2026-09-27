@@ -1,9 +1,9 @@
 """
 criteria.py — the catalog-level half of an edit (split out of app.py).
 
-Category, purchase criteria (note, budget, preferred store) and the standing
-preferences of PLAN.md Phase 7 (organic, brand). They live on the catalog row,
-not the list entry, so they survive checkoff → re-add.
+Category, purchase criteria (note, budget, preferred store) and the preferred
+brand of PLAN.md Phase 7. They live on the catalog row, not the list entry, so
+they survive checkoff → re-add. (Organic is a household setting, not here.)
 """
 
 import sqlite3
@@ -29,7 +29,7 @@ def parse_budget(raw: str) -> float | None:
         return None
 
 
-def apply(conn: sqlite3.Connection, op: Op, catalog_id: int, rename_organic: bool) -> bool:
+def apply(conn: sqlite3.Connection, op: Op, catalog_id: int) -> bool:
     """The catalog-level half of an edit: category, purchase criteria, and the
     standing preferences. They live on the catalog row, so they survive
     checkoff → re-add. Returns whether anything was written."""
@@ -54,12 +54,6 @@ def apply(conn: sqlite3.Connection, op: Op, catalog_id: int, rename_organic: boo
     if op.store is not None:
         sid = db.get_or_create_store(conn, op.store)  # None when "" → clears
         conn.execute("UPDATE item_catalog SET preferred_store_id=? WHERE id=?", (sid, catalog_id))
-        changed = True
-    # An explicit toggle wins over a qualifier typed in the same save; a plain
-    # rename never CLEARS organic — only the toggle does.
-    organic = op.organic if op.organic is not None else (True if rename_organic else None)
-    if organic is not None:
-        conn.execute("UPDATE item_catalog SET organic=? WHERE id=?", (int(organic), catalog_id))
         changed = True
     if op.brand is not None:
         conn.execute("UPDATE item_catalog SET brand=? WHERE id=?", (op.brand.strip(), catalog_id))

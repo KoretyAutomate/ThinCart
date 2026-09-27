@@ -2584,3 +2584,26 @@ crackers", is a brand's product name with organic mid-name and stays as is.
     every request is still made by a `lookup.*` function, reached as a module
     attribute so the tests' monkeypatching of `lookup` holds — so lookup.py
     remains the one file to read for what leaves the box.
+
+### 2026-09-27 — Organic is ONE household setting, not per item (owner's decision)
+
+The owner asked for Organic to be a global selection instead of a per-item one.
+Supersedes the per-item parts of 7A and 7C (never merged; phones ran them for a
+few hours):
+
+- `meta.organic` ('0'/'1'), synced as `state.settings.organic`, set by a new
+  `settings` op (`organic` required; a no-op change bumps nothing). The switch
+  lives at the top of ⚙️ Settings; the editor toggle and the row 🌱 are gone.
+  `item_catalog.organic` is dropped by migration.
+- Typing "organic onion" still lands on the Onion (one item, one history) — it
+  no longer sets anything, and never flips the household setting. An edit op
+  still carrying the retired `organic` field is ignored.
+- `/api/where` reads the setting. With it on: search "organic X", keep organic
+  products only; an item that EVERY store answered with no organic product is
+  asked again for the regular product and marked `organic_fallback` ("no
+  organic found — regular price") — some things (paper towels) do not come
+  organic. No fallback while any store went unasked.
+- The phone holds the whole price ask while a `settings` op is queued (the
+  server would price with its old setting) and says so; the setting is part of
+  the answer's input key, so a change from either phone re-asks.
+- `merge_organic.py` now only folds duplicates (it already ran on the live DB).

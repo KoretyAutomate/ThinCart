@@ -177,9 +177,8 @@
   #sheet #sheet-note-input, #sheet #sheet-budget, #sheet #sheet-brand { flex:1; padding:12px;
     border:1.5px solid #d4dcd4; border-radius:10px; font-size:1rem; outline:none;
     min-width:0; }
-  #sheet .sheet-check { display:flex; align-items:center; gap:10px; margin:2px 0 14px;
-    font-weight:600; }
-  #sheet .sheet-check input { width:22px; height:22px; accent-color:var(--green); }
+  .set-check { display:flex; align-items:center; gap:10px; margin:2px 0 6px; font-weight:600; }
+  .set-check input { width:22px; height:22px; accent-color:var(--green); }
   /* a NOTE must be fully visible while editing — a single-line input clips it */
   #sheet #sheet-note-input { font-family:inherit; resize:none; line-height:1.35; }
   #sheet #sheet-stores { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
@@ -486,6 +485,10 @@
     <button class="topbtn" id="set-close">✕</button>
   </header>
   <div class="body">
+    <h3 id="org-h"></h3>
+    <label class="set-check"><input type="checkbox" id="set-organic"><span id="set-organic-label"></span></label>
+    <p class="set-note" id="org-note"></p>
+
     <h3 id="ver-h"></h3>
     <p class="stores-note" id="buildline"></p>
     <button id="reload-btn"></button>
@@ -552,7 +555,6 @@
     <textarea id="sheet-note-input" maxlength="200" rows="2"></textarea></label>
   <label class="sheet-field"><span id="sheet-budget-label"></span>
     <input id="sheet-budget" maxlength="20" inputmode="numeric"></label>
-  <label class="sheet-check"><input type="checkbox" id="sheet-organic"><span id="sheet-organic-label"></span></label>
   <label class="sheet-field"><span id="sheet-brand-label"></span>
     <input id="sheet-brand" maxlength="60"></label>
   <button id="sheet-compare" class="linkbtn"></button>
@@ -661,9 +663,17 @@ const saveBase  = () => localStorage.setItem(LS.base, JSON.stringify(base));
 /* canonical() twin of server db.canonical — NFKC fold handles full-width JP */
 const canon = s => s.normalize('NFKC').toLowerCase().trim().replace(/\s+/g,' ');
 /* Mirror of server db.split_organic (PLAN.md Phase 7A): "organic onion" is the
- * Onion, bought organic. A LEADING qualifier only; one that is the whole name
- * is not split. Used so a queued add does not flash a second Onion. */
+ * Onion — one item, one history. A LEADING qualifier only; one that is the
+ * whole name is not split. Used so a queued add does not flash a second Onion. */
 const ORGANIC_RE = /^\s*(?:organic\b|オーガニック|有機)[\s・]*/i;
+/* The household's organic preference (PLAN.md Phase 7A, revised 2026-09-27):
+ * one shared setting. A queued change wins until the server has it. */
+function organicSetting() {
+  let v = !!(base.settings && base.settings.organic);
+  for (const op of queue) if (op.type === 'settings' && op.organic !== undefined) v = op.organic;
+  return v;
+}
+function organicPending() { return queue.some(op => op.type === 'settings'); }
 function splitOrganic(name) {
   const f = (name || '').normalize('NFKC');
   const m = f.match(ORGANIC_RE);
@@ -751,14 +761,19 @@ const STR = {
     hist_restored:n=>`↩ ${n} back on the list`,
     cand_on:'✓ on list', cand_edit:'tap to edit',
     note_label:'Note', sheet_budget:'Budget 💰', sheet_store:'Where to buy',
-    organic_label:'🌱 Organic', sheet_brand:'Preferred brand', brand_any:'any brand is fine',
+    sheet_brand:'Preferred brand', brand_any:'any brand is fine',
+    org_h:'Shopping preference', organic_label:'🌱 We buy organic',
+    org_note:'One setting for the household — both phones. 💲 Compare by price then looks for organic products, and uses the regular one only where no store has it organic.',
+    no_organic:'no organic found — regular price',
+    org_waiting:'Waiting for the 🌱 setting to reach the server…',
     byprice:'💲 Compare by price', byprice_off:'🏬 Back to usual stores',
     byprice_searching:'Checking prices…',
     byprice_none:'No store can give prices yet — pin a Wegmans, Whole Foods or ShopRite below.',
-    byprice_note:'Cheapest per unit (per oz, fl oz or each), in stock, matching 🌱 and brand. Not saved — your usual stores stay as they are.',
+    byprice_note:'Cheapest per unit (per oz, fl oz or each), in stock, matching the brand. Not saved — your usual stores stay as they are.',
+    byprice_note_org:'🌱 Organic, cheapest per unit (per oz, fl oz or each), in stock, matching the brand. Not saved — your usual stores stay as they are.',
     byprice_partial:'Some stores could not be reached — their prices are missing.',
     why_unasked:'price not checked — store unreachable', why_no_match:'no matching product found',
-    why_conflict:'your chosen product no longer matches (🌱 / brand / stock)',
+    why_conflict:'your chosen product no longer matches (brand / stock)',
     why_pick_missing:'your chosen product was not found',
     why_uncomparable:'different sizes/units — not ranked',
     best_match:'best match', not_synced:'not synced yet',
@@ -888,14 +903,19 @@ const STR = {
     hist_restored:n=>`↩ ${n} をリストに戻しました`,
     cand_on:'✓ リストにあり', cand_edit:'タップで編集',
     note_label:'メモ', sheet_budget:'予算 💰', sheet_store:'購入する店',
-    organic_label:'🌱 オーガニック', sheet_brand:'好みのブランド', brand_any:'こだわりなし',
+    sheet_brand:'好みのブランド', brand_any:'こだわりなし',
+    org_h:'買い物の方針', organic_label:'🌱 オーガニックを買う',
+    org_note:'家族共通の設定です（両方のスマホ）。💲 価格で比較では、オーガニック商品を探し、どの店にもない場合だけ通常品を使います。',
+    no_organic:'オーガニックなし — 通常品の価格',
+    org_waiting:'🌱 の設定をサーバーに送信中…',
     byprice:'💲 価格で比較', byprice_off:'🏬 いつもの店に戻す',
     byprice_searching:'価格を確認中…',
     byprice_none:'価格を取得できる店がまだありません — 下でWegmans・Whole Foods・ShopRiteを登録してください。',
-    byprice_note:'単位あたり（oz・fl oz・個）で最安、在庫あり、🌱とブランドに合う商品のみ。保存はされません — いつもの店はそのままです。',
+    byprice_note:'単位あたり（oz・fl oz・個）で最安、在庫あり、ブランドに合う商品のみ。保存はされません — いつもの店はそのままです。',
+    byprice_note_org:'🌱 オーガニックで、単位あたり（oz・fl oz・個）最安、在庫あり、ブランドに合う商品のみ。保存はされません — いつもの店はそのままです。',
     byprice_partial:'一部の店に接続できず、その価格はありません。',
     why_unasked:'価格未確認 — 店に接続できません', why_no_match:'合う商品が見つかりません',
-    why_conflict:'選んだ商品が条件に合いません（🌱・ブランド・在庫）',
+    why_conflict:'選んだ商品が条件に合いません（ブランド・在庫）',
     why_pick_missing:'選んだ商品が見つかりません',
     why_uncomparable:'サイズ・単位が違うため順位なし',
     best_match:'近い商品', not_synced:'未同期',
@@ -1016,7 +1036,9 @@ function applyLang() {
   $('trip-note').textContent = T().trip_note;
   $('sheet-note-label').textContent = T().note_label;
   $('sheet-budget-label').textContent = T().sheet_budget;
-  $('sheet-organic-label').textContent = T().organic_label;
+  $('org-h').textContent = T().org_h;
+  $('set-organic-label').textContent = T().organic_label;
+  $('org-note').textContent = T().org_note;
   $('sheet-brand-label').textContent = T().sheet_brand;
   $('sheet-brand').placeholder = T().brand_any;
   $('sheet-store-label').textContent = T().sheet_store;
@@ -1054,22 +1076,16 @@ function view() {
   let items = base.items.map(i => ({...i}));
   for (const op of queue) {
     if (op.type === 'add') {
-      const [nm, org] = splitOrganic(op.name);
-      const same = items.find(i => canon(i.name) === canon(nm));
-      if (same) { if (org) same.organic = true; }   // mirror server: flag set, no 2nd row
-      else items.push({ id:op.item_id, name:nm, qty_note:op.qty_note||'', organic:org,
-                        added_by:op.actor, category:op.cat||null, pending:true });
+      const [nm] = splitOrganic(op.name);           // mirror server: "organic X" is X
+      if (!items.some(i => canon(i.name) === canon(nm)))
+        items.push({ id:op.item_id, name:nm, qty_note:op.qty_note||'',
+                     added_by:op.actor, category:op.cat||null, pending:true });
     } else if (op.type === 'checkoff' || op.type === 'remove' || op.type === 'skip') {
       items = items.filter(i => i.id !== op.item_id);
     } else if (op.type === 'edit') {
       const it = items.find(i => i.id === op.item_id);
       if (it) {
-        if (op.name !== undefined) {
-          const [nm, org] = splitOrganic(op.name);
-          it.name = nm; it.name_en = null;
-          if (org && op.organic === undefined) it.organic = true;
-        }
-        if (op.organic !== undefined) it.organic = op.organic;
+        if (op.name !== undefined) { it.name = splitOrganic(op.name)[0]; it.name_en = null; }
         if (op.brand !== undefined) it.brand = op.brand.trim();
         if (op.qty_note !== undefined) it.qty_note = op.qty_note;
         if (op.category !== undefined) it.category = op.category;
@@ -1521,23 +1537,18 @@ let whereGen = 0;         // numbers each ask; a superseded answer is dropped
 const WHERE_PAGE = 30;    // the server's per-request cap
 
 /* Items whose price question the SERVER would answer with stale preferences:
- * a queued 🌱 / brand / rename / product-pick edit — or a queued "organic X"
- * add that turns an existing X organic — has not reached it yet, so /api/where
- * would price the old wish while the row shows the new one. They are left out
- * and shown as not synced; once their op is acknowledged the set shrinks, the
- * key below changes, and refreshStores asks again. */
+ * a queued brand / rename / product-pick edit has not reached it yet, so
+ * /api/where would price the old wish while the row shows the new one. They
+ * are left out and shown as not synced; once their op is acknowledged the set
+ * shrinks, the key below changes, and refreshStores asks again. (A queued 🌱
+ * household change holds the WHOLE ask back — see whereTick.) */
 function unsettledItems() {
-  const ids = new Set(), cats = new Set(), organicNames = new Set();
+  const ids = new Set(), cats = new Set();
   for (const op of queue) {
-    if (op.type === 'edit' && (op.organic !== undefined || op.brand !== undefined || op.name !== undefined))
-      ids.add(op.item_id);
+    if (op.type === 'edit' && (op.brand !== undefined || op.name !== undefined)) ids.add(op.item_id);
     if (op.type === 'product_pick') cats.add(op.catalog_id);
-    if (op.type === 'add') {
-      const [nm, org] = splitOrganic(op.name);
-      if (org) organicNames.add(canon(nm));
-    }
   }
-  return it => ids.has(it.id) || cats.has(it.catalog_id) || (!it.pending && organicNames.has(canon(it.name)));
+  return it => ids.has(it.id) || cats.has(it.catalog_id);
 }
 
 function whereInput() {
@@ -1546,9 +1557,9 @@ function whereInput() {
   const ask = items.filter(i => !i.pending && i.catalog_id && !unsettled(i));
   const picks = base.picks || {};
   const key = JSON.stringify([
+    organicSetting(),
     pricedStores().map(s => s.id + ':' + s.chain_store_id),
-    ask.map(i => [i.catalog_id, i.name, i.name_en || '', !!i.organic, i.brand || '',
-                  picks[String(i.catalog_id)] || '']),
+    ask.map(i => [i.catalog_id, i.name, i.name_en || '', i.brand || '', picks[String(i.catalog_id)] || '']),
     items.filter(i => i.pending || unsettled(i)).map(i => i.catalog_id || i.id),
   ]);
   return { key, ids: ask.map(i => i.catalog_id) };
@@ -1562,6 +1573,8 @@ function whereCurrent() {
 /* Ask if the input moved and nobody is already asking about it. */
 function whereTick() {
   if (!byPrice || $('stores-panel').style.display !== 'flex') return;
+  // the server prices with ITS organic setting: wait until it has ours
+  if (organicPending()) return;
   const { key } = whereInput();
   if ((!whereResult || whereResult.key !== key) && whereAsking !== key) loadWhere();
 }
@@ -1599,11 +1612,12 @@ function whereLine(it, w, unsettled) {
   if (w.cheapest) {
     const q = w.cheapest;
     return [`$${q.amount.toFixed(2)}`, q.unit_price, q.product,
-            q.exact ? '' : '(' + T().best_match + ')', agoLabel(q.fetched_at)].filter(Boolean).join(' · ');
+            q.exact ? '' : '(' + T().best_match + ')', w.organic_fallback ? T().no_organic : '',
+            agoLabel(q.fetched_at)].filter(Boolean).join(' · ');
   }
   // No honest winner — but the prices found are still worth seeing, side by side.
   if (w.quotes && w.quotes.length)
-    return T().why_uncomparable + ': ' + w.quotes.map(q =>
+    return (w.organic_fallback ? T().no_organic + ' · ' : '') + T().why_uncomparable + ': ' + w.quotes.map(q =>
       `${q.store} $${q.amount.toFixed(2)}` + (q.unit_price || q.pack_size ? ` (${q.unit_price || q.pack_size})` : '')
     ).join(' · ');
   return ({ unasked:T().why_unasked, conflict:T().why_conflict, pick_missing:T().why_pick_missing })[w.reason]
@@ -1690,8 +1704,9 @@ function renderStores() {
   const items = view();
   $('plan-byprice').textContent = byPrice ? T().byprice_off : T().byprice;
   const ans = byPrice ? whereCurrent() : null;
-  $('plan-price-note').textContent = !byPrice ? '' : !ans ? T().byprice_searching
-    : ans.msg || (ans.partial ? T().byprice_partial : T().byprice_note);
+  $('plan-price-note').textContent = !byPrice ? '' : organicPending() ? T().org_waiting
+    : !ans ? T().byprice_searching
+    : ans.msg || (ans.partial ? T().byprice_partial : organicSetting() ? T().byprice_note_org : T().byprice_note);
   const priced = ans && ans.items ? ans : null;
   const unsettled = unsettledItems();
   const wOf = it => (priced && it.catalog_id && !unsettled(it)) ? priced.items[String(it.catalog_id)] : null;
@@ -1724,7 +1739,7 @@ function renderStores() {
       p.innerHTML = '<span class="pnm"></span><span class="pmeta"></span>';
       const ico = i.emoji || (i.category ? catEmoji(i.category) : '');
       p.querySelector('.pnm').textContent =
-        (ico ? ico + ' ' : '') + disp(i) + (i.organic ? ' 🌱' : '') + (i.note ? ' · ' + i.note : '');
+        (ico ? ico + ' ' : '') + disp(i) + (i.note ? ' · ' + i.note : '');
       if (priced) p.querySelector('.pmeta').classList.add('price');
       p.querySelector('.pmeta').textContent = priced ? whereLine(i, wOf(i), unsettled) : [
         i.qty_note, i.budget != null ? fmtYen(i.budget) : '',
@@ -1973,7 +1988,10 @@ $('storelink').addEventListener('keydown', e => { if (e.key === 'Enter') { e.pre
  * boots the page the way a browser does, for exactly this class of fault. */
 window.openSheet = openSheet;
 
+$('set-organic').onchange = () => enqueue({ type:'settings', organic: $('set-organic').checked });
+
 function render() {
+  $('set-organic').checked = organicSetting();
   renderTray();
   refreshStores();
   if (base.plants)
@@ -2044,7 +2062,7 @@ function render() {
       openSheet(it);
     });
     const ico = it.emoji || (it.category ? catEmoji(it.category) : '');
-    li.querySelector('.nm1').textContent = (ico ? ico + ' ' : '') + disp(it) + (it.organic ? ' 🌱' : '');
+    li.querySelector('.nm1').textContent = (ico ? ico + ' ' : '') + disp(it);
     if (it.store || it.note || it.brand) {   // criteria sub-line: store chip, brand, note
       const sub = document.createElement('span');
       sub.className = 'sub'; sub.style.display = 'block';
@@ -2497,7 +2515,6 @@ function fillSheet(it) {
   $('sheet-qty').value = it.qty_note || '';
   $('sheet-note-input').value = it.note || '';
   $('sheet-budget').value = it.budget == null ? '' : String(it.budget);
-  $('sheet-organic').checked = !!it.organic;
   $('sheet-brand').value = it.brand || '';
   // Prices are looked up on demand, never on open: opening the editor to change
   // a quantity must not fire a network request describing what you are buying.
@@ -2534,8 +2551,7 @@ function saveSheet() {
   if (editState.category !== (it.category || 'other')) { fields.category = editState.category; changed = true; }
   if (note !== (it.note || ''))                    { fields.note = note;                 changed = true; }
   if (budget !== (it.budget == null ? '' : String(it.budget))) { fields.budget = budget; changed = true; }
-  const organic = $('sheet-organic').checked, brand = $('sheet-brand').value.trim();
-  if (organic !== !!it.organic)                    { fields.organic = organic;           changed = true; }
+  const brand = $('sheet-brand').value.trim();
   if (brand !== (it.brand || ''))                  { fields.brand = brand;               changed = true; }
   const origStore = it.store_source === 'preferred' ? it.store : '';
   if ((editState.store || '') !== origStore)       { fields.store = editState.store || ''; changed = true; }

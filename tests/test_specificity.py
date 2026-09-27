@@ -192,8 +192,8 @@ def test_enrich_blocks_elbow_macaroni_into_pasta(monkeypatch):
 
 def test_alias_merge_keeps_edits_and_picks_made_while_the_llm_was_asked(monkeypatch):
     """Codex plan review 2026-09-27: enrich() read the row's criteria BEFORE
-    awaiting the LLM and merged them AFTER. A brand, organic flag or product
-    pick set in between was lost, and picks cascaded away with the row."""
+    awaiting the LLM and merged them AFTER. A brand or product pick set in
+    between was lost, and picks cascaded away with the row."""
     orig_web, orig_chat = catalog.web_evidence, catalog.llm.chat_json
     tgt = db.get_or_create_catalog(appmod.conn, "玉ねぎレース")
     appmod.conn.execute("UPDATE item_catalog SET category='produce', llm_enriched_at='2026-01-01' WHERE id=?", (tgt,))
@@ -205,7 +205,7 @@ def test_alias_merge_keeps_edits_and_picks_made_while_the_llm_was_asked(monkeypa
 
     async def fake_chat(prompt, **kw):
         # the user edits the row while the model is thinking
-        appmod.conn.execute("UPDATE item_catalog SET brand='Vidalia', organic=1 WHERE id=?", (sid,))
+        appmod.conn.execute("UPDATE item_catalog SET brand='Vidalia' WHERE id=?", (sid,))
         appmod.conn.execute(
             "INSERT INTO product_picks(catalog_id, chain, sku, name, brand, pack_size, picked_at) "
             "VALUES(?, 'wegmans', 'SKU1', 'onion', '', '', '2026-09-27')",
@@ -221,7 +221,7 @@ def test_alias_merge_keeps_edits_and_picks_made_while_the_llm_was_asked(monkeypa
         _run(catalog.enrich(appmod.conn, asyncio.Lock(), sid))
     finally:
         catalog.web_evidence, catalog.llm.chat_json = orig_web, orig_chat
-    row = appmod.conn.execute("SELECT brand, organic FROM item_catalog WHERE id=?", (tgt,)).fetchone()
-    assert (row["brand"], row["organic"]) == ("Vidalia", 1)
+    row = appmod.conn.execute("SELECT brand FROM item_catalog WHERE id=?", (tgt,)).fetchone()
+    assert row["brand"] == "Vidalia"
     picks = appmod.conn.execute("SELECT catalog_id FROM product_picks WHERE sku='SKU1'").fetchall()
     assert [p["catalog_id"] for p in picks] == [tgt]

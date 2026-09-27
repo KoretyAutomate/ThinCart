@@ -159,8 +159,15 @@ def test_where_names_the_cheapest_per_unit_and_never_saves_it(monkeypatch, store
     assert row["preferred_store_id"] is None                               # a view, not a preference
 
 
-def test_where_searches_organic_and_filters_brand(monkeypatch, stores):
-    cid = add("where milk", organic=True, brand="Horizon")
+@pytest.fixture
+def organic_on():
+    op(type="settings", organic=True)
+    yield
+    op(type="settings", organic=False)
+
+
+def test_where_searches_organic_and_filters_brand(monkeypatch, stores, organic_on):
+    cid = add("where milk", brand="Horizon")
     calls = stub(monkeypatch, {
         "901": {"organic where milk": [rec("Organic Milk", 4.0, "$0.03/fl oz", brand="Store"),
                                        rec("Horizon Organic Milk", 5.0, "$0.04/fl oz", brand="Horizon")]},
@@ -201,3 +208,26 @@ def test_where_is_refused_when_prices_are_switched_off(monkeypatch, stores):
     monkeypatch.setattr(lookup, "MODE", "stores")
     r = client.post("/api/where", json={"catalog_ids": [add("where salt")]})
     assert r.status_code == 503 and r.json()["detail"]["code"] == lookup.DISABLED
+
+
+def test_with_organic_on_an_item_nobody_sells_organic_falls_back(monkeypatch, stores, organic_on):
+    """Paper towels do not come organic: with the household setting on, an item
+    no store carries organic is priced as the regular product, and says so."""
+    cid = add("where towels")
+    calls = stub(monkeypatch, {
+        "901": {"organic where towels": [], "where towels": [rec("Bounty Towels", 9.0, "$0.05/sq ft")]},
+        "902": {"organic where towels": [], "where towels": [rec("Viva Towels", 7.0, "$0.04/sq ft")]},
+    })
+    it = client.post("/api/where", json={"catalog_ids": [cid]}).json()["items"][str(cid)]
+    assert it["organic_fallback"] is True
+    assert {q["product"] for q in it["quotes"]} == {"Bounty Towels", "Viva Towels"}
+    assert any("where towels" in c["terms"] for c in calls)
+
+
+def test_no_fallback_while_a_store_could_not_be_asked(monkeypatch, stores, organic_on):
+    """An unreachable store might have had it organic: do not settle for
+    conventional on a partial answer."""
+    cid = add("where oats")
+    stub(monkeypatch, {"901": {"organic where oats": []}}, fail={"902"})
+    it = client.post("/api/where", json={"catalog_ids": [cid]}).json()["items"][str(cid)]
+    assert it["organic_fallback"] is False and it["reason"] == "unasked"

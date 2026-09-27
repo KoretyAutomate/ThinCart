@@ -217,11 +217,11 @@ async def enrich(conn, write_lock, catalog_id: int) -> bool:
             )
             target = None
         # The LLM call above awaited without the lock, so `row` may be stale: the
-        # user can have set a note, brand or organic — or picked a product — on
+        # user can have set a note or brand — or picked a product — on
         # it meanwhile. Re-read what is carried over now, under the lock.
         cur = (
             conn.execute(
-                "SELECT note, budget, preferred_store_id, brand, organic FROM item_catalog WHERE id=?",
+                "SELECT note, budget, preferred_store_id, brand FROM item_catalog WHERE id=?",
                 (row["id"],),
             ).fetchone()
             if target
@@ -250,15 +250,14 @@ async def enrich(conn, write_lock, catalog_id: int) -> bool:
             )
             # criteria the user set on the doomed row before this async merge ran
             # must survive it — carry note/budget/preferred store/brand (target
-            # wins), and organic if either side was set
+            # wins)
             conn.execute(
                 "UPDATE item_catalog SET "
                 "note = CASE WHEN note='' THEN ? ELSE note END, "
                 "budget = COALESCE(budget, ?), "
                 "preferred_store_id = COALESCE(preferred_store_id, ?), "
-                "brand = CASE WHEN brand='' THEN ? ELSE brand END, "
-                "organic = MAX(organic, ?) WHERE id=?",
-                (cur["note"], cur["budget"], cur["preferred_store_id"], cur["brand"], cur["organic"], target["id"]),
+                "brand = CASE WHEN brand='' THEN ? ELSE brand END WHERE id=?",
+                (cur["note"], cur["budget"], cur["preferred_store_id"], cur["brand"], target["id"]),
             )
             conn.execute("DELETE FROM item_catalog WHERE id=?", (row["id"],))
             log.info("alias-merged %r into %r", row["canonical_name"], alias_of)

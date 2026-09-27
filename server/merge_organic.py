@@ -1,8 +1,9 @@
-"""Fold "Organic X" catalog rows into X, with X marked organic (PLAN.md Phase 7A).
+"""Fold "Organic X" catalog rows into X (PLAN.md Phase 7A).
 
 Before Phase 7 "organic onion" became a second item beside Onion, with its own
 purchase history. This moves each such row onto its base item — list entry,
-purchases and product picks — sets the base organic, and deletes the duplicate.
+purchases and product picks — and deletes the duplicate. Whether the household
+buys organic is a household setting, not something this records per item.
 
     python server/merge_organic.py            # dry run: says what it WOULD do
     python server/merge_organic.py --apply    # backs the DB up first, then does it
@@ -69,7 +70,7 @@ def merge_into(conn: sqlite3.Connection, src: int, dst: int) -> None:
         "SELECT note, budget, preferred_store_id, brand, snoozed_until FROM item_catalog WHERE id=?", (src,)
     ).fetchone()
     conn.execute(
-        "UPDATE item_catalog SET organic=1, "
+        "UPDATE item_catalog SET "
         "note = CASE WHEN note='' THEN ? ELSE note END, "
         "budget = COALESCE(budget, ?), "
         "preferred_store_id = COALESCE(preferred_store_id, ?), "
@@ -81,7 +82,7 @@ def merge_into(conn: sqlite3.Connection, src: int, dst: int) -> None:
 
 def rename_in_place(conn: sqlite3.Connection, src: int, base: str) -> None:
     conn.execute(
-        "UPDATE item_catalog SET canonical_name=?, display_name=?, organic=1 WHERE id=?",
+        "UPDATE item_catalog SET canonical_name=?, display_name=? WHERE id=?",
         (db.canonical(base), base, src),
     )
 
@@ -109,9 +110,9 @@ def main() -> int:
         where = f"#{s['id']}, {n} purchases, on list: {'yes' if listed else 'no'}, picks: {picks}"
         if s["target"]:
             t = ro.execute("SELECT display_name FROM item_catalog WHERE id=?", (s["target"],)).fetchone()[0]
-            print(f"{s['name']!r} ({where}) -> {t!r} (#{s['target']}), organic")
+            print(f"{s['name']!r} ({where}) -> {t!r} (#{s['target']})")
         else:
-            print(f"{s['name']!r} ({where}) -> renamed {s['base']!r}, organic")
+            print(f"{s['name']!r} ({where}) -> renamed {s['base']!r}")
     ro.close()
     if not args.apply:
         print("\ndry run — nothing changed; re-run with --apply")

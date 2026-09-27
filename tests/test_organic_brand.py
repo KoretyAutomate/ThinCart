@@ -1,9 +1,10 @@
-"""Phase 7A/7B: organic is a property of the item, brand a standing preference.
+"""Phase 7A/7B: one item whatever the qualifier; organic a HOUSEHOLD setting.
 
 "organic onion" must land on the Onion — same catalog row, same purchase
-history — with its organic flag set, instead of becoming a second Onion
-(PLAN.md §Phase 7). Names are suffixed per test: the app module and its DB are
-shared across this process.
+history — instead of becoming a second Onion. Whether the household buys
+organic is one shared setting (the owner's call, 2026-09-27), not a per-item
+flag; the brand is a standing per-item preference (PLAN.md §Phase 7). Names
+are suffixed per test: the app module and its DB are shared across this process.
 """
 
 import os
@@ -62,6 +63,10 @@ def test_split_organic(typed, base, organic):
     assert db.split_organic(typed) == (base, organic)
 
 
+def settings():
+    return client.get("/api/state").json()["settings"]
+
+
 def test_typing_organic_lands_on_the_existing_item_with_its_history():
     name = "onion-7a1"
     first = op(type="add", name=name, item_id=str(uuid.uuid4()))
@@ -69,70 +74,84 @@ def test_typing_organic_lands_on_the_existing_item_with_its_history():
     res = op(type="add", name=f"organic {name}", item_id=str(uuid.uuid4()))
     assert res["catalog_id"] == catalog_row(name)["id"]  # the same Onion
     assert catalog_row(f"organic {name}") is None       # no second one
-    assert state_item(name)["organic"] is True
     n = appmod.conn.execute("SELECT COUNT(*) FROM purchase_events WHERE catalog_id=?", (res["catalog_id"],))
     assert n.fetchone()[0] == 1                          # its history came along
 
 
-def test_organic_add_onto_a_listed_item_dedupes_and_still_sets_the_flag():
+def test_organic_add_onto_a_listed_item_dedupes():
     name = "walnuts-7a2"
     op(type="add", name=name, item_id=str(uuid.uuid4()))
-    rev = client.get("/api/state").json()["revision"]
-    res = op(type="add", name=f"Organic {name}", item_id=str(uuid.uuid4()))
-    assert res["deduped"] is True
-    assert state_item(name)["organic"] is True
-    assert client.get("/api/state").json()["revision"] > rev  # both phones hear about it
+    assert op(type="add", name=f"Organic {name}", item_id=str(uuid.uuid4()))["deduped"] is True
 
 
 def test_a_new_organic_item_is_created_under_its_base_name():
     res = op(type="add", name="organic kale-7a3", item_id=str(uuid.uuid4()))
     row = appmod.conn.execute("SELECT * FROM item_catalog WHERE id=?", (res["catalog_id"],)).fetchone()
-    assert row["display_name"] == "kale-7a3" and row["organic"] == 1
+    assert row["display_name"] == "kale-7a3"
 
 
-def test_a_plain_add_never_clears_organic():
-    name = "rice-7a4"
-    op(type="add", name=f"organic {name}", item_id=str(uuid.uuid4()))
-    op(type="add", name=name, item_id=str(uuid.uuid4()))
-    assert state_item(name)["organic"] is True
+def test_typing_organic_does_not_flip_the_household_setting():
+    before = settings()["organic"]
+    op(type="add", name="organic rice-7a4", item_id=str(uuid.uuid4()))
+    assert settings()["organic"] == before
 
 
-def test_edit_toggles_organic_and_sets_brand():
-    name = "milk-7b1"
-    added = op(type="add", name=name, item_id=str(uuid.uuid4()))
-    op(type="edit", item_id=added["item_id"], organic=True, brand="  Horizon ")
-    it = state_item(name)
-    assert it["organic"] is True and it["brand"] == "Horizon"
-    op(type="edit", item_id=added["item_id"], organic=False, brand="")
-    it = state_item(name)
-    assert it["organic"] is False and it["brand"] == ""
-
-
-def test_an_old_phones_edit_without_the_new_fields_leaves_them_alone():
-    """A phone with ops queued before this release sends neither field."""
-    name = "yogurt-7b2"
-    added = op(type="add", name=name, item_id=str(uuid.uuid4()))
-    op(type="edit", item_id=added["item_id"], organic=True, brand="Fage")
-    op(type="edit", item_id=added["item_id"], note="plain")
-    it = state_item(name)
-    assert it["organic"] is True and it["brand"] == "Fage" and it["note"] == "plain"
-
-
-def test_renaming_to_an_organic_name_is_the_base_item_organic():
+def test_renaming_to_an_organic_name_is_the_base_item():
     name = "egg whites-7a5"
     added = op(type="add", name=name, item_id=str(uuid.uuid4()))
     res = op(type="edit", item_id=added["item_id"], name=f"Organic {name}")
     assert "rename_skipped" not in res
-    it = state_item(name)
-    assert it is not None and it["organic"] is True
+    assert state_item(name) is not None
     assert catalog_row(f"organic {name}") is None
 
 
-def test_an_explicit_toggle_beats_a_typed_qualifier_in_the_same_save():
-    name = "tofu-7a6"
+def test_organic_is_one_household_setting():
+    op(type="settings", organic=True)
+    assert settings()["organic"] is True
+    rev = client.get("/api/state").json()["revision"]
+    assert op(type="settings", organic=True)["changed"] is False     # no-op: no revision bump
+    assert client.get("/api/state").json()["revision"] == rev
+    op(type="settings", organic=False)
+    assert settings()["organic"] is False
+    assert "organic" not in state_item_any()                           # no per-item flag any more
+
+
+def state_item_any():
+    op(type="add", name="probe-7a6", item_id=str(uuid.uuid4()))
+    return state_item("probe-7a6")
+
+
+def test_settings_without_a_value_is_refused():
+    body = {"op_id": str(uuid.uuid4()), "type": "settings"}
+    assert client.post("/api/op", json=body).status_code == 422
+
+
+def test_edit_sets_and_clears_brand():
+    name = "milk-7b1"
     added = op(type="add", name=name, item_id=str(uuid.uuid4()))
-    op(type="edit", item_id=added["item_id"], name=f"organic {name}", organic=False)
-    assert state_item(name)["organic"] is False
+    op(type="edit", item_id=added["item_id"], brand="  Horizon ")
+    assert state_item(name)["brand"] == "Horizon"
+    op(type="edit", item_id=added["item_id"], brand="")
+    assert state_item(name)["brand"] == ""
+
+
+def test_an_old_phones_edit_without_the_brand_field_leaves_it_alone():
+    """A phone with ops queued before this release does not send it."""
+    name = "yogurt-7b2"
+    added = op(type="add", name=name, item_id=str(uuid.uuid4()))
+    op(type="edit", item_id=added["item_id"], brand="Fage")
+    op(type="edit", item_id=added["item_id"], note="plain")
+    it = state_item(name)
+    assert it["brand"] == "Fage" and it["note"] == "plain"
+
+
+def test_an_edit_carrying_the_retired_per_item_organic_field_is_harmless():
+    """Phones ran the per-item toggle for a few hours; a queued edit from then
+    must not flip the household setting."""
+    before = settings()["organic"]
+    added = op(type="add", name="tofu-7a7", item_id=str(uuid.uuid4()))
+    op(type="edit", item_id=added["item_id"], organic=not before)
+    assert settings()["organic"] == before
 
 
 def test_brand_is_capped():

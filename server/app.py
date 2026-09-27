@@ -76,17 +76,12 @@ async def broadcast_state() -> None:
 def apply_add(op: Op, ts: str) -> dict:
     if not op.name or not op.name.strip():
         raise HTTPException(422, "add requires a non-empty name")
-    # "organic onion" is the Onion, bought organic (PLAN.md Phase 7A): resolve
-    # the base name, and let the qualifier set the item's standing preference.
-    base, organic = db.split_organic(op.name)
+    # "organic onion" is the Onion (PLAN.md Phase 7A): one item, one history.
+    # Whether the household buys organic is a setting, not part of the name.
+    base, _ = db.split_organic(op.name)
     catalog_id = db.get_or_create_catalog(conn, base)
-    flipped = organic and bool(
-        conn.execute("UPDATE item_catalog SET organic=1 WHERE id=? AND organic=0", (catalog_id,)).rowcount
-    )
     existing = conn.execute("SELECT id FROM items WHERE catalog_id=?", (catalog_id,)).fetchone()
     if existing:  # duplicate-add convergence: already on the list → no-op
-        if flipped:
-            db.bump_revision(conn)  # the flag still changed, and both phones must see it
         return {"item_id": existing["id"], "deduped": True}
     item_id = op.item_id or str(uuid.uuid4())
     rev = db.bump_revision(conn)
@@ -210,9 +205,8 @@ def apply_edit(op: Op, ts: str) -> dict:
     changed = False
     item_id = op.item_id
     result: dict = {}
-    rename_organic = False
     if op.name is not None and op.name.strip() and row is not None:
-        base, rename_organic = db.split_organic(op.name)
+        base, _ = db.split_organic(op.name)
         new_cid = db.get_or_create_catalog(conn, base)
         if new_cid != catalog_id:
             dup = conn.execute(
@@ -261,7 +255,7 @@ def apply_edit(op: Op, ts: str) -> dict:
     if op.qty_note is not None and row is not None:  # per-item: needs the live row
         conn.execute("UPDATE items SET qty_note=? WHERE id=?", (op.qty_note, item_id))
         changed = True
-    changed = criteria.apply(conn, op, catalog_id, rename_organic) or changed
+    changed = criteria.apply(conn, op, catalog_id) or changed
     if changed:
         db.bump_revision(conn)
     return {"edited": op.item_id or catalog_id, "changed": changed, **result}
@@ -340,6 +334,17 @@ def apply_store_delete(op: Op, ts: str) -> dict:
     return {"deleted_store": op.store_id}
 
 
+def apply_settings(op: Op, ts: str) -> dict:
+    """Household-wide preferences — both phones see the same setting."""
+    if op.organic is None:
+        raise HTTPException(422, "settings requires organic")
+    value = "1" if op.organic else "0"
+    cur = conn.execute("UPDATE meta SET value=? WHERE key='organic' AND value != ?", (value, value))
+    if cur.rowcount:
+        db.bump_revision(conn)
+    return {"organic": op.organic, "changed": bool(cur.rowcount)}
+
+
 def apply_product_pick(op: Op, ts: str) -> dict:
     """Remember WHICH product an item means, so price and aisle are questions
     about a real thing. One pick per (item, chain): the same milk is a different
@@ -369,6 +374,7 @@ APPLY = {
     "store_upsert": apply_store_upsert,
     "store_delete": apply_store_delete,
     "product_pick": apply_product_pick,
+    "settings": apply_settings,
 }
 
 
