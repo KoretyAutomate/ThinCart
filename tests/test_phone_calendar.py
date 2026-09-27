@@ -228,3 +228,17 @@ def test_a_boundary_day_the_phone_only_partly_read_is_not_pruned(client):
     r = _push(client, [])
     assert r.json()["dropped"] == 0
     assert first.isoformat() in _pending_days(client)
+
+
+def test_a_day_two_calendars_share_survives_one_going_quiet(client):
+    """Codex review 2026-09-26: the same trip on calendars 7 and 9; 9 is then
+    hidden and 7's event deleted. 9 still claims the days — they must stay."""
+    first = date.today() - timedelta(days=20)
+    _push(client, [_trip(first, eid="7:1:0"), _trip(first, eid="9:2:0")], calendars=("7", "9"))
+    assert len(_pending_days(client)) == 3
+    r = _push(client, [], calendars=("7",))
+    assert r.json()["dropped"] == 0
+    assert len(_pending_days(client)) == 3
+    # and once 9 is read again without the trip, nothing claims them
+    r = _push(client, [], calendars=("7", "9"))
+    assert r.json()["dropped"] == 3

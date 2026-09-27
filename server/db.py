@@ -162,6 +162,10 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
         # Without it the backfill re-selects the same unfillable rows every run
         # (gibberish names the LLM rightly declines) and never reaches the rest.
         "ALTER TABLE item_catalog ADD COLUMN emoji_tried_at TEXT",
+        # Every calendar that currently proposes this away day (JSON list of ids).
+        # event_id keeps only the first claimant's details for display; pruning
+        # needs them all, or a hidden calendar's claim dies with a visible one's.
+        "ALTER TABLE away_days ADD COLUMN claims TEXT NOT NULL DEFAULT '[]'",
     ):
         with contextlib.suppress(sqlite3.OperationalError):
             conn.execute(ddl)
@@ -349,32 +353,65 @@ def record_away_candidates(conn: sqlite3.Connection, candidates, detected_at: st
     return n
 
 
-def prune_away_candidates(
-    conn: sqlite3.Connection, start: str, end: str, keep: set, calendars: set | None = None
-) -> int:
+def prune_away_candidates(conn: sqlite3.Connection, start: str, end: str, keep: set) -> int:
     """Drop unreviewed calendar days in [start, end] the calendar no longer claims.
 
     A deleted or rescheduled trip has to stop counting, but only unreviewed
     ('auto') calendar rows are eligible — a manual entry or a confirmed day
     outlives whatever the calendar currently says.
-
-    `calendars`, when given, limits pruning to rows proposed from those
-    calendars (event ids are `<calendar>:<event>:<begin>`): a calendar the phone
-    did not read this time — hidden, sync off, a second account — says nothing
-    about whether its trips were cancelled.
     """
     stale = [
         r["day"]
         for r in conn.execute(
-            """SELECT day, event_id FROM away_days
+            """SELECT day FROM away_days
                WHERE status='auto' AND source='calendar' AND day BETWEEN ? AND ?""",
             (start, end),
         )
         if r["day"] not in keep
-        and (calendars is None or (r["event_id"] or "").split(":", 1)[0] in calendars)
     ]
     conn.executemany("DELETE FROM away_days WHERE day=?", [(d,) for d in stale])
     return len(stale)
+
+
+def _claims_of(row) -> set[str]:
+    """A row's claimant calendars; rows from before the column fall back to the
+    calendar their event id names (`<calendar>:<event>:<begin>`)."""
+    claims = set(json.loads(row["claims"] or "[]"))
+    if not claims and row["event_id"]:
+        claims = {row["event_id"].split(":", 1)[0]}
+    return claims
+
+
+def sync_away_claims(
+    conn: sqlite3.Connection,
+    claims_now: dict[str, set[str]],
+    read: set[str],
+    start: str,
+    end: str,
+) -> int:
+    """Reconcile unreviewed calendar days with one phone read. Returns days dropped.
+
+    For each 'auto' calendar row: the calendars read this time are replaced by
+    what they claim now; calendars NOT read keep their earlier claim untouched.
+    A day is dropped only when no calendar claims it any more — and only inside
+    [start, end], the part of the window the read fully covered.
+
+    Call after `record_away_candidates`, which creates the rows for new days.
+    """
+    dropped = 0
+    rows = conn.execute("SELECT day, event_id, claims FROM away_days WHERE status='auto' AND source='calendar'")
+    for r in list(rows):
+        day = r["day"]
+        now = claims_now.get(day, set())
+        if not now and not (start <= day <= end):
+            continue  # outside what was fully read: this read says nothing about it
+        claims = (_claims_of(r) - read) | now
+        if claims:
+            conn.execute("UPDATE away_days SET claims=? WHERE day=?", (json.dumps(sorted(claims)), day))
+        else:
+            conn.execute("DELETE FROM away_days WHERE day=?", (day,))
+            dropped += 1
+    return dropped
 
 
 def set_away_status(conn: sqlite3.Connection, day: str, status: str, detected_at: str) -> dict:

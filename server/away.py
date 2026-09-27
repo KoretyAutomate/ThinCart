@@ -157,6 +157,22 @@ def bounded(events: list[dict]) -> list[dict]:
     return out
 
 
+def day_claims(events: list[dict], window: tuple[str, str]) -> dict[str, set[str]]:
+    """Which calendars propose each in-window day. `travel.detect` keeps one
+    event per day for display; pruning needs every claimant, so a day two
+    calendars share outlives either one going quiet."""
+    claims: dict[str, set[str]] = {}
+    for ev in events:
+        if travel.classify(ev) is None:
+            continue
+        calendar = ev["id"].split(":", 1)[0]
+        for d in travel.event_dates(ev):
+            day = d.isoformat()
+            if window[0] <= day <= window[1]:
+                claims.setdefault(day, set()).add(calendar)
+    return claims
+
+
 def clamp_window(start: datetime, end: datetime, now: datetime) -> tuple[datetime, datetime]:
     """The posted window, checked and narrowed to the server's own.
 
@@ -220,6 +236,7 @@ async def ingest(push: CalendarPush) -> dict:
     # for its in-window days, and nothing outside is written that a later sync
     # could never prune.
     found = [c for c in travel.detect(events) if window[0] <= c.day.isoformat() <= window[1]]
+    claims_now = day_claims(events, window)
     async with ctx.write_lock:
         ts = ctx.now_iso()
         dropped = 0
@@ -228,9 +245,7 @@ async def ingest(push: CalendarPush) -> dict:
         # cancelled. Pruning on that would wipe every proposal awaiting review.
         if read:
             db.record_away_candidates(ctx.conn, found, ts)
-            dropped = db.prune_away_candidates(
-                ctx.conn, *prune_window, {c.day.isoformat() for c in found}, calendars=read
-            )
+            dropped = db.sync_away_claims(ctx.conn, claims_now, read, *prune_window)
         summary = {"at": ts, "calendars": len(read), "events": len(events), "away_days": len(found)}
         ctx.conn.execute(
             "INSERT INTO meta(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",

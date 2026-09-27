@@ -2430,3 +2430,9 @@ plugins. So the read happens in the launcher, before handoff.
 - **(round 3) Prune one day inside each window edge.** The phone reads from an
   instant, the window starts at a home-local date; a partly-read edge day is
   never treated as empty.
+- **(round 4) Claims are kept per calendar.** `travel.detect` keeps one event
+  per day for display, so a day two calendars both propose would die with the
+  first one's event even while the other (hidden this read) still claims it.
+  `away_days.claims` (additive migration, JSON list) records every claimant;
+  a read replaces only the claims of the calendars it read, and a day is
+  dropped only when no calendar claims it, inside the fully-read window.
