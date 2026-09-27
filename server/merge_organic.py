@@ -40,13 +40,26 @@ def find_base(conn: sqlite3.Connection, base: str, not_id: int) -> int | None:
     return None
 
 
+def resolve(conn: sqlite3.Connection, src: int, base: str) -> int | None:
+    """The plain row this organic row belongs to: its own base name first, then
+    each of its aliases with the qualifier stripped — an enriched
+    オーガニックケール is found to be the existing Kale through "organic kale"."""
+    row = conn.execute("SELECT aliases_json FROM item_catalog WHERE id=?", (src,)).fetchone()
+    names = [base] + [db.split_organic(a)[0] for a in json.loads((row and row["aliases_json"]) or "[]")]
+    for name in dict.fromkeys(names):
+        target = find_base(conn, name, src)
+        if target:
+            return target
+    return None
+
+
 def plan(conn: sqlite3.Connection) -> list[dict]:
     steps = []
     for r in conn.execute("SELECT id, canonical_name, display_name FROM item_catalog ORDER BY id"):
         base, organic = db.split_organic(r["display_name"])
         if not organic:
             continue
-        target = find_base(conn, base, r["id"])
+        target = resolve(conn, r["id"], base)
         steps.append({"id": r["id"], "name": r["display_name"], "base": base, "target": target})
     return steps
 
@@ -147,7 +160,7 @@ def main() -> int:
             # item with no plain row ("Organic Kale", "オーガニックKale") — the
             # first is renamed to Kale, and the second must then fold INTO it
             # rather than try to become a second Kale.
-            target = find_base(conn, s["base"], s["id"])
+            target = resolve(conn, s["id"], s["base"])
             if target:
                 merge_into(conn, s["id"], target)
             else:

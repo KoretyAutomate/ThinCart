@@ -1557,11 +1557,12 @@ function whereInput() {
   const unsettled = unsettledItems();
   const items = view();
   const ask = items.filter(i => !i.pending && i.catalog_id && !unsettled(i));
-  const picks = base.picks || {};
+  // every chain's pick: /api/where asks each chain about ITS pick
+  const picks = base.picks_by_chain || {};
   const key = JSON.stringify([
     organicSetting(),
     pricedStores().map(s => s.id + ':' + s.chain_store_id),
-    ask.map(i => [i.catalog_id, i.name, i.name_en || '', i.brand || '', picks[String(i.catalog_id)] || '']),
+    ask.map(i => [i.catalog_id, i.name, i.name_en || '', i.brand || '', picks[String(i.catalog_id)] || {}]),
     items.filter(i => i.pending || unsettled(i)).map(i => i.catalog_id || i.id),
   ]);
   return { key, ids: ask.map(i => i.catalog_id) };

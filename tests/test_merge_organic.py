@@ -156,3 +156,20 @@ def test_an_in_place_rename_drops_the_qualifier_from_aliases_too(tmp_path):
     row = conn.execute("SELECT display_name, aliases_json FROM item_catalog").fetchone()
     assert row["display_name"] == "ケール" and json.loads(row["aliases_json"]) == ["kale"]
     assert db.get_or_create_catalog(conn, "kale") == conn.execute("SELECT id FROM item_catalog").fetchone()[0]
+
+
+def test_an_aliased_organic_row_folds_into_the_existing_english_row(tmp_path):
+    """Codex review 2026-09-27: オーガニックケール (alias "organic kale") beside an
+    existing Kale was renamed to ケール, leaving two rows and two histories."""
+    conn = db.connect(tmp_path / "b.db")
+    conn.execute("INSERT INTO item_catalog(canonical_name, display_name) VALUES('kale', 'Kale')")
+    conn.execute("INSERT INTO item_catalog(canonical_name, display_name, aliases_json) VALUES(?,?,?)",
+                 (db.canonical("オーガニックケール"), "オーガニックケール", '["organic kale"]'))
+    src = conn.execute("SELECT id FROM item_catalog WHERE display_name='オーガニックケール'").fetchone()[0]
+    conn.execute("INSERT INTO purchase_events(catalog_id, bought_at) VALUES(?, '2026-09-01T00:00:00+00:00')", (src,))
+    conn.commit()
+    _run(tmp_path / "b.db", "--apply")
+    conn = db.connect(tmp_path / "b.db")
+    rows = conn.execute("SELECT id, display_name FROM item_catalog").fetchall()
+    assert [r["display_name"] for r in rows] == ["Kale"]
+    assert conn.execute("SELECT COUNT(*) FROM purchase_events WHERE catalog_id=?", (rows[0]["id"],)).fetchone()[0] == 1

@@ -487,6 +487,13 @@ def split_organic(name: str) -> tuple[str, bool]:
     return (base, True) if base else (name, False)
 
 
+def _picks_by_chain(conn: sqlite3.Connection) -> dict[str, dict[str, str]]:
+    out: dict[str, dict[str, str]] = {}
+    for r in conn.execute("SELECT catalog_id, chain, sku FROM product_picks ORDER BY catalog_id, chain"):
+        out.setdefault(str(r["catalog_id"]), {})[r["chain"]] = r["sku"]
+    return out
+
+
 def organic_setting(conn: sqlite3.Connection) -> bool:
     """The household buys organic where it can (PLAN.md Phase 7A, revised)."""
     row = conn.execute("SELECT value FROM meta WHERE key='organic'").fetchone()
@@ -533,6 +540,9 @@ def state(conn: sqlite3.Connection, now=None) -> dict:
             str(r["catalog_id"]): r["sku"]
             for r in conn.execute("SELECT catalog_id, sku FROM product_picks")
         },
+        # every chain's pick, not one per item: "by price" asks each chain about
+        # ITS pick, so a change at any chain is a new question for the phone
+        "picks_by_chain": _picks_by_chain(conn),
         "suggestions": suggestions(conn, now),
         # badge on the Travel button: detected days nobody has ruled on yet
         "away_pending": conn.execute("SELECT COUNT(*) FROM away_days WHERE status='auto'").fetchone()[0],

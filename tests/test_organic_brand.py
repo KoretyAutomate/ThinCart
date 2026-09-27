@@ -168,3 +168,12 @@ def test_brand_is_capped():
     added = op(type="add", name="bread-7b3", item_id=str(uuid.uuid4()))
     body = {"op_id": str(uuid.uuid4()), "type": "edit", "item_id": added["item_id"], "brand": "x" * 61}
     assert client.post("/api/op", json=body).status_code == 422
+
+
+def test_state_carries_every_chains_pick():
+    added = op(type="add", name="picks-7c1", item_id=str(uuid.uuid4()))
+    for chain, sku in (("wegmans", "W1"), ("wholefoods", "WF1")):
+        op(type="product_pick", catalog_id=added["catalog_id"], pick_chain=chain, pick_sku=sku,
+           pick_name="p", pick_brand="", pick_size="")
+    got = client.get("/api/state").json()["picks_by_chain"][str(added["catalog_id"])]
+    assert got == {"wegmans": "W1", "wholefoods": "WF1"}
