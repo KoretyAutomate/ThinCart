@@ -212,6 +212,7 @@ window.normalizeServerUrl = normalizeServerUrl;
 window.probeServer = probeServer;
 window.openServer = openServer;
 window.launchUrl = launchUrl;
+window.syncCalendar = syncCalendar;
 
 /* ---- in-app updates ------------------------------------------------------
  * The DGX publishes a build at GET /version (scripts/publish_apk.py). If its
@@ -380,6 +381,39 @@ function showSetup(prefill, msg) {
   show("setup");
 }
 
+/* Travel detection reads the calendar here, in the launcher, because this is
+ * the page the native bridge is injected for (PLAN.md §2026-09-26). Never a
+ * gate: whatever happens — no plugin (a browser), permission refused, a
+ * dialog that never settles — the app opens as usual.
+ *
+ * The permission is asked ONCE. "prompt" is a first run; after one refusal
+ * Android reports "prompt-with-rationale", and a dialog on every cold start
+ * would be nagging — the Travel panel says where to turn it on instead.
+ *
+ * push() resolves at once and posts from native code on a background thread,
+ * so the handoff is not held up by the upload and the navigation cannot
+ * cancel it. Resolves to what happened, for the tests. */
+var CALENDAR_STEP_MS = 30000;
+
+function syncCalendar(url, timeoutMs) {
+  var Cal = Plugins.Calendar;
+  if (!Cal) return Promise.resolve("absent");
+  var step = Cal.checkPermissions().then(function (p) {
+    if (p.calendar === "granted") return "granted";
+    if (p.calendar === "prompt") {
+      return Cal.requestPermissions({ permissions: ["calendar"] }).then(function (r) { return r.calendar; });
+    }
+    return p.calendar;                      // prompt-with-rationale, denied: don't ask again
+  }).then(function (state) {
+    if (state !== "granted") return "skipped";
+    return Cal.push({ url: url }).then(function () { return "pushed"; });
+  }).catch(function () { return "error"; });
+  var cap = new Promise(function (resolve) {
+    setTimeout(function () { resolve("timeout"); }, timeoutMs || CALENDAR_STEP_MS);
+  });
+  return Promise.race([step, cap]);
+}
+
 function tryLaunch(url, force) {
   show("connecting");
   $("connecting-text").textContent = "Connecting to " + url.replace(/^https?:\/\//, "") + "…";
@@ -388,9 +422,10 @@ function tryLaunch(url, force) {
       showSettings("Can't reach that server. Check that Tailscale is connected on this phone.");
       return;
     }
-    // A newer build on the DGX is offered first; "Later" and anything that
-    // goes wrong with the check fall through to the app as usual.
-    return checkUpdate(url).then(function (u) {
+    // The calendar goes before the update offer, never between the offer and
+    // the launch it gates. Then a newer build on the DGX is offered; "Later"
+    // and anything that goes wrong with the check fall through to the app.
+    return window.syncCalendar(url).then(function () { return checkUpdate(url); }).then(function (u) {
       if (u && !updateSkipped(u.available.versionCode)) {
         showUpdate(u, url, function () { launch(url, force); });
       } else {

@@ -54,4 +54,7 @@
          hands it to the system installer. Android still asks the person, once,
          to allow installs from this app. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Travel detection: CalendarPlugin reads the calendar Android already
+         syncs (PLAN.md §2026-09-26). READ only — never WRITE_CALENDAR. -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
 </manifest>

@@ -423,7 +423,6 @@ async def enrich_sweeper() -> None:
 @app.on_event("startup")
 async def startup():
     asyncio.create_task(enrich_sweeper())
-    asyncio.create_task(away.sweeper())
 
 
 @app.post("/api/op")

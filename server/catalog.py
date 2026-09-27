@@ -64,6 +64,45 @@ def _is_variety(source_canon: str, target_names: list[str]) -> bool:
     return False
 
 
+# English names that are the SAME product, so the mismatch guard below lets
+# them merge. The guard cannot tell a synonym from a variety by itself —
+# 'aubergine' → eggplant and 'elbow macaroni' → pasta look identical to it — and
+# a wrong merge rewrites purchase history while a missed one only leaves a
+# duplicate row. So equivalence is opt-in and curated here, the same way the
+# emoji map is, starting from the pairs enrich_prompt names as aliases.
+ENGLISH_SYNONYMS = [
+    {"eggplant", "aubergine"},
+    {"cilantro", "coriander"},
+    {"zucchini", "courgette"},
+    {"arugula", "rocket"},
+    {"scallion", "scallions", "green onion", "green onions", "spring onion", "spring onions"},
+    {"bell pepper", "capsicum"},
+    {"chickpeas", "garbanzo beans"},
+]
+
+
+def _with_synonyms(names: set[str]) -> set[str]:
+    out = set(names)
+    for group in ENGLISH_SYNONYMS:
+        if names & group:
+            out |= group
+    return out
+
+
+def _english_mismatch(source_canon: str, english_name, target_names: list[str]) -> bool:
+    """Second backstop, for varieties that do not spell out their parent:
+    'elbow macaroni' shares no word with 'pasta', so _is_variety lets it
+    through. An alias is the IDENTICAL product, so every English name the new
+    item has — as typed, and the LLM's own english_name — must be one the target
+    already goes by. When either side has no English name (たまねぎ → 玉ねぎ with
+    none on record) there is nothing to compare and this stays out of the way."""
+    target_en = _with_synonyms({canonical(n) for n in target_names if n.strip() and n.isascii()})
+    if not target_en:
+        return False
+    source_en = [n for n in (source_canon, english_name) if isinstance(n, str) and n.strip() and n.isascii()]
+    return any(canonical(n) not in target_en for n in source_en)
+
+
 def item_context(row) -> str:
     """The item's own text — what disambiguates a bare LLM token ("pepper" on
     `bell pepper bag` is a capsicum; on `Amys frozen pizza` it is the spice)."""
@@ -165,8 +204,17 @@ async def enrich(conn, write_lock, catalog_id: int) -> bool:
                 "SELECT id, aliases_json FROM item_catalog WHERE canonical_name=?",
                 (alias_of,),
             ).fetchone()
-        if target and _is_variety(row["canonical_name"], [alias_of] + json.loads(target["aliases_json"])):
+        target_names = [alias_of] + json.loads(target["aliases_json"]) if target else []
+        if target and _is_variety(row["canonical_name"], target_names):
             log.info("merge blocked (variety/brand): %r kept distinct from %r", row["canonical_name"], alias_of)
+            target = None
+        elif target and _english_mismatch(row["canonical_name"], res.get("english_name"), target_names):
+            log.info(
+                "merge blocked (english name %r): %r kept distinct from %r",
+                res.get("english_name"),
+                row["canonical_name"],
+                alias_of,
+            )
             target = None
         if target:
             # merge: repoint history + live items, record alias, drop this row

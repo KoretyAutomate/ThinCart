@@ -384,7 +384,9 @@ def test_api_refuses_to_un_review_a_day(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
     import app as appmod
+    import db as dbmod
 
+    importlib.reload(dbmod)  # re-read THINCART_DB: an earlier import froze DB_PATH
     importlib.reload(appmod)
     client = TestClient(appmod.app)
 
@@ -418,7 +420,9 @@ def test_snooze_deadline_is_stored_comparable_to_now(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
     import app as appmod
+    import db as dbmod
 
+    importlib.reload(dbmod)  # re-read THINCART_DB: an earlier import froze DB_PATH
     importlib.reload(appmod)
     client = TestClient(appmod.app)
 
@@ -467,8 +471,8 @@ def test_prune_window_is_in_home_local_dates(tmp_path, monkeypatch):
     assert len(dbmod.away_rows(conn)) == 1
 
     # the window a sync computes, expressed the way the rows are keyed
-    time_max = now + timedelta(days=awaymod.calendar_sync.WINDOW_AHEAD_DAYS)
-    time_min = now - timedelta(days=awaymod.calendar_sync.WINDOW_BACK_DAYS)
+    time_max = now + timedelta(days=awaymod.WINDOW_AHEAD_DAYS)
+    time_min = now - timedelta(days=awaymod.WINDOW_BACK_DAYS)
     dropped = dbmod.prune_away_candidates(
         conn,
         time_min.astimezone(travel.HOME_TZ).date().isoformat(),

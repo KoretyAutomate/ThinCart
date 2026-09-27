@@ -23,7 +23,8 @@ See `PLAN.md` for the full architecture (agent-reviewed, approved 2026-07-03).
   store); iPhone stays Add-to-Home-Screen. Remaining: wife's iPhone Tailscale
   onboarding, two-phone in-store test.
 - **Travel-aware cycles**: ✅ code complete — cycles counted in *days at home*,
-  away days read from Google Calendar. Needs the one-time OAuth link below.
+  away days read from the calendar on the Pixel (below). Needs the app to be
+  allowed calendar access once.
 - 151/151 tests (`tests/`); live verifications in `test_results/`.
 
 Runs on a home DGX box over a private Tailscale tailnet (bind IP + hostname are
@@ -101,7 +102,7 @@ Shell tests: `cd mobile && npm install && npm test`.
    or share your account), then open https://spark-d28c.<your-tailnet>.ts.net
    **in Safari** → Share → *Add to Home Screen*. (The Pixel uses the sideloaded
    app instead — see *Install as an app* above.)
-3. **Link Google Calendar** (for travel-aware cycles — see below).
+3. **Allow calendar access on the Pixel** (for travel-aware cycles — see below).
 
 ## Travel-aware cycles ✈️
 
@@ -110,26 +111,21 @@ at home**: days spent out of town are subtracted from every interval, so an
 item does not get suggested late just because the household was travelling.
 With no away days recorded the arithmetic is identical to before.
 
-**Link the calendar** (read-only, one time, on the DGX):
+**Where the calendar comes from.** The Pixel app reads the calendar Android
+already syncs from your Google account — no Google Cloud project, no OAuth, no
+token to expire. Each time the app opens, its launcher reads the last 180 days
+and next 30 of **all-day** events from calendars you own (your primary calendar
+and ones you created; shared, holiday and birthday calendars are skipped) and
+sends them to `POST /api/calendar/events`. Android asks for calendar access
+once; if you decline, it doesn't ask again — turn it on in *Settings → Apps →
+ThinCart → Permissions → Calendar*. The Travel panel shows when the Pixel last
+read the calendar. The iPhone never needs to: away days are household-wide.
 
-1. Google Cloud console → new project → enable the **Google Calendar API**
-2. *OAuth consent screen* → External → add yourself as a test user
-3. *Credentials* → OAuth client ID → **Desktop app**
-4. Put the id and secret in `~/.config/thincart/google_oauth.json` (outside this
-   repo — it is a bearer credential, and this repo is public):
-   ```json
-   {"client_id": "….apps.googleusercontent.com", "client_secret": "…",
-    "calendar_ids": ["primary"]}
-   ```
-5. `python3 server/calendar_sync.py --authorize` — open the printed URL in any
-   browser; if the browser is on another machine, paste the redirect URL back.
-
-Then `--calendars` lists what the link can read and `--check` prints what reads
-as travel without writing anything.
+Out-of-office events are not exposed by Android, so a timed out-of-office entry
+is not detected; all-day events and booking wording are.
 
 **Detection proposes, you decide.** The calendar has no "travel" field, so
-ThinCart flags out-of-office events, all-day events spanning ≥2 days, and
-hotel/flight/trip wording; timed events are always days at home. Everything it
+ThinCart flags all-day events spanning ≥2 days and hotel/flight/trip wording; timed events are always days at home. Everything it
 finds lands in the ✈️ **Travel** panel for review. A detected day does **not**
 affect your cycles until you confirm it — until then it is only shown — and a
 day you confirm or reject is never overwritten by a later sync.
