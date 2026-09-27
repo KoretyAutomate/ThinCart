@@ -1599,14 +1599,14 @@ async function loadWhere() {
       const res = await fetch('/api/where', { method:'POST', headers:{ 'Content-Type':'application/json' },
         body: JSON.stringify({ catalog_ids: ids.slice(k, k + WHERE_PAGE) }) });
       if (gen !== whereGen) return;
-      if (res.status === 503) { done({ key, msg: await why503(res, T().cmp_off, T().cmp_fail) }); return; }
+      if (res.status === 503) { done({ key, failed: true, msg: await why503(res, T().cmp_off, T().cmp_fail) }); return; }
       if (!res.ok) throw new Error('where ' + res.status);
       const d = await res.json();
       Object.assign(merged.items, d.items);
       merged.partial = merged.partial || d.partial;
     }
     done(merged);
-  } catch (e) { done({ key, msg: T().cmp_fail }); }
+  } catch (e) { done({ key, failed: true, msg: T().cmp_fail }); }
 }
 
 function whereLine(it, w, unsettled) {
@@ -1629,9 +1629,17 @@ function whereLine(it, w, unsettled) {
 
 $('plan-byprice').onclick = () => {
   byPrice = !byPrice;
+  // switching it on is asking: never answer that with a remembered failure
+  if (byPrice && whereResult && whereResult.failed) whereResult = null;
   renderStores();
   whereTick();
 };
+
+/* Back online / back in the app: a failure may have been the network. One
+ * fresh ask, not a retry loop — a second failure stays until the next wake. */
+function whereRetryAfterWake() {
+  if (whereResult && whereResult.failed) { whereResult = null; whereTick(); }
+}
 $('stores-close').onclick = () => $('stores-panel').style.display = 'none';
 
 /* A price link is a network round trip to the chain, and the panel can be
@@ -2999,7 +3007,7 @@ function connectWS() {
 /* phone unlock / tab foreground / network back — the NORMAL in-store path */
 /* showBuild on every wake, not only at startup: the phone that has been open
  * since before a deploy is exactly the one that needs telling. */
-const wake = () => { connectWS(); flush(); guessStoreByGps(); showBuild(); };
+const wake = () => { connectWS(); flush(); guessStoreByGps(); showBuild(); whereRetryAfterWake(); };
 document.addEventListener('visibilitychange', () => { if (!document.hidden) wake(); });
 window.addEventListener('online', wake);
 window.addEventListener('pageshow', wake);

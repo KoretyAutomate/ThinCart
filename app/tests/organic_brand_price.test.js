@@ -361,6 +361,34 @@ function openEditor(b, i) {
     check("(d) the unsaved note is still there", now && now.value === "half-typed note", now && now.value);
   }
 
+  console.log("\n--- 4g. a failed ask is retried on request, not remembered --------");
+  {
+    let n = 0;
+    const fetchImpl = (url) => {
+      const u = String(url);
+      if (u === "/api/where") { n++; return Promise.reject(new TypeError("offline")); }
+      if (u === "/api/op") return new Promise(() => {});
+      if (u.startsWith("/api/state")) return Promise.resolve({ ok: true, status: 200, json: async () => (
+        { revision: 1, items: [item(1, "milk")], stores: STORES, settings: { organic: false }, picks: {},
+          suggestions: [], away_pending: 0 }) });
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({}), text: async () => "" });
+    };
+    const b = boot({ items: [item(1, "milk")], fetchImpl });
+    await settle();
+    b.doc.getElementById("stores-btn").click(); b.doc.getElementById("plan-byprice").click();
+    await settle(); await settle();
+    check("the first ask failed and said so", n === 1 && /Could not reach/.test(b.doc.getElementById("plan-price-note").textContent),
+      [n, b.doc.getElementById("plan-price-note").textContent]);
+    await settle();
+    check("and did not loop", n === 1, n);
+    b.doc.getElementById("plan-byprice").click(); b.doc.getElementById("plan-byprice").click();
+    await settle(); await settle();
+    check("switching it back on asks again", n === 2, n);
+    b.w.dispatchEvent(new b.w.Event("online"));
+    await settle(); await settle();
+    check("coming back online asks once more", n === 3, n);
+  }
+
   console.log("\n--- 5. no priced store: say what to do ------------------------------");
   {
     const b = boot({ items: [item(1, "milk")], stores: [] });
