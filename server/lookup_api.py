@@ -334,8 +334,15 @@ def _where_items(ids: list[int]) -> dict[int, dict]:
         ).fetchone()
         if r is None:
             continue
-        plain = db.name_en(r["aliases_json"], r["display_name"]) or r["display_name"]
-        organic = plain if where.is_organic({"name": plain}) else f"organic {plain}"
+        name = db.name_en(r["aliases_json"], r["display_name"]) or r["display_name"]
+        # The preferred brand goes INTO the search: only the top few results
+        # come back, and a brand ranked below them for the bare name ("milk")
+        # would read as "not sold here". where.brand_ok still checks each result.
+        brand = (r["brand"] or "").strip()
+        branded = name if not brand or where.brand_ok({"name": name}, brand) else f"{brand} {name}"
+        plain = branded
+        organic = plain if where.is_organic({"name": plain}) else (
+            f"{brand} organic {name}" if branded != name else f"organic {name}")
         items[cid] = {"plain": plain, "organic": organic, "brand": r["brand"]}
     return items
 

@@ -169,13 +169,14 @@ def organic_on():
 def test_where_searches_organic_and_filters_brand(monkeypatch, stores, organic_on):
     cid = add("where milk", brand="Horizon")
     calls = stub(monkeypatch, {
-        "901": {"organic where milk": [rec("Organic Milk", 4.0, "$0.03/fl oz", brand="Store"),
-                                       rec("Horizon Organic Milk", 5.0, "$0.04/fl oz", brand="Horizon")]},
-        "902": {"organic where milk": [rec("Horizon Milk", 3.0, "$0.02/fl oz", brand="Horizon")]},  # not organic
+        "901": {"Horizon organic where milk": [rec("Organic Milk", 4.0, "$0.03/fl oz", brand="Store"),
+                                               rec("Horizon Organic Milk", 5.0, "$0.04/fl oz", brand="Horizon")]},
+        "902": {"Horizon organic where milk": [rec("Horizon Milk", 3.0, "$0.02/fl oz", brand="Horizon")]},
     })
     d = client.post("/api/where", json={"catalog_ids": [cid]}).json()
     it = d["items"][str(cid)]
-    assert any("organic where milk" in c["terms"] for c in calls)
+    # the brand is IN the search (Codex review 2026-09-28), and still checked on the results
+    assert any("Horizon organic where milk" in c["terms"] for c in calls)
     assert [q["product"] for q in it["quotes"]] == ["Horizon Organic Milk"]
     assert it["stores"][str(stores["Where B"])] == "no_match"
 
@@ -264,3 +265,11 @@ def test_a_fallback_that_could_not_be_asked_says_unasked(monkeypatch, stores, or
     monkeypatch.setattr(lookup_api, "products_many", fake)
     it = client.post("/api/where", json={"catalog_ids": [cid]}).json()["items"][str(cid)]
     assert it["reason"] == "unasked" and "unasked" in it["stores"].values()
+
+
+def test_a_brand_already_in_the_name_is_not_repeated(monkeypatch, stores):
+    cid = add("Horizon where cream", brand="horizon")
+    calls = stub(monkeypatch, {})
+    client.post("/api/where", json={"catalog_ids": [cid]})
+    assert any("Horizon where cream" in c["terms"] for c in calls)
+    assert not any(t.lower().startswith("horizon horizon") for c in calls for t in c["terms"])
