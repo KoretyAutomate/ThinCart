@@ -2607,3 +2607,18 @@ few hours):
   server would price with its old setting) and says so; the setting is part of
   the answer's input key, so a change from either phone re-asks.
 - `merge_organic.py` now only folds duplicates (it already ran on the live DB).
+
+### 2026-09-27 (evening) — 🍃 gets a header button; ✈️ Travel moves into ⚙️
+
+Owner: Organic deserves a button; Travel may move to Settings if the header
+has no room (it has none — the title is already cut to "T"). So: a 🍃 button
+in the header toggles the household setting (lit "🍃 ON" when on, a toast with
+undo says what it means); ✈️ Travel is the first section of ⚙️, and ⚙️ itself
+turns amber while trips wait for review. 🍃 not 🌱 — 🌱 is the plants counter.
+
+Also reported: tapping a suggestion "also opens the purchase-history based
+suggestions" (the Purchase cycles panel). Not reproduced — jsdom, and a
+Pixel-7-emulated Chromium tapping tray chips, typing candidates and cycle rows
+against a throwaway copy of the live DB all behaved. Per the long-press lesson
+(fix on evidence, not theory), every opening of Purchase cycles and every chip
+tap now lands in the ⚙️ trace; the owner reproduces once and reads it.

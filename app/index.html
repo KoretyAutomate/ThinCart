@@ -177,8 +177,6 @@
   #sheet #sheet-note-input, #sheet #sheet-budget, #sheet #sheet-brand { flex:1; padding:12px;
     border:1.5px solid #d4dcd4; border-radius:10px; font-size:1rem; outline:none;
     min-width:0; }
-  .set-check { display:flex; align-items:center; gap:10px; margin:2px 0 6px; font-weight:600; }
-  .set-check input { width:22px; height:22px; accent-color:var(--green); }
   /* a NOTE must be fully visible while editing — a single-line input clips it */
   #sheet #sheet-note-input { font-family:inherit; resize:none; line-height:1.35; }
   #sheet #sheet-stores { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
@@ -307,13 +305,19 @@
     border:none; background:#d3e8d9; color:var(--green-dark); border-radius:999px;
     width:22px; height:22px; font-size:.8rem; line-height:1; cursor:pointer; padding:0;
   }
-  #plants, #lang, #hist, #stores-btn, #trips, #set-btn {
+  #plants, #lang, #hist, #stores-btn, #org-btn, #set-btn {
     background:#ffffff2b; border:none; color:#fff; font-size:.8rem; font-weight:700;
     padding:5px 8px; border-radius:999px; cursor:pointer; white-space:nowrap;
     flex-shrink:0;
   }
-  /* unreviewed trips are the only reason to open the panel — say how many */
-  #trips.pending { background:var(--amber); color:#fff; }
+  /* the household buys organic: lit, so it is never on without anyone seeing */
+  #org-btn.on { background:#fff; color:var(--green-dark); }
+  /* unreviewed trips are the only reason to open Travel, which lives in ⚙️ —
+     so ⚙️ turns amber, and the Travel button inside says how many */
+  #set-btn.pending { background:var(--amber); color:#fff; }
+  #set-panel #trips { background:var(--green); color:#fff; border:none; border-radius:10px;
+    padding:10px 16px; font-size:1rem; font-weight:700; cursor:pointer; }
+  #set-panel #trips.pending { background:var(--amber); }
   .cand .alt { color:var(--muted); font-size:.8rem; }
   #ideas {
     position:fixed; inset:0; background:var(--bg); z-index:35; display:none;
@@ -431,7 +435,7 @@
   <h1>ThinCart</h1>
   <button id="stores-btn" aria-label="Stores">🏬</button>
   <button id="hist" aria-label="History">🕘</button>
-  <button id="trips" aria-label="Travel">✈️</button>
+  <button id="org-btn" aria-label="Organic" aria-pressed="false">🍃</button>
   <button id="lang">🌐 EN</button>
   <button id="plants">🌱 –/30</button>
   <button id="set-btn" aria-label="Settings">⚙️</button>
@@ -485,9 +489,8 @@
     <button class="topbtn" id="set-close">✕</button>
   </header>
   <div class="body">
-    <h3 id="org-h"></h3>
-    <label class="set-check"><input type="checkbox" id="set-organic"><span id="set-organic-label"></span></label>
-    <p class="set-note" id="org-note"></p>
+    <h3 id="trip-h"></h3>
+    <button id="trips">✈️</button>
 
     <h3 id="ver-h"></h3>
     <p class="stores-note" id="buildline"></p>
@@ -764,8 +767,9 @@ const STR = {
     cand_on:'✓ on list', cand_edit:'tap to edit',
     note_label:'Note', sheet_budget:'Budget 💰', sheet_store:'Where to buy',
     sheet_brand:'Preferred brand', brand_any:'any brand is fine',
-    org_h:'Shopping preference', organic_label:'🌱 We buy organic',
-    org_note:'One setting for the household — both phones. 💲 Compare by price then looks for organic products, and uses the regular one only where no store has it organic.',
+    trip_h:'Travel', trip_btn:n=>n ? `✈️ Travel — ${n} to review` : '✈️ Travel',
+    org_btn:'Organic', org_on:'🍃 Organic ON for the household — prices look for organic products',
+    org_off:'🍃 Organic OFF — prices look for regular products',
     no_organic:'no organic found — regular price',
     org_waiting:'Waiting for the 🌱 setting to reach the server…',
     byprice:'💲 Compare by price', byprice_off:'🏬 Back to usual stores',
@@ -906,8 +910,9 @@ const STR = {
     cand_on:'✓ リストにあり', cand_edit:'タップで編集',
     note_label:'メモ', sheet_budget:'予算 💰', sheet_store:'購入する店',
     sheet_brand:'好みのブランド', brand_any:'こだわりなし',
-    org_h:'買い物の方針', organic_label:'🌱 オーガニックを買う',
-    org_note:'家族共通の設定です（両方のスマホ）。💲 価格で比較では、オーガニック商品を探し、どの店にもない場合だけ通常品を使います。',
+    trip_h:'旅行', trip_btn:n=>n ? `✈️ 旅行 — 確認待ち ${n}件` : '✈️ 旅行',
+    org_btn:'オーガニック', org_on:'🍃 オーガニック ON（家族共通）— 価格はオーガニック商品で比較',
+    org_off:'🍃 オーガニック OFF — 価格は通常品で比較',
     no_organic:'オーガニックなし — 通常品の価格',
     org_waiting:'🌱 の設定をサーバーに送信中…',
     byprice:'💲 価格で比較', byprice_off:'🏬 いつもの店に戻す',
@@ -1038,9 +1043,8 @@ function applyLang() {
   $('trip-note').textContent = T().trip_note;
   $('sheet-note-label').textContent = T().note_label;
   $('sheet-budget-label').textContent = T().sheet_budget;
-  $('org-h').textContent = T().org_h;
-  $('set-organic-label').textContent = T().organic_label;
-  $('org-note').textContent = T().org_note;
+  $('trip-h').textContent = T().trip_h;
+  $('org-btn').setAttribute('aria-label', T().org_btn);
   $('sheet-brand-label').textContent = T().sheet_brand;
   $('sheet-brand').placeholder = T().brand_any;
   $('sheet-store-label').textContent = T().sheet_store;
@@ -1128,7 +1132,10 @@ function renderTray() {
     chip.querySelector('.lbl').textContent =
       cycWeeks(s) + (s.tier === 'potential' ? ' ?' : '');
     chip.classList.toggle('maybe', s.tier === 'potential');
-    chip.onclick = () => enqueue({ type:'add', name:s.name, qty_note:'', item_id:uuid() });
+    chip.onclick = e => {
+      gtrace('chip:' + e.type + '@' + (e.target.className || e.target.tagName));
+      enqueue({ type:'add', name:s.name, qty_note:'', item_id:uuid() });
+    };
     chip.querySelector('.snz').onclick = e => {
       e.stopPropagation();
       enqueue({ type:'snooze', catalog_id:s.catalog_id });
@@ -1139,7 +1146,7 @@ function renderTray() {
     const more = document.createElement('span');
     more.className = 'chip more';
     more.textContent = T().tray_more(all.length - TRAY_MAX);
-    more.onclick = openCycles;
+    more.onclick = () => { gtrace('more-chip'); openCycles(); };
     chips.appendChild(more);
   }
 }
@@ -1174,10 +1181,14 @@ const evidence = c =>
   T().tier_evidence(c.events, c.spread === null ? '—' : c.spread)
   + (c.trusted ? '' : ' · ' + T().tier_shaky);
 
-$('tray-label').onclick = openCycles;
+$('tray-label').onclick = e => { gtrace('tray-label:' + e.type); openCycles(); };
 $('cyc-close').onclick = () => $('cyc').style.display = 'none';
 
+/* Opened by the tray label and the "+N more" chip only. The owner saw it open
+ * when tapping a suggestion; it did not reproduce on an emulated Pixel, so
+ * every opening is traced (⚙️ → trace) rather than fixed on a theory. */
 async function openCycles() {
+  gtrace('openCycles');
   $('cyc').style.display = 'flex';
   $('cyc-due').innerHTML = $('cyc-all').innerHTML = '<div class="cyc-note">…</div>';
   try {
@@ -1275,7 +1286,7 @@ async function openHistory() {
    Detection only ever proposes. Every day here is one tap from being corrected,
    and the server never overwrites a day that has been ruled on — which is what
    makes it safe for the heuristics to guess in the first place. */
-$('trips').onclick = openTrips;
+$('trips').onclick = () => { $('set-panel').style.display = 'none'; openTrips(); };
 $('trip-close').onclick = () => $('trip-panel').style.display = 'none';
 
 $('trip-day-go').onclick = async () => {
@@ -2013,10 +2024,19 @@ window.openSheet = openSheet;
 // the parity test runs the shared split_organic cases through this function
 window.splitOrganic = splitOrganic;
 
-$('set-organic').onchange = () => enqueue({ type:'settings', organic: $('set-organic').checked });
+/* 🍃 is one switch for the household (PLAN.md Phase 7A, revised): both phones
+ * see the same setting. The toast says what it now means, with an undo. */
+$('org-btn').onclick = () => {
+  const next = !organicSetting();
+  enqueue({ type:'settings', organic: next });
+  showToast(next ? T().org_on : T().org_off, () => enqueue({ type:'settings', organic: !next }));
+};
 
 function render() {
-  $('set-organic').checked = organicSetting();
+  const org = organicSetting();
+  $('org-btn').classList.toggle('on', org);
+  $('org-btn').setAttribute('aria-pressed', String(org));
+  $('org-btn').textContent = org ? '🍃 ON' : '🍃';
   renderTray();
   refreshStores();
   if (base.plants)
@@ -2024,8 +2044,9 @@ function render() {
   // detected days nobody has ruled on yet — they are already bending the
   // cycles, so the button says how many rather than waiting to be found
   const pend = base.away_pending || 0;
-  $('trips').textContent = pend ? `✈️ ${pend}` : '✈️';
+  $('trips').textContent = T().trip_btn(pend);
   $('trips').classList.toggle('pending', pend > 0);
+  $('set-btn').classList.toggle('pending', pend > 0);
   const byAisle = viewMode() === 'aisle' && storeCanAisle() && !!aisleMap;
   let items = view();
   const list = $('list');

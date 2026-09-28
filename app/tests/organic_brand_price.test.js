@@ -35,11 +35,12 @@ function item(id, name, extra = {}) {
 const STORES = [{ id: 7, name: "Wegmans", chain: "wegmans", chain_store_id: "93" },
                 { id: 8, name: "Whole Foods", chain: "wholefoods", chain_store_id: "10738" }];
 
-function boot({ items, queue = [], where = null, stores = STORES, fetchImpl = null, settings = { organic: false } }) {
+function boot({ items, queue = [], where = null, stores = STORES, fetchImpl = null, settings = { organic: false },
+               extra = {} }) {
   const dom = new JSDOM(HTML, { runScripts: "outside-only", url: "https://s.ts.net/" });
   const w = dom.window;
   w.localStorage.setItem("pc_name", "tester");
-  const state = { revision: 1, items, stores, settings, picks: {}, suggestions: [], away_pending: 0 };
+  const state = { revision: 1, items, stores, settings, picks: {}, suggestions: [], away_pending: 0, ...extra };
   w.localStorage.setItem("pc_base", JSON.stringify(state));
   w.localStorage.setItem("pc_queue", JSON.stringify(queue));
   const calls = [];
@@ -74,21 +75,53 @@ function openEditor(b, i) {
 }
 
 (async () => {
-  console.log("\n--- 1. 🌱 is one household switch, in ⚙️ Settings ------------------");
+  console.log("\n--- 1. 🍃 is one household switch, a button in the header ---------");
   {
     const b = boot({ items: [item(1, "milk")] });
     await settle();
     check("no per-item organic toggle in the editor", b.doc.getElementById("sheet-organic") === null);
-    const sw = b.doc.getElementById("set-organic");
-    check("the switch starts off", sw && sw.checked === false);
-    sw.checked = true;
-    sw.dispatchEvent(new b.w.Event("change"));
+    const btn = b.doc.getElementById("org-btn");
+    check("the button is in the header and starts off",
+      btn && btn.closest("header") && !btn.classList.contains("on") && btn.getAttribute("aria-pressed") === "false");
+    btn.click();
     await settle();
     const op = b.ops().find(o => o.type === "settings");
-    check("turning it on sends a settings op", op && op.organic === true, b.ops());
+    check("tapping it sends a settings op", op && op.organic === true, b.ops());
+    check("and lights up at once", btn.classList.contains("on") && /ON/.test(btn.textContent), btn.textContent);
+    check("with a toast that says what it means", /Organic ON/.test(b.doc.getElementById("toastmsg").textContent));
     const c = boot({ items: [item(1, "milk")], settings: { organic: true } });
     await settle();
-    check("the switch shows the server's setting", c.doc.getElementById("set-organic").checked === true);
+    check("the button shows the server's setting", c.doc.getElementById("org-btn").classList.contains("on"));
+  }
+
+  console.log("\n--- 1a. ✈️ Travel lives in ⚙️ now; ⚙️ says when trips wait ---------");
+  {
+    const b = boot({ items: [item(1, "milk")] });
+    await settle();
+    const trips = b.doc.getElementById("trips");
+    check("the Travel button is inside Settings, not the header",
+      trips && b.doc.getElementById("set-panel").contains(trips) && !trips.closest("header"));
+    const c = boot({ items: [item(1, "milk")], extra: { away_pending: 3 } });
+    await settle();
+    check("⚙️ turns amber when trips wait", c.doc.getElementById("set-btn").classList.contains("pending"));
+    check("and the Travel button says how many", /3 to review/.test(c.doc.getElementById("trips").textContent),
+      c.doc.getElementById("trips").textContent);
+  }
+
+  console.log("\n--- 1c. a suggestion tap adds, and is traced — never opens cycles -");
+  {
+    const b = boot({ items: [item(1, "milk")], extra: { suggestions: [
+      { catalog_id: 9, name: "tea", name_en: "tea", tier: "high", weeks: 1 }] } });
+    await settle();
+    const chip = b.doc.querySelector("#chips .chip:not(.more)");
+    check("the suggestion is shown", !!chip);
+    chip.click();
+    await settle();
+    check("it was added", b.ops().some(o => o.type === "add" && o.name === "tea"), b.ops());
+    check("Purchase cycles did not open", b.doc.getElementById("cyc").style.display !== "flex");
+    b.doc.getElementById("set-btn").click();
+    const trace = b.doc.getElementById("diag-out").textContent;
+    check("the tap is in the ⚙️ trace", /chip:click/.test(trace), trace);
   }
 
   console.log("\n--- 1b. the phone splits 'organic X' exactly as the server does -----");
