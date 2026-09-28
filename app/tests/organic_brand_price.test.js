@@ -173,7 +173,8 @@ function openEditor(b, i) {
   {
     const where = { partial: false, items: {
       "1": { cheapest: { store: "Whole Foods", amount: 3.49, unit_price: "$0.05/fl oz", product: "365 Organic Milk",
-                         exact: false, fetched_at: new Date().toISOString() }, quotes: [{}], comparable: true },
+                         exact: false, fetched_at: new Date().toISOString() }, quotes: [{}], comparable: true,
+             stores: { "7": "conflict", "8": "ok" } },
       "2": { cheapest: null, comparable: false, reason: null, quotes: [
                { store: "Wegmans", amount: 3.99, unit_price: "$0.25/oz", product: "Wegmans Milk",
                  pack_size: "16 oz", exact: false },
@@ -194,6 +195,8 @@ function openEditor(b, i) {
     const groups = [...b.doc.querySelectorAll("#plan-groups .plangroup")].map(g => g.textContent);
     const wf = groups.find(g => /Whole Foods/.test(g)) || "";
     check("milk moved to its cheapest store", /milk/.test(wf) && /\$3\.49/.test(wf) && /best match/.test(wf), groups);
+    check("and the store left out says why (Codex review 2026-09-28)",
+      /⚠ Wegmans: your chosen product no longer matches/.test(wf), wf);
     const all = groups.join("|");
     check("different units are not called cheapest", /not ranked/.test(all), all);
     check("the prices found are still shown, unranked, with product and size",
