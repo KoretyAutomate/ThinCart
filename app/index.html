@@ -1549,6 +1549,10 @@ let whereResult = null;   // { key, items, partial } or { key, msg }
 let whereAsking = null;   // the key of the ask in flight
 let whereGen = 0;         // numbers each ask; a superseded answer is dropped
 const WHERE_PAGE = 30;    // the server's per-request cap
+// An answer is re-asked after this long even if nothing on the list changed:
+// prices move, and a phone can sit on this panel for days. Cheap — the server
+// answers from its own cache while a price is fresh (lookup TTL["price"]).
+const WHERE_MAX_AGE_MS = 60 * 60 * 1000;
 
 /* Items whose price question the SERVER would answer with stale preferences:
  * a queued brand / rename / product-pick edit has not reached it yet, so
@@ -1580,9 +1584,11 @@ function whereInput() {
   return { key, ids: ask.map(i => i.catalog_id) };
 }
 
-/* The last answer, if it answers the question as it stands now. */
+/* The last answer, if it answers the question as it stands now — the same
+ * input, and not so old that the prices may have moved. */
+function whereFresh(r) { return !!r && Date.now() - r.at < WHERE_MAX_AGE_MS; }
 function whereCurrent() {
-  return whereResult && whereResult.key === whereInput().key ? whereResult : null;
+  return whereResult && whereResult.key === whereInput().key && whereFresh(whereResult) ? whereResult : null;
 }
 
 /* Ask if the input moved and nobody is already asking about it. */
@@ -1591,7 +1597,8 @@ function whereTick() {
   // the server prices with ITS organic setting: wait until it has ours
   if (organicPending()) return;
   const { key } = whereInput();
-  if ((!whereResult || whereResult.key !== key) && whereAsking !== key) loadWhere();
+  const stale = !whereResult || whereResult.key !== key || !whereFresh(whereResult);
+  if (stale && whereAsking !== key) loadWhere();
 }
 
 async function loadWhere() {
@@ -1600,7 +1607,7 @@ async function loadWhere() {
   whereAsking = key;
   const done = result => {
     if (gen !== whereGen) return;               // superseded: never shown
-    whereResult = result; whereAsking = null;
+    whereResult = { ...result, at: Date.now() }; whereAsking = null;
     renderPlan();                               // the plan only: never under a half-typed note
     whereTick();                                // asks again if the input moved meanwhile
   };
@@ -1651,10 +1658,11 @@ $('plan-byprice').onclick = () => {
   whereTick();
 };
 
-/* Back online / back in the app: a failure may have been the network. One
- * fresh ask, not a retry loop — a second failure stays until the next wake. */
+/* Back online / back in the app: a failure may have been the network, and an
+ * answer may have aged past WHERE_MAX_AGE_MS while the phone slept. One fresh
+ * ask, not a retry loop — a second failure stays until the next wake. */
 function whereRetryAfterWake() {
-  if (whereResult && whereResult.failed) { whereResult = null; whereTick(); }
+  if (whereResult && (whereResult.failed || !whereFresh(whereResult))) { whereResult = null; whereTick(); }
 }
 $('stores-close').onclick = () => $('stores-panel').style.display = 'none';
 
