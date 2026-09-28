@@ -1633,8 +1633,11 @@ function whereLine(it, w, unsettled) {
   }
   // No honest winner — but the prices found are still worth seeing, side by side.
   if (w.quotes && w.quotes.length)
+    // Unranked means YOU compare — so each quote carries what that takes:
+    // which product, how big, and whether it is only a best match.
     return (w.organic_fallback ? T().no_organic + ' · ' : '') + T().why_uncomparable + ': ' + w.quotes.map(q =>
-      `${q.store} $${q.amount.toFixed(2)}` + (q.unit_price || q.pack_size ? ` (${q.unit_price || q.pack_size})` : '')
+      [`${q.store} $${q.amount.toFixed(2)}`, q.product, q.pack_size, q.unit_price,
+       q.exact ? '' : '(' + T().best_match + ')'].filter(Boolean).join(' ')
     ).join(' · ');
   return ({ unasked:T().why_unasked, conflict:T().why_conflict, pick_missing:T().why_pick_missing })[w.reason]
     || T().why_no_match;

@@ -175,8 +175,10 @@ function openEditor(b, i) {
       "1": { cheapest: { store: "Whole Foods", amount: 3.49, unit_price: "$0.05/fl oz", product: "365 Organic Milk",
                          exact: false, fetched_at: new Date().toISOString() }, quotes: [{}], comparable: true },
       "2": { cheapest: null, comparable: false, reason: null, quotes: [
-               { store: "Wegmans", amount: 3.99, unit_price: "$0.25/oz" },
-               { store: "Whole Foods", amount: 6.29, unit_price: "$6.29/count" }] },
+               { store: "Wegmans", amount: 3.99, unit_price: "$0.25/oz", product: "Wegmans Milk",
+                 pack_size: "16 oz", exact: false },
+               { store: "Whole Foods", amount: 6.29, unit_price: "$6.29/count", product: "365 Milk",
+                 pack_size: "64 fl oz", exact: true }] },
       "3": { cheapest: null, quotes: [], comparable: false, reason: "unasked" },
     } };
     const b = boot({ items: [item(1, "milk", { store: "Wegmans", store_source: "history" }), item(2, "bread"),
@@ -194,8 +196,9 @@ function openEditor(b, i) {
     check("milk moved to its cheapest store", /milk/.test(wf) && /\$3\.49/.test(wf) && /best match/.test(wf), groups);
     const all = groups.join("|");
     check("different units are not called cheapest", /not ranked/.test(all), all);
-    check("the prices found are still shown, unranked",
-      /Wegmans \$3\.99 \(\$0\.25\/oz\)/.test(all) && /Whole Foods \$6\.29/.test(all), all);
+    check("the prices found are still shown, unranked, with product and size",
+      /Wegmans \$3\.99 Wegmans Milk 16 oz \$0\.25\/oz \(best match\)/.test(all)
+      && /Whole Foods \$6\.29 365 Milk 64 fl oz/.test(all), all);
     check("an unreachable store is named as the reason", /unreachable/.test(all), all);
     check("a queued item says it is not synced", /not synced/.test(all), all);
     check("nothing was saved", !b.ops().some(o => o.type === "edit"), b.ops());

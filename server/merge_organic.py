@@ -99,8 +99,12 @@ def merge_into(conn: sqlite3.Connection, src: int, dst: int) -> None:
         "note = CASE WHEN note='' THEN ? ELSE note END, "
         "budget = COALESCE(budget, ?), "
         "preferred_store_id = COALESCE(preferred_store_id, ?), "
-        "brand = CASE WHEN brand='' THEN ? ELSE brand END WHERE id=?",
-        (s["note"], s["budget"], s["preferred_store_id"], s["brand"], dst),
+        "brand = CASE WHEN brand='' THEN ? ELSE brand END, "
+        # a snooze set on either row still holds: keep the later one
+        "snoozed_until = CASE WHEN snoozed_until IS NULL OR ? > snoozed_until THEN ? "
+        "ELSE snoozed_until END WHERE id=?",
+        (s["note"], s["budget"], s["preferred_store_id"], s["brand"],
+         s["snoozed_until"] or "", s["snoozed_until"], dst),
     )
     conn.execute("DELETE FROM item_catalog WHERE id=?", (src,))
 

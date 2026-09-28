@@ -204,3 +204,16 @@ def test_a_brand_named_organic_is_not_folded(tmp_path):
     assert "nothing to fold" in _run(tmp_path / "v.db", "--apply")
     assert db.connect(tmp_path / "v.db").execute("SELECT display_name FROM item_catalog").fetchone()[0] \
         == "Organic Valley Milk"
+
+
+def test_a_snooze_on_the_folded_row_survives(tmp_path):
+    """Codex review 2026-09-28: the source row's snooze was read and dropped, so
+    a suppressed item came straight back to suggestions after the fold."""
+    conn = _seed(tmp_path / "z.db")
+    conn.execute("UPDATE item_catalog SET snoozed_until=? WHERE display_name='organic walnuts'",
+                 ("2099-01-01T00:00:00+00:00",))
+    conn.commit()
+    _run(tmp_path / "z.db", "--apply")
+    got = db.connect(tmp_path / "z.db").execute(
+        "SELECT snoozed_until FROM item_catalog WHERE display_name='walnuts'").fetchone()[0]
+    assert got == "2099-01-01T00:00:00+00:00"
