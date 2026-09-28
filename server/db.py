@@ -473,7 +473,15 @@ def suggestions(conn: sqlite3.Connection, now) -> list[dict]:
 # The boundary after "organic" is spelled out — not \b — because Python's \b is
 # Unicode-aware and JavaScript's is ASCII-only: "organic卵" must be ONE word on
 # both sides (the phone mirrors this in splitOrganic, app/index.html).
-_ORGANIC_PREFIX = re.compile(r"^\s*(?:organic(?!\w)|オーガニック|有機)[\s・]*", re.IGNORECASE)
+# Brands whose NAME begins with "Organic" are not a qualifier: "Organic Valley
+# Milk" is that brand's milk, and stripping would store "Valley Milk" (Codex
+# review 2026-09-28). Mirrored in app/index.html ORGANIC_RE; the shared cases in
+# tests/fixtures/split_organic_cases.json keep the two sides in step.
+_ORGANIC_BRANDS = r"valley|girl|india|prairie|traditions"
+_ORGANIC_PREFIX = re.compile(
+    rf"^\s*(?:organic(?!\w)(?!\s+(?:{_ORGANIC_BRANDS})(?!\w))|オーガニック|有機)[\s・]*",
+    re.IGNORECASE,
+)
 
 
 def split_organic(name: str) -> tuple[str, bool]:

@@ -669,8 +669,9 @@ const canon = s => s.normalize('NFKC').toLowerCase().trim().replace(/\s+/g,' ');
  * Onion — one item, one history. A LEADING qualifier only; one that is the
  * whole name is not split. Used so a queued add does not flash a second Onion. */
 // explicit boundary, not \b (ASCII-only in JS, Unicode in Python): "organic卵"
-// is one word on both sides — parity with server db.split_organic
-const ORGANIC_RE = /^\s*(?:organic(?![\p{L}\p{N}_])|オーガニック|有機)[\s・]*/iu;
+// is one word on both sides; brands named "Organic …" (Organic Valley) are not a
+// qualifier — parity with server db.split_organic, same brand list
+const ORGANIC_RE = /^\s*(?:organic(?![\p{L}\p{N}_])(?!\s+(?:valley|girl|india|prairie|traditions)(?![\p{L}\p{N}_]))|オーガニック|有機)[\s・]*/iu;
 /* The household's organic preference (PLAN.md Phase 7A, revised 2026-09-27):
  * one shared setting. A queued change wins until the server has it. */
 function organicSetting() {

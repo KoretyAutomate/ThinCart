@@ -192,3 +192,15 @@ def test_the_backup_is_the_database_before_any_migration(tmp_path):
     cols = [r[1] for r in raw.execute("PRAGMA table_info(item_catalog)")]
     assert "organic" in cols
     assert raw.execute("SELECT organic FROM item_catalog WHERE display_name='walnuts'").fetchone()[0] == 1
+
+
+def test_a_brand_named_organic_is_not_folded(tmp_path):
+    """Codex review 2026-09-28: "Organic Valley Milk" is Organic Valley's milk,
+    not organic "Valley Milk" — it must survive the fold untouched."""
+    conn = db.connect(tmp_path / "v.db")
+    conn.execute("INSERT INTO item_catalog(canonical_name, display_name) VALUES(?,?)",
+                 (db.canonical("Organic Valley Milk"), "Organic Valley Milk"))
+    conn.commit()
+    assert "nothing to fold" in _run(tmp_path / "v.db", "--apply")
+    assert db.connect(tmp_path / "v.db").execute("SELECT display_name FROM item_catalog").fetchone()[0] \
+        == "Organic Valley Milk"
