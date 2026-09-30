@@ -332,7 +332,7 @@ async def _algolia_multi(bodies: list[dict]) -> list[list[dict]] | None:
 
 
 async def wegmans_products_many(
-    terms: list[str], store_number: str
+    terms: list[str], store_number: str, max_age: timedelta | None = None
 ) -> tuple[dict[str, list[dict]], bool]:
     """({term: records}, complete). Cache first; only the misses go over the wire.
 
@@ -346,7 +346,7 @@ async def wegmans_products_many(
     misses = []
     for term in terms:
         key = f"{store_number}|{term.strip().lower()}|5"
-        hit = cache_get("product", key)
+        hit = cache_get("product", key, max_age)
         if hit is not None:
             found[term] = hit
         else:
@@ -501,94 +501,3 @@ async def _sr_location(rsid: str, sku: str) -> dict | None:
 
 
 _LOCATE = {"wholefoods": _wf_location, "shoprite": _sr_location}
-
-
-async def _place(chain: str, store: str, recs: list[dict], prefer: list[str]) -> bool:
-    """Fill the shelf position on the top hit and on every product the household
-    picked that is among the hits — `prefer` is a list because two items can
-    share a search term and mean different jars. Both chains keep the position
-    on the product record, so placing every hit would cost a request each;
-    these few cost a few, cached for the aisle TTL. "Asked, has no place" is
-    cached as an empty dict; a failed read is not cached, so it is asked again
-    — an answer about the shop versus a failure to ask. True when a record
-    changed."""
-    targets = [r for r in recs[:1] if r["sku"]]
-    targets += [r for r in recs if r["sku"] in prefer and r not in targets]
-    changed = False
-    for rec in targets:
-        if rec.get("aisle"):
-            continue
-        key = f"{chain}:{store}|{rec['sku']}"
-        loc = cache_get("aisle", key)
-        if loc is None:
-            loc = await _LOCATE[chain](store, rec["sku"])
-            if loc is None:
-                continue
-            cache_put("aisle", key, loc)
-        new = (loc.get("aisle", ""), loc.get("shelf", ""))
-        if new != (rec.get("aisle", ""), rec.get("shelf", "")):
-            rec["aisle"], rec["shelf"] = new
-            changed = True
-    return changed
-
-
-async def _chain_products(chain: str, term: str, store: str, limit: int,
-                          max_age: timedelta | None, prefer: list[str]) -> list[dict] | None:
-    """Search-then-place. The search is cached once, when fetched, and never
-    written back: positions live in their own cache and are laid on at every
-    read, which costs nothing — writing placed records back would re-stamp the
-    row, and a fortnight-old price would pass the two-day check as fresh."""
-    key = f"{chain}:{store}|{term.strip().lower()}|{limit}"
-    recs = cache_get("product", key, max_age)
-    if recs is None:
-        fetched = await (_wf_search(term, store) if chain == "wholefoods" else _sr_search(term, store, limit))
-        if fetched is None:
-            return None
-        recs = fetched[:limit]
-        cache_put("product", key, recs)
-    await _place(chain, store, recs, prefer)
-    return recs
-
-
-# --- dispatch: the one place that knows which chain answers how ----------------
-
-
-async def products(chain: str, term: str, store: str, limit: int = 8, max_age: timedelta | None = None,
-                   prefer_sku: str | list[str] | None = None) -> list[dict] | None:
-    """Products matching `term` at ONE store, in our shape. None = the lookup
-    failed; [] = it genuinely found nothing. `prefer_sku` names the product(s)
-    the household picked, so their shelf positions are fetched even when they
-    are not the top hit."""
-    if chain == "wegmans":
-        return await wegmans_products(term, store, limit, max_age)
-    if chain in _LOCATE:
-        prefer = [prefer_sku] if isinstance(prefer_sku, str) else list(prefer_sku or [])
-        return await _chain_products(chain, term, store, limit, max_age, [s for s in prefer if s])
-    return None
-
-
-async def products_many(chain: str, terms: list[str], store: str,
-                        prefer: dict[str, list[str]] | None = None) -> tuple[dict[str, list[dict]], bool]:
-    """({term: records}, complete) — see wegmans_products_many for why
-    `complete` exists. The two page-backed chains have no multi-query, so this
-    asks term by term, a few at a time, and reports any it could not ask.
-    `prefer` maps a term to EVERY sku picked under it: two items can share a
-    search term and mean different jars, and each must find its shelf."""
-    if chain == "wegmans":
-        return await wegmans_products_many(terms, store)
-    if chain not in _LOCATE:
-        return {}, False
-    sem = asyncio.Semaphore(3)
-
-    async def one(t: str) -> tuple[str, list[dict] | None]:
-        async with sem:
-            return t, await products(chain, t, store, limit=5, prefer_sku=(prefer or {}).get(t))
-
-    found: dict[str, list[dict]] = {}
-    complete = True
-    for t, recs in await asyncio.gather(*(one(t) for t in dict.fromkeys(terms))):
-        if recs is None:
-            complete = False
-        else:
-            found[t] = recs
-    return found, complete

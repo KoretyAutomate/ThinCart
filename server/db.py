@@ -167,9 +167,16 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
         # event_id keeps only the first claimant's details for display; pruning
         # needs them all, or a hidden calendar's claim dies with a visible one's.
         "ALTER TABLE away_days ADD COLUMN claims TEXT NOT NULL DEFAULT '[]'",
+        # Phase 7: a standing brand preference; '' means any brand will do.
+        "ALTER TABLE item_catalog ADD COLUMN brand TEXT NOT NULL DEFAULT ''",
     ):
         with contextlib.suppress(sqlite3.OperationalError):
             conn.execute(ddl)
+    # Organic was briefly a per-item column (2026-09-26, never merged); it is a
+    # household setting now (meta 'organic'). Drop the column where it exists.
+    with contextlib.suppress(sqlite3.OperationalError):
+        conn.execute("ALTER TABLE item_catalog DROP COLUMN organic")
+    conn.execute("INSERT OR IGNORE INTO meta(key, value) VALUES('organic', '0')")
     conn.execute("INSERT OR IGNORE INTO meta(key, value) VALUES('revision', '0')")
     conn.commit()
     return conn
@@ -460,6 +467,47 @@ def suggestions(conn: sqlite3.Connection, now) -> list[dict]:
     return out
 
 
+# "organic onion" is the Onion — one item, one history — whatever the household
+# setting. A LEADING qualifier only: mid-name "organic" belongs to a product's
+# own name ("simple mills organic seed flour crackers") and is left alone.
+# The boundary after "organic" is spelled out — not \b — because Python's \b is
+# Unicode-aware and JavaScript's is ASCII-only: "organic卵" must be ONE word on
+# both sides (the phone mirrors this in splitOrganic, app/index.html).
+# Brands whose NAME begins with "Organic" are not a qualifier: "Organic Valley
+# Milk" is that brand's milk, and stripping would store "Valley Milk" (Codex
+# review 2026-09-28). Mirrored in app/index.html ORGANIC_RE; the shared cases in
+# tests/fixtures/split_organic_cases.json keep the two sides in step.
+_ORGANIC_BRANDS = r"valley|girl|india|prairie|traditions"
+_ORGANIC_PREFIX = re.compile(
+    rf"^\s*(?:organic(?!\w)(?!\s+(?:{_ORGANIC_BRANDS})(?!\w))|オーガニック|有機)[\s・]*",
+    re.IGNORECASE,
+)
+
+
+def split_organic(name: str) -> tuple[str, bool]:
+    """("organic onion" → ("onion", True)); a name that is only the qualifier
+    is not split — "Organic" alone stays an item called Organic."""
+    folded = unicodedata.normalize("NFKC", name or "")
+    m = _ORGANIC_PREFIX.match(folded)
+    if not m:
+        return name, False
+    base = folded[m.end():].strip()
+    return (base, True) if base else (name, False)
+
+
+def _picks_by_chain(conn: sqlite3.Connection) -> dict[str, dict[str, str]]:
+    out: dict[str, dict[str, str]] = {}
+    for r in conn.execute("SELECT catalog_id, chain, sku FROM product_picks ORDER BY catalog_id, chain"):
+        out.setdefault(str(r["catalog_id"]), {})[r["chain"]] = r["sku"]
+    return out
+
+
+def organic_setting(conn: sqlite3.Connection) -> bool:
+    """The household buys organic where it can (PLAN.md Phase 7A, revised)."""
+    row = conn.execute("SELECT value FROM meta WHERE key='organic'").fetchone()
+    return bool(row and row[0] == "1")
+
+
 def state(conn: sqlite3.Connection, now=None) -> dict:
     """Full list state — small enough (tens of items) to always send whole."""
     from datetime import datetime
@@ -471,7 +519,7 @@ def state(conn: sqlite3.Connection, now=None) -> dict:
     items = []
     for r in conn.execute(
         """SELECT i.id, i.catalog_id, c.display_name AS name, c.aliases_json,
-                  c.category, c.emoji, c.note, c.budget,
+                  c.category, c.emoji, c.note, c.budget, c.brand,
                   i.qty_note, i.added_by, i.added_at
            FROM items i JOIN item_catalog c ON c.id = i.catalog_id
            ORDER BY COALESCE(c.category, 'zzz'), i.added_at"""
@@ -489,6 +537,8 @@ def state(conn: sqlite3.Connection, now=None) -> dict:
     return {
         "revision": get_revision(conn),
         "items": items,
+        # household-wide preferences, shared by both phones
+        "settings": {"organic": organic_setting(conn)},
         "stores": stores,
         # catalog_id -> sku of the product the household settled on. Small, and
         # it has to be SYNCED: the other phone choosing a specific jar changes
@@ -498,6 +548,9 @@ def state(conn: sqlite3.Connection, now=None) -> dict:
             str(r["catalog_id"]): r["sku"]
             for r in conn.execute("SELECT catalog_id, sku FROM product_picks")
         },
+        # every chain's pick, not one per item: "by price" asks each chain about
+        # ITS pick, so a change at any chain is a new question for the phone
+        "picks_by_chain": _picks_by_chain(conn),
         "suggestions": suggestions(conn, now),
         # badge on the Travel button: detected days nobody has ruled on yet
         "away_pending": conn.execute("SELECT COUNT(*) FROM away_days WHERE status='auto'").fetchone()[0],

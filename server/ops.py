@@ -31,6 +31,7 @@ class Op(BaseModel):
         "store_upsert",
         "store_delete",
         "product_pick",
+        "settings",
     ]
     actor: str = Field("", max_length=40)
     # add / edit
@@ -44,6 +45,11 @@ class Op(BaseModel):
     budget: str | None = Field(None, max_length=20)
     # edit / checkoff: store display name ("" clears the preference on edit)
     store: str | None = Field(None, max_length=60)
+    # edit (Phase 7): a standing brand preference. None = leave unchanged —
+    # phones with ops queued before this field existed do not send it. "" = any.
+    brand: str | None = Field(None, max_length=60)
+    # settings: the household-wide organic preference
+    organic: bool | None = None
     # store_upsert
     store_name: str | None = Field(None, max_length=60)
     store_notes: str | None = Field(None, max_length=300)

@@ -18,7 +18,6 @@ Run (tailnet-bound — bind the Tailscale IP, NOT 0.0.0.0):
 import asyncio
 import json
 import logging
-import unicodedata
 import uuid
 from datetime import datetime, timedelta, UTC
 from pathlib import Path
@@ -28,6 +27,7 @@ from fastapi.staticfiles import StaticFiles
 
 import away
 import catalog
+import criteria
 import cycles
 import db
 import ideas
@@ -61,19 +61,6 @@ ideas.bind(conn)
 lookup.bind(conn)
 
 
-def parse_budget(raw: str) -> float | None:
-    """Lenient price parse — JP keyboards produce full-width digits and ¥/円.
-    None = unparseable (field is IGNORED, the rest of the edit still applies);
-    a 422 here would silently drop the whole op client-side."""
-    t = unicodedata.normalize("NFKC", raw)
-    t = t.replace("¥", "").replace("円", "").replace(",", "").strip()
-    try:
-        v = float(t)
-        return v if v >= 0 else None
-    except ValueError:
-        return None
-
-
 async def broadcast_state() -> None:
     payload = json.dumps(db.state(conn), ensure_ascii=False)
     dead = []
@@ -89,7 +76,10 @@ async def broadcast_state() -> None:
 def apply_add(op: Op, ts: str) -> dict:
     if not op.name or not op.name.strip():
         raise HTTPException(422, "add requires a non-empty name")
-    catalog_id = db.get_or_create_catalog(conn, op.name)
+    # "organic onion" is the Onion (PLAN.md Phase 7A): one item, one history.
+    # Whether the household buys organic is a setting, not part of the name.
+    base, _ = db.split_organic(op.name)
+    catalog_id = db.get_or_create_catalog(conn, base)
     existing = conn.execute("SELECT id FROM items WHERE catalog_id=?", (catalog_id,)).fetchone()
     if existing:  # duplicate-add convergence: already on the list → no-op
         return {"item_id": existing["id"], "deduped": True}
@@ -216,7 +206,8 @@ def apply_edit(op: Op, ts: str) -> dict:
     item_id = op.item_id
     result: dict = {}
     if op.name is not None and op.name.strip() and row is not None:
-        new_cid = db.get_or_create_catalog(conn, op.name)
+        base, _ = db.split_organic(op.name)
+        new_cid = db.get_or_create_catalog(conn, base)
         if new_cid != catalog_id:
             dup = conn.execute(
                 "SELECT id FROM items WHERE catalog_id=? AND id != ?",
@@ -238,7 +229,7 @@ def apply_edit(op: Op, ts: str) -> dict:
                 "SELECT canonical_name, display_name FROM item_catalog WHERE id=?",
                 (catalog_id,),
             ).fetchone()
-            if cur["canonical_name"] == db.canonical(op.name):
+            if cur["canonical_name"] == db.canonical(base):
                 # (1) Canonical variant: only case / full-width / whitespace
                 # differ, so this is the SAME concept respelled — the user
                 # fixing how it reads. display_name is the only place that
@@ -247,10 +238,10 @@ def apply_edit(op: Op, ts: str) -> dict:
                 # fetch. Applied even when other items share this catalog row:
                 # canonical_name is unchanged, so every sharer is by definition
                 # the same concept and wants the corrected spelling too.
-                if cur["display_name"] != op.name.strip():
-                    conn.execute("UPDATE item_catalog SET display_name=? WHERE id=?", (op.name.strip(), catalog_id))
+                if cur["display_name"] != base.strip():
+                    conn.execute("UPDATE item_catalog SET display_name=? WHERE id=?", (base.strip(), catalog_id))
                     changed = True
-                result["name"] = op.name.strip()
+                result["name"] = base.strip()
             else:
                 # (2) Alias match ("milk" → the 牛乳 row). Renaming the shared
                 # row here would rename the concept for every item and every
@@ -264,27 +255,7 @@ def apply_edit(op: Op, ts: str) -> dict:
     if op.qty_note is not None and row is not None:  # per-item: needs the live row
         conn.execute("UPDATE items SET qty_note=? WHERE id=?", (op.qty_note, item_id))
         changed = True
-    if op.category is not None:
-        if op.category not in catalog.CATEGORIES:
-            raise HTTPException(422, "invalid category")
-        conn.execute("UPDATE item_catalog SET category=? WHERE id=?", (op.category, catalog_id))
-        changed = True
-    if op.note is not None:
-        conn.execute("UPDATE item_catalog SET note=? WHERE id=?", (op.note.strip(), catalog_id))
-        changed = True
-    if op.budget is not None:
-        if not op.budget.strip():  # "" clears
-            conn.execute("UPDATE item_catalog SET budget=NULL WHERE id=?", (catalog_id,))
-            changed = True
-        else:
-            val = parse_budget(op.budget)
-            if val is not None:
-                conn.execute("UPDATE item_catalog SET budget=? WHERE id=?", (val, catalog_id))
-                changed = True
-    if op.store is not None:
-        sid = db.get_or_create_store(conn, op.store)  # None when "" → clears
-        conn.execute("UPDATE item_catalog SET preferred_store_id=? WHERE id=?", (sid, catalog_id))
-        changed = True
+    changed = criteria.apply(conn, op, catalog_id) or changed
     if changed:
         db.bump_revision(conn)
     return {"edited": op.item_id or catalog_id, "changed": changed, **result}
@@ -363,6 +334,17 @@ def apply_store_delete(op: Op, ts: str) -> dict:
     return {"deleted_store": op.store_id}
 
 
+def apply_settings(op: Op, ts: str) -> dict:
+    """Household-wide preferences — both phones see the same setting."""
+    if op.organic is None:
+        raise HTTPException(422, "settings requires organic")
+    value = "1" if op.organic else "0"
+    cur = conn.execute("UPDATE meta SET value=? WHERE key='organic' AND value != ?", (value, value))
+    if cur.rowcount:
+        db.bump_revision(conn)
+    return {"organic": op.organic, "changed": bool(cur.rowcount)}
+
+
 def apply_product_pick(op: Op, ts: str) -> dict:
     """Remember WHICH product an item means, so price and aisle are questions
     about a real thing. One pick per (item, chain): the same milk is a different
@@ -392,6 +374,7 @@ APPLY = {
     "store_upsert": apply_store_upsert,
     "store_delete": apply_store_delete,
     "product_pick": apply_product_pick,
+    "settings": apply_settings,
 }
 
 

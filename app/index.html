@@ -174,7 +174,7 @@
     display:flex; flex-direction:column; align-items:center; gap:3px; }
   #sheet .catopt.sel { border-color:var(--green); background:#e9f5ec; color:var(--green-dark); }
   #sheet .catopt .em { font-size:1.15rem; }
-  #sheet #sheet-note-input, #sheet #sheet-budget { flex:1; padding:12px;
+  #sheet #sheet-note-input, #sheet #sheet-budget, #sheet #sheet-brand { flex:1; padding:12px;
     border:1.5px solid #d4dcd4; border-radius:10px; font-size:1rem; outline:none;
     min-width:0; }
   /* a NOTE must be fully visible while editing — a single-line input clips it */
@@ -208,6 +208,8 @@
   .plangroup .pitem:last-child { border-bottom:none; }
   .plangroup .pitem .pnm { flex:1; overflow-wrap:anywhere; }
   .plangroup .pitem .pmeta { color:var(--muted); font-size:.8rem; white-space:nowrap; }
+  /* a price line names a product: let it wrap instead of pushing the item off-screen */
+  .plangroup .pitem .pmeta.price { white-space:normal; text-align:right; max-width:62%; }
   .storerow { background:var(--card); border-radius:12px; padding:12px 14px;
     margin-bottom:8px; box-shadow:0 1px 2px #0000000a; }
   .storerow .srhead { display:flex; align-items:center; gap:8px; }
@@ -303,13 +305,19 @@
     border:none; background:#d3e8d9; color:var(--green-dark); border-radius:999px;
     width:22px; height:22px; font-size:.8rem; line-height:1; cursor:pointer; padding:0;
   }
-  #plants, #lang, #hist, #stores-btn, #trips, #set-btn {
+  #plants, #lang, #hist, #stores-btn, #org-btn, #set-btn {
     background:#ffffff2b; border:none; color:#fff; font-size:.8rem; font-weight:700;
     padding:5px 8px; border-radius:999px; cursor:pointer; white-space:nowrap;
     flex-shrink:0;
   }
-  /* unreviewed trips are the only reason to open the panel — say how many */
-  #trips.pending { background:var(--amber); color:#fff; }
+  /* the household buys organic: lit, so it is never on without anyone seeing */
+  #org-btn.on { background:#fff; color:var(--green-dark); }
+  /* unreviewed trips are the only reason to open Travel, which lives in ⚙️ —
+     so ⚙️ turns amber, and the Travel button inside says how many */
+  #set-btn.pending { background:var(--amber); color:#fff; }
+  #set-panel #trips { background:var(--green); color:#fff; border:none; border-radius:10px;
+    padding:10px 16px; font-size:1rem; font-weight:700; cursor:pointer; }
+  #set-panel #trips.pending { background:var(--amber); }
   .cand .alt { color:var(--muted); font-size:.8rem; }
   #ideas {
     position:fixed; inset:0; background:var(--bg); z-index:35; display:none;
@@ -427,7 +435,7 @@
   <h1>ThinCart</h1>
   <button id="stores-btn" aria-label="Stores">🏬</button>
   <button id="hist" aria-label="History">🕘</button>
-  <button id="trips" aria-label="Travel">✈️</button>
+  <button id="org-btn" aria-label="Organic" aria-pressed="false">🍃</button>
   <button id="lang">🌐 EN</button>
   <button id="plants">🌱 –/30</button>
   <button id="set-btn" aria-label="Settings">⚙️</button>
@@ -481,6 +489,9 @@
     <button class="topbtn" id="set-close">✕</button>
   </header>
   <div class="body">
+    <h3 id="trip-h"></h3>
+    <button id="trips">✈️</button>
+
     <h3 id="ver-h"></h3>
     <p class="stores-note" id="buildline"></p>
     <button id="reload-btn"></button>
@@ -547,6 +558,8 @@
     <textarea id="sheet-note-input" maxlength="200" rows="2"></textarea></label>
   <label class="sheet-field"><span id="sheet-budget-label"></span>
     <input id="sheet-budget" maxlength="20" inputmode="numeric"></label>
+  <label class="sheet-field"><span id="sheet-brand-label"></span>
+    <input id="sheet-brand" maxlength="60"></label>
   <button id="sheet-compare" class="linkbtn"></button>
   <div id="sheet-prices"></div>
   <div class="sheet-field-label" id="sheet-store-label"></div>
@@ -585,6 +598,8 @@
     <h3 id="at-h"></h3>
     <div id="at-chips"></div>
     <h3 id="plan-h"></h3>
+    <button class="linkbtn" id="plan-byprice"></button>
+    <div class="stores-note" id="plan-price-note"></div>
     <div id="plan-groups"></div>
     <h3 id="manage-h"></h3>
     <div id="store-rows"></div>
@@ -650,6 +665,28 @@ const saveBase  = () => localStorage.setItem(LS.base, JSON.stringify(base));
 
 /* canonical() twin of server db.canonical — NFKC fold handles full-width JP */
 const canon = s => s.normalize('NFKC').toLowerCase().trim().replace(/\s+/g,' ');
+/* Mirror of server db.split_organic (PLAN.md Phase 7A): "organic onion" is the
+ * Onion — one item, one history. A LEADING qualifier only; one that is the
+ * whole name is not split. Used so a queued add does not flash a second Onion. */
+// explicit boundary, not \b (ASCII-only in JS, Unicode in Python): "organic卵"
+// is one word on both sides; brands named "Organic …" (Organic Valley) are not a
+// qualifier — parity with server db.split_organic, same brand list
+const ORGANIC_RE = /^\s*(?:organic(?![\p{L}\p{N}_])(?!\s+(?:valley|girl|india|prairie|traditions)(?![\p{L}\p{N}_]))|オーガニック|有機)[\s・]*/iu;
+/* The household's organic preference (PLAN.md Phase 7A, revised 2026-09-27):
+ * one shared setting. A queued change wins until the server has it. */
+function organicSetting() {
+  let v = !!(base.settings && base.settings.organic);
+  for (const op of queue) if (op.type === 'settings' && op.organic !== undefined) v = op.organic;
+  return v;
+}
+function organicPending() { return queue.some(op => op.type === 'settings'); }
+function splitOrganic(name) {
+  const f = (name || '').normalize('NFKC');
+  const m = f.match(ORGANIC_RE);
+  if (!m) return [name, false];
+  const rest = f.slice(m[0].length).trim();
+  return rest ? [rest, true] : [name, false];
+}
 /* budget parse twin of server parse_budget: '' → null (clear), invalid →
  * undefined (ignore), else float — ３００円 / ¥1,200 all work */
 const budgetNum = s => {
@@ -730,6 +767,23 @@ const STR = {
     hist_restored:n=>`↩ ${n} back on the list`,
     cand_on:'✓ on list', cand_edit:'tap to edit',
     note_label:'Note', sheet_budget:'Budget 💰', sheet_store:'Where to buy',
+    sheet_brand:'Preferred brand', brand_any:'any brand is fine',
+    trip_h:'Travel', trip_btn:n=>n ? `✈️ Travel — ${n} to review` : '✈️ Travel',
+    org_btn:'Organic', org_on:'🍃 Organic ON for the household — prices look for organic products',
+    org_off:'🍃 Organic OFF — prices look for regular products',
+    no_organic:'no organic found — regular price',
+    org_waiting:'Waiting for the 🌱 setting to reach the server…',
+    byprice:'💲 Compare by price', byprice_off:'🏬 Back to usual stores',
+    byprice_searching:'Checking prices…',
+    byprice_none:'No store can give prices yet — pin a Wegmans, Whole Foods or ShopRite below.',
+    byprice_note:'Cheapest per unit (per oz, fl oz or each), in stock, matching the brand. Not saved — your usual stores stay as they are.',
+    byprice_note_org:'🌱 Organic, cheapest per unit (per oz, fl oz or each), in stock, matching the brand. Not saved — your usual stores stay as they are.',
+    byprice_partial:'Some stores could not be reached — their prices are missing.',
+    why_unasked:'price not checked — store unreachable', why_no_match:'no matching product found',
+    why_conflict:'your chosen product no longer matches (brand / stock)',
+    why_pick_missing:'your chosen product was not found',
+    why_uncomparable:'different sizes/units — not ranked',
+    best_match:'best match', not_synced:'not synced yet',
     store_none:'no preference', new_store_inline:'new store…',
     stores_title:'🏬 Stores & plan', at_h:'I’m at… (tags purchases for 6 h)',
     plan_h:'Where to buy today', manage_h:'Stores', at_none:'— none —',
@@ -856,6 +910,23 @@ const STR = {
     hist_restored:n=>`↩ ${n} をリストに戻しました`,
     cand_on:'✓ リストにあり', cand_edit:'タップで編集',
     note_label:'メモ', sheet_budget:'予算 💰', sheet_store:'購入する店',
+    sheet_brand:'好みのブランド', brand_any:'こだわりなし',
+    trip_h:'旅行', trip_btn:n=>n ? `✈️ 旅行 — 確認待ち ${n}件` : '✈️ 旅行',
+    org_btn:'オーガニック', org_on:'🍃 オーガニック ON（家族共通）— 価格はオーガニック商品で比較',
+    org_off:'🍃 オーガニック OFF — 価格は通常品で比較',
+    no_organic:'オーガニックなし — 通常品の価格',
+    org_waiting:'🌱 の設定をサーバーに送信中…',
+    byprice:'💲 価格で比較', byprice_off:'🏬 いつもの店に戻す',
+    byprice_searching:'価格を確認中…',
+    byprice_none:'価格を取得できる店がまだありません — 下でWegmans・Whole Foods・ShopRiteを登録してください。',
+    byprice_note:'単位あたり（oz・fl oz・個）で最安、在庫あり、ブランドに合う商品のみ。保存はされません — いつもの店はそのままです。',
+    byprice_note_org:'🌱 オーガニックで、単位あたり（oz・fl oz・個）最安、在庫あり、ブランドに合う商品のみ。保存はされません — いつもの店はそのままです。',
+    byprice_partial:'一部の店に接続できず、その価格はありません。',
+    why_unasked:'価格未確認 — 店に接続できません', why_no_match:'合う商品が見つかりません',
+    why_conflict:'選んだ商品が条件に合いません（ブランド・在庫）',
+    why_pick_missing:'選んだ商品が見つかりません',
+    why_uncomparable:'サイズ・単位が違うため順位なし',
+    best_match:'近い商品', not_synced:'未同期',
     store_none:'指定なし', new_store_inline:'新しい店…',
     stores_title:'🏬 店舗とプラン', at_h:'いまいる店（6時間有効）',
     plan_h:'今日どこで買う？', manage_h:'店舗リスト', at_none:'— なし —',
@@ -973,6 +1044,10 @@ function applyLang() {
   $('trip-note').textContent = T().trip_note;
   $('sheet-note-label').textContent = T().note_label;
   $('sheet-budget-label').textContent = T().sheet_budget;
+  $('trip-h').textContent = T().trip_h;
+  $('org-btn').setAttribute('aria-label', T().org_btn);
+  $('sheet-brand-label').textContent = T().sheet_brand;
+  $('sheet-brand').placeholder = T().brand_any;
   $('sheet-store-label').textContent = T().sheet_store;
   $('stores-h1').textContent = T().stores_title;
   $('at-h').textContent = T().at_h;
@@ -1008,15 +1083,17 @@ function view() {
   let items = base.items.map(i => ({...i}));
   for (const op of queue) {
     if (op.type === 'add') {
-      if (!items.some(i => canon(i.name) === canon(op.name)))
-        items.push({ id:op.item_id, name:op.name, qty_note:op.qty_note||'',
+      const [nm] = splitOrganic(op.name);           // mirror server: "organic X" is X
+      if (!items.some(i => canon(i.name) === canon(nm)))
+        items.push({ id:op.item_id, name:nm, qty_note:op.qty_note||'',
                      added_by:op.actor, category:op.cat||null, pending:true });
     } else if (op.type === 'checkoff' || op.type === 'remove' || op.type === 'skip') {
       items = items.filter(i => i.id !== op.item_id);
     } else if (op.type === 'edit') {
       const it = items.find(i => i.id === op.item_id);
       if (it) {
-        if (op.name !== undefined) { it.name = op.name; it.name_en = null; }
+        if (op.name !== undefined) { it.name = splitOrganic(op.name)[0]; it.name_en = null; }
+        if (op.brand !== undefined) it.brand = op.brand.trim();
         if (op.qty_note !== undefined) it.qty_note = op.qty_note;
         if (op.category !== undefined) it.category = op.category;
         if (op.note !== undefined) it.note = op.note;
@@ -1056,7 +1133,10 @@ function renderTray() {
     chip.querySelector('.lbl').textContent =
       cycWeeks(s) + (s.tier === 'potential' ? ' ?' : '');
     chip.classList.toggle('maybe', s.tier === 'potential');
-    chip.onclick = () => enqueue({ type:'add', name:s.name, qty_note:'', item_id:uuid() });
+    chip.onclick = e => {
+      gtrace('chip:' + e.type + '@' + (e.target.className || e.target.tagName));
+      enqueue({ type:'add', name:s.name, qty_note:'', item_id:uuid() });
+    };
     chip.querySelector('.snz').onclick = e => {
       e.stopPropagation();
       enqueue({ type:'snooze', catalog_id:s.catalog_id });
@@ -1067,7 +1147,7 @@ function renderTray() {
     const more = document.createElement('span');
     more.className = 'chip more';
     more.textContent = T().tray_more(all.length - TRAY_MAX);
-    more.onclick = openCycles;
+    more.onclick = () => { gtrace('more-chip'); openCycles(); };
     chips.appendChild(more);
   }
 }
@@ -1102,10 +1182,14 @@ const evidence = c =>
   T().tier_evidence(c.events, c.spread === null ? '—' : c.spread)
   + (c.trusted ? '' : ' · ' + T().tier_shaky);
 
-$('tray-label').onclick = openCycles;
+$('tray-label').onclick = e => { gtrace('tray-label:' + e.type); openCycles(); };
 $('cyc-close').onclick = () => $('cyc').style.display = 'none';
 
+/* Opened by the tray label and the "+N more" chip only. The owner saw it open
+ * when tapping a suggestion; it did not reproduce on an emulated Pixel, so
+ * every opening is traced (⚙️ → trace) rather than fixed on a theory. */
 async function openCycles() {
+  gtrace('openCycles');
   $('cyc').style.display = 'flex';
   $('cyc-due').innerHTML = $('cyc-all').innerHTML = '<div class="cyc-note">…</div>';
   try {
@@ -1203,7 +1287,7 @@ async function openHistory() {
    Detection only ever proposes. Every day here is one tap from being corrected,
    and the server never overwrites a day that has been ruled on — which is what
    makes it safe for the heuristics to guess in the first place. */
-$('trips').onclick = openTrips;
+$('trips').onclick = () => { $('set-panel').style.display = 'none'; openTrips(); };
 $('trip-close').onclick = () => $('trip-panel').style.display = 'none';
 
 $('trip-day-go').onclick = async () => {
@@ -1442,7 +1526,162 @@ $('gps-test').onclick = () => {
 $('set-close').onclick = () => $('set-panel').style.display = 'none';
 
 /* ============ stores panel: where-to-buy plan + store management ============ */
-$('stores-btn').onclick = () => { $('stores-panel').style.display = 'flex'; renderStores(); };
+$('stores-btn').onclick = () => {
+  // prices age: a reopened panel asks again rather than show the last answer
+  whereResult = null; whereAsking = null;
+  $('stores-panel').style.display = 'flex'; renderStores(); whereTick();
+};
+
+/* ============ where to buy, by price (PLAN.md Phase 7C) ============
+   A VIEW over the plan, never a saved preference: nothing here enqueues an op.
+   The server names a store cheapest only on comparable unit prices.
+
+   Every answer is tied to the INPUT it was computed for — whereInput().key:
+   the priced stores, and for every item its name, English name (enrichment
+   changes it without a revision bump), 🌱, brand and picked product, plus which
+   items are held back as unsettled. An answer is shown only while its key is
+   still today's; otherwise the panel says it is checking. Any change to the
+   input, from this phone or the other, asks again (whereTick) — whether or not
+   an earlier answer exists. Background repaints go through refreshStores so a
+   half-typed store note is never rebuilt away. */
+let byPrice = false;
+let whereResult = null;   // { key, items, partial } or { key, msg }
+let whereAsking = null;   // the key of the ask in flight
+let whereGen = 0;         // numbers each ask; a superseded answer is dropped
+const WHERE_PAGE = 30;    // the server's per-request cap
+// An answer is re-asked after this long even if nothing on the list changed:
+// prices move, and a phone can sit on this panel for days. Cheap — the server
+// answers from its own cache while a price is fresh (lookup TTL["price"]).
+const WHERE_MAX_AGE_MS = 60 * 60 * 1000;
+
+/* Items whose price question the SERVER would answer with stale preferences:
+ * a queued brand / rename / product-pick edit has not reached it yet, so
+ * /api/where would price the old wish while the row shows the new one. They
+ * are left out and shown as not synced; once their op is acknowledged the set
+ * shrinks, the key below changes, and refreshStores asks again. (A queued 🌱
+ * household change holds the WHOLE ask back — see whereTick.) */
+function unsettledItems() {
+  const ids = new Set(), cats = new Set();
+  for (const op of queue) {
+    if (op.type === 'edit' && (op.brand !== undefined || op.name !== undefined)) ids.add(op.item_id);
+    if (op.type === 'product_pick') cats.add(op.catalog_id);
+  }
+  return it => ids.has(it.id) || cats.has(it.catalog_id);
+}
+
+function whereInput() {
+  const unsettled = unsettledItems();
+  const items = view();
+  const ask = items.filter(i => !i.pending && i.catalog_id && !unsettled(i));
+  // every chain's pick: /api/where asks each chain about ITS pick
+  const picks = base.picks_by_chain || {};
+  const key = JSON.stringify([
+    organicSetting(),
+    pricedStores().map(s => s.id + ':' + s.chain_store_id),
+    ask.map(i => [i.catalog_id, i.name, i.name_en || '', i.brand || '', picks[String(i.catalog_id)] || {}]),
+    items.filter(i => i.pending || unsettled(i)).map(i => i.catalog_id || i.id),
+  ]);
+  return { key, ids: ask.map(i => i.catalog_id) };
+}
+
+/* The last answer, if it answers the question as it stands now — the same
+ * input, and not so old that the prices may have moved. */
+function whereFresh(r) { return !!r && Date.now() - r.at < WHERE_MAX_AGE_MS; }
+function whereCurrent() {
+  return whereResult && whereResult.key === whereInput().key && whereFresh(whereResult) ? whereResult : null;
+}
+
+/* Ask if the input moved and nobody is already asking about it. */
+function whereTick() {
+  if (!byPrice || $('stores-panel').style.display !== 'flex') return;
+  // the server prices with ITS organic setting: wait until it has ours
+  if (organicPending()) return;
+  const { key } = whereInput();
+  const stale = !whereResult || whereResult.key !== key || !whereFresh(whereResult);
+  if (stale && whereAsking !== key) loadWhere();
+}
+
+async function loadWhere() {
+  const { key, ids } = whereInput();
+  const gen = ++whereGen;
+  whereAsking = key;
+  const done = result => {
+    if (gen !== whereGen) return;               // superseded: never shown
+    whereResult = { ...result, at: Date.now() }; whereAsking = null;
+    renderPlan();                               // the plan only: never under a half-typed note
+    whereTick();                                // asks again if the input moved meanwhile
+  };
+  if (!pricedStores().length) { done({ key, msg: T().byprice_none }); return; }
+  renderPlan();                                 // "checking…"
+  const merged = { key, items:{}, partial:false };
+  try {
+    for (let k = 0; k < ids.length; k += WHERE_PAGE) {
+      const res = await fetch('/api/where', { method:'POST', headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ catalog_ids: ids.slice(k, k + WHERE_PAGE) }) });
+      if (gen !== whereGen) return;
+      if (res.status === 503) { done({ key, failed: true, msg: await why503(res, T().cmp_off, T().cmp_fail) }); return; }
+      if (!res.ok) throw new Error('where ' + res.status);
+      const d = await res.json();
+      Object.assign(merged.items, d.items);
+      merged.partial = merged.partial || d.partial;
+    }
+    done(merged);
+  } catch (e) { done({ key, failed: true, msg: T().cmp_fail }); }
+}
+
+/* Stores that were left out of this item's comparison, and why. A cheapest
+ * price elsewhere must not hide that the saved product at Wegmans no longer
+ * fits, or that a store could not be asked — that is what the owner fixes. */
+const WHY_STORE = { conflict:'why_conflict', pick_missing:'why_pick_missing', unasked:'why_unasked' };
+function excludedStores(w) {
+  const names = new Map((base.stores || []).map(s => [String(s.id), s.name]));
+  return Object.entries(w.stores || {})
+    .filter(([, st]) => WHY_STORE[st])
+    .map(([sid, st]) => `⚠ ${names.get(sid) || '?'}: ${T()[WHY_STORE[st]]}`)
+    .join(' · ');
+}
+
+function whereLine(it, w, unsettled) {
+  const line = whereLineMain(it, w, unsettled);
+  const ex = w && (w.cheapest || (w.quotes && w.quotes.length)) ? excludedStores(w) : '';
+  return [line, ex].filter(Boolean).join(' · ');
+}
+
+function whereLineMain(it, w, unsettled) {
+  if (it.pending || unsettled(it)) return T().not_synced;
+  if (!w) return '';
+  if (w.cheapest) {
+    const q = w.cheapest;
+    return [`$${q.amount.toFixed(2)}`, q.unit_price, q.product,
+            q.exact ? '' : '(' + T().best_match + ')', w.organic_fallback ? T().no_organic : '',
+            agoLabel(q.fetched_at)].filter(Boolean).join(' · ');
+  }
+  // No honest winner — but the prices found are still worth seeing, side by side.
+  if (w.quotes && w.quotes.length)
+    // Unranked means YOU compare — so each quote carries what that takes:
+    // which product, how big, and whether it is only a best match.
+    return (w.organic_fallback ? T().no_organic + ' · ' : '') + T().why_uncomparable + ': ' + w.quotes.map(q =>
+      [`${q.store} $${q.amount.toFixed(2)}`, q.product, q.pack_size, q.unit_price,
+       q.exact ? '' : '(' + T().best_match + ')'].filter(Boolean).join(' ')
+    ).join(' · ');
+  return ({ unasked:T().why_unasked, conflict:T().why_conflict, pick_missing:T().why_pick_missing })[w.reason]
+    || T().why_no_match;
+}
+
+$('plan-byprice').onclick = () => {
+  byPrice = !byPrice;
+  // switching it on is asking: never answer that with a remembered failure
+  if (byPrice && whereResult && whereResult.failed) whereResult = null;
+  renderStores();
+  whereTick();
+};
+
+/* Back online / back in the app: a failure may have been the network, and an
+ * answer may have aged past WHERE_MAX_AGE_MS while the phone slept. One fresh
+ * ask, not a retry loop — a second failure stays until the next wake. */
+function whereRetryAfterWake() {
+  if (whereResult && (whereResult.failed || !whereFresh(whereResult))) { whereResult = null; whereTick(); }
+}
 $('stores-close').onclick = () => $('stores-panel').style.display = 'none';
 
 /* A price link is a network round trip to the chain, and the panel can be
@@ -1487,6 +1726,9 @@ function refreshStores() {
   const typing = focused && $('stores-panel').contains(focused)
     && (focused.tagName === 'TEXTAREA' || focused.tagName === 'INPUT');
   if ($('stores-panel').style.display === 'flex' && !typing) renderStores();
+  // the price answer was for an older list (an edit synced, enrichment named
+  // an item, the other phone changed a preference): ask again
+  whereTick();
 }
 
 function renderStores() {
@@ -1510,12 +1752,29 @@ function renderStores() {
   mkAt(T().at_none, '');
   (base.stores || []).forEach(s => mkAt('🏬 ' + s.name, s.name));
 
+  renderPlan();
+  renderStoreRows();
+}
+
+/* The plan: the list grouped by store. Split out of renderStores because it has
+ * no text fields — a price answer can repaint it at any moment, even while a
+ * store note is half-typed below it (refreshStores guards only the editors). */
+function renderPlan() {
   // the plan: current list grouped by recommended store — computed client-side
   // over view() so it works offline and reflects pending ops (review delta 6)
   const items = view();
+  $('plan-byprice').textContent = byPrice ? T().byprice_off : T().byprice;
+  const ans = byPrice ? whereCurrent() : null;
+  $('plan-price-note').textContent = !byPrice ? '' : organicPending() ? T().org_waiting
+    : !ans ? T().byprice_searching
+    : ans.msg || (ans.partial ? T().byprice_partial : organicSetting() ? T().byprice_note_org : T().byprice_note);
+  const priced = ans && ans.items ? ans : null;
+  const unsettled = unsettledItems();
+  const wOf = it => (priced && it.catalog_id && !unsettled(it)) ? priced.items[String(it.catalog_id)] : null;
   const groups = new Map();
   for (const it of items) {
-    const k = it.store || '';
+    const w = wOf(it);
+    const k = (w && w.cheapest) ? w.cheapest.store : (it.store || '');
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k).push(it);
   }
@@ -1542,7 +1801,8 @@ function renderStores() {
       const ico = i.emoji || (i.category ? catEmoji(i.category) : '');
       p.querySelector('.pnm').textContent =
         (ico ? ico + ' ' : '') + disp(i) + (i.note ? ' · ' + i.note : '');
-      p.querySelector('.pmeta').textContent = [
+      if (priced) p.querySelector('.pmeta').classList.add('price');
+      p.querySelector('.pmeta').textContent = priced ? whereLine(i, wOf(i), unsettled) : [
         i.qty_note, i.budget != null ? fmtYen(i.budget) : '',
         i.store_source === 'history' ? T().src_hist : '',
       ].filter(Boolean).join(' ');
@@ -1551,6 +1811,9 @@ function renderStores() {
     pg.appendChild(div);
   }
 
+}
+
+function renderStoreRows() {
   // store management: notes (shared household knowledge) + delete
   const sr = $('store-rows'); sr.innerHTML = '';
   for (const s of (base.stores || [])) {
@@ -1788,8 +2051,22 @@ $('storelink').addEventListener('keydown', e => { if (e.key === 'Enter') { e.pre
  * exercising a function the browser never calls. tests/page_scope.test.js now
  * boots the page the way a browser does, for exactly this class of fault. */
 window.openSheet = openSheet;
+// the parity test runs the shared split_organic cases through this function
+window.splitOrganic = splitOrganic;
+
+/* 🍃 is one switch for the household (PLAN.md Phase 7A, revised): both phones
+ * see the same setting. The toast says what it now means, with an undo. */
+$('org-btn').onclick = () => {
+  const next = !organicSetting();
+  enqueue({ type:'settings', organic: next });
+  showToast(next ? T().org_on : T().org_off, () => enqueue({ type:'settings', organic: !next }));
+};
 
 function render() {
+  const org = organicSetting();
+  $('org-btn').classList.toggle('on', org);
+  $('org-btn').setAttribute('aria-pressed', String(org));
+  $('org-btn').textContent = org ? '🍃 ON' : '🍃';
   renderTray();
   refreshStores();
   if (base.plants)
@@ -1797,8 +2074,9 @@ function render() {
   // detected days nobody has ruled on yet — they are already bending the
   // cycles, so the button says how many rather than waiting to be found
   const pend = base.away_pending || 0;
-  $('trips').textContent = pend ? `✈️ ${pend}` : '✈️';
+  $('trips').textContent = T().trip_btn(pend);
   $('trips').classList.toggle('pending', pend > 0);
+  $('set-btn').classList.toggle('pending', pend > 0);
   const byAisle = viewMode() === 'aisle' && storeCanAisle() && !!aisleMap;
   let items = view();
   const list = $('list');
@@ -1861,7 +2139,7 @@ function render() {
     });
     const ico = it.emoji || (it.category ? catEmoji(it.category) : '');
     li.querySelector('.nm1').textContent = (ico ? ico + ' ' : '') + disp(it);
-    if (it.store || it.note) {   // criteria sub-line: store chip + note
+    if (it.store || it.note || it.brand) {   // criteria sub-line: store chip, brand, note
       const sub = document.createElement('span');
       sub.className = 'sub'; sub.style.display = 'block';
       if (it.store) {
@@ -1870,8 +2148,15 @@ function render() {
         sc.textContent = '🏬 ' + it.store;
         sub.appendChild(sc);
       }
+      if (it.brand) {
+        const bc = document.createElement('span');
+        bc.className = 'stchip';
+        bc.textContent = '🏷 ' + it.brand;
+        if (it.store) sub.appendChild(document.createTextNode(' '));
+        sub.appendChild(bc);
+      }
       if (it.note) sub.appendChild(document.createTextNode(
-        (it.store ? ' ' : '') + it.note));
+        (it.store || it.brand ? ' ' : '') + it.note));
       li.querySelector('.nm').appendChild(sub);
     }
     li.querySelector('.qty').textContent = it.qty_note || '';
@@ -2306,6 +2591,7 @@ function fillSheet(it) {
   $('sheet-qty').value = it.qty_note || '';
   $('sheet-note-input').value = it.note || '';
   $('sheet-budget').value = it.budget == null ? '' : String(it.budget);
+  $('sheet-brand').value = it.brand || '';
   // Prices are looked up on demand, never on open: opening the editor to change
   // a quantity must not fire a network request describing what you are buying.
   $('sheet-prices').innerHTML = '';
@@ -2341,6 +2627,8 @@ function saveSheet() {
   if (editState.category !== (it.category || 'other')) { fields.category = editState.category; changed = true; }
   if (note !== (it.note || ''))                    { fields.note = note;                 changed = true; }
   if (budget !== (it.budget == null ? '' : String(it.budget))) { fields.budget = budget; changed = true; }
+  const brand = $('sheet-brand').value.trim();
+  if (brand !== (it.brand || ''))                  { fields.brand = brand;               changed = true; }
   const origStore = it.store_source === 'preferred' ? it.store : '';
   if ((editState.store || '') !== origStore)       { fields.store = editState.store || ''; changed = true; }
   if (changed) enqueue(fields);
@@ -2782,7 +3070,7 @@ function connectWS() {
 /* phone unlock / tab foreground / network back — the NORMAL in-store path */
 /* showBuild on every wake, not only at startup: the phone that has been open
  * since before a deploy is exactly the one that needs telling. */
-const wake = () => { connectWS(); flush(); guessStoreByGps(); showBuild(); };
+const wake = () => { connectWS(); flush(); guessStoreByGps(); showBuild(); whereRetryAfterWake(); };
 document.addEventListener('visibilitychange', () => { if (!document.hidden) wake(); });
 window.addEventListener('online', wake);
 window.addEventListener('pageshow', wake);

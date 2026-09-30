@@ -2440,3 +2440,185 @@ plugins. So the read happens in the launcher, before handoff.
   ids name no phone calendar, so they are treated as claimed by whatever the
   phone reads. (The live DB has none — the Google pull never ran — but a clone
   that did sync must not keep them pending forever.)
+
+## Phase 7 — Organic, preferred brand, where to buy by price (2026-09-27)
+
+The owner's three asks, verbatim in intent:
+1. an **Organic** option, so "organic onion" is tracked as the existing Onion
+   (same history) instead of a second item;
+2. a **preferred brand** per product — empty means any brand is fine;
+3. **where to buy based on price**.
+
+Evidence from the live DB (2026-09-27): six rows mention organic. Five are
+the duplicates the ask describes, each with 1 purchase and a plain row that
+already exists — organic fusilli pasta→fusilli pasta (244), organic walnuts→
+walnuts (199), organic white rice→white rice (204), organic egg whites→egg
+whites (176), organic egg→卵 (93). The sixth, "simple mills organic seed flour
+crackers", is a brand's product name with organic mid-name and stays as is.
+`product_picks` is empty; 221 lookups are cached; four stores are priced
+(Wegmans 93, ShopRite 617, Whole Foods 10187, Whole Foods Montgomery 10738).
+
+### 7A — Organic is a property of the item, not a different item
+
+- `item_catalog.organic INTEGER NOT NULL DEFAULT 0` (additive ALTER). It is a
+  standing preference ("we buy this organic"), so it lives on the catalog row
+  like note/budget/preferred store and survives checkoff → re-add. History
+  stays keyed by catalog_id, which is the point: one Onion, one cycle.
+- `db.split_organic(name) -> (base, organic)` strips a **leading** qualifier
+  only, after NFKC: `organic ` (any case), `オーガニック`, `有機` (optional
+  space/・ after). A name that is only the qualifier is not split. Mid-name
+  "organic" (brand product names) is never touched.
+- `apply_add`: split, resolve `base` with `get_or_create_catalog`; if the
+  qualifier was present set `organic=1` — **also on the deduped path** (onion
+  already on the list + "organic onion" typed = one row, now organic). A new
+  base row is created under the base name, so enrichment never sees
+  "organic X" and the variety guard is not involved.
+- `apply_edit`: a rename is split the same way (rename to "organic walnuts" =
+  walnuts, organic on). New op field `organic: bool | None` sets/clears it.
+  Typing a plain name never clears the flag — only the sheet toggle does.
+- Enrichment alias-merge carry-over: `organic = MAX(target, source)`.
+- `state()` sends `organic`. Client mirrors `split_organic` (`splitOrganic`)
+  in `view()`'s pending-add dedupe so a queued "organic onion" does not flash a
+  second row; editor sheet gets a 🌱 Organic toggle; list row shows 🌱.
+- **Existing duplicates:** `server/merge_organic.py`, dry-run by default,
+  `--apply` takes a DB backup first. For each row whose display name has a
+  leading qualifier: if its base resolves to a different row, repoint
+  `items` (drop the source item if the target is already listed) and
+  `purchase_events`, drop the source's `product_picks` where the target has one
+  for that chain (else repoint), carry note/budget/preferred store/brand
+  (target wins), set target organic=1, delete the source row. If no base row
+  exists, rename in place to the base and set organic=1. Idempotent.
+
+### 7B — Preferred brand
+
+- `item_catalog.brand TEXT NOT NULL DEFAULT ''` (additive). Op field
+  `brand: str | None` (max 60; "" clears). `state()` sends it; editor sheet
+  gets a Brand input ("any" placeholder); the row sub-line shows it. Carry-over
+  on alias merge: target wins when non-empty. Distinct from
+  `product_picks.brand`, which is the brand of one chosen SKU at one chain.
+
+### 7C — Where to buy, by price (a view, never a saved preference)
+
+- `POST /api/where {catalog_ids: [...]}` (≤ 60) in `lookup_api.py`, gated by
+  `_require("price")`; no outbound code outside `lookup.py` (invariant test).
+- Per priced store, ONE batch: `lookup.products_many(chain, terms, store,
+  prefer, max_age=TTL["price"])` — `products_many` / `wegmans_products_many`
+  gain `max_age` so a 2-day price freshness is honoured, as `/api/prices` does.
+- Term per item per store: that chain's pick name if the household picked a
+  product there; else the English name (`name_en`, else display name), with
+  "organic " prefixed when the item is organic.
+- Candidate per item per store:
+  - a pick → the record with that sku, if found (`exact: true`); the pick is
+    the household's explicit choice, so filters do not second-guess it;
+  - otherwise the first search result (relevance order) that is in stock,
+    has a price, and passes the filters (`exact: false`, shown as "best
+    match"): **organic** — "organic"/"オーガニック"/"有機" appears in the
+    product's name, brand or sub-brand (read from the product's own text,
+    never inferred); **brand** — the preferred brand appears (casefold) in
+    brand, sub-brand or name.
+- Result per item: `cheapest` (lowest amount among candidates), all `quotes`
+  (store, product, brand, pack size, amount, unit price, exact, source URL,
+  fetched_at), or a `reason` when no store qualifies (`no organic match`,
+  `no <brand> match`, `not found`). `partial: true` if any store's lookup
+  failed; a total failure is 503, as `/api/prices`.
+- UI: the Stores (plan) panel gains **💲 By price**. On: fetch `/api/where`
+  for the list, group items under their cheapest store with price, product,
+  pack size, age and a "best match" marker; items with no quote stay in
+  their usual store group with the reason. Off: today's history/preferred
+  grouping. It is never written to `preferred_store_id` — the existing sheet
+  "tap a price row to prefer that store" stays the only way to save one.
+  Lookup disabled / outage wording reuses `why503`.
+- Known limits, stated in the UI copy: best-match products at different stores
+  can differ in size — amount is compared as sold, pack size shown beside it.
+
+### Tests
+- Python: `split_organic` cases (EN/JA/full-width/branded/qualifier-only);
+  add/dedupe/rename set organic; edit organic & brand set/clear; `state()`
+  fields; enrich carry-over; `merge_organic.py` on a fixture DB (dry-run
+  changes nothing; apply merges history, handles an already-listed target and
+  a pick conflict, is idempotent); `/api/where` with `products_many` stubbed:
+  pick exact, organic filter, brand filter, cheapest across stores, reasons,
+  partial, 503, disabled, max_age passed through.
+- Web (jsdom): sheet toggle + brand save the right edit op; row 🌱 and brand;
+  pending "organic x" add dedupes onto x; By price groups by cheapest and
+  never enqueues an edit.
+- Real path: publish, open on the phone, toggle/brand/by-price exercised
+  against the live server; `merge_organic.py --apply` on the live DB with a
+  backup, after a dry run shown to the owner in the report.
+
+### Plan review deltas (Codex, 2026-09-27 — applied; override the above)
+
+1. **Merge script safety.** Dry run opens the DB read-only (no migrations, no
+   commit). `--apply` takes an SQLite online backup, then runs every fold in
+   one `BEGIN IMMEDIATE` transaction.
+2. **Enrichment race.** `enrich()` re-reads the source row's criteria and
+   picks INSIDE the write lock before merging (the pre-await read could be
+   stale), and moves the source's product picks instead of letting them
+   cascade away (target's pick wins per chain).
+3. **Comparable prices only.** "Cheapest" is decided on the unit price,
+   normalised to one dimension: weight → $/oz (lb = 16 oz), volume → $/fl oz
+   (gallon = 128), count → $/each. A winner is named only when every
+   candidate has a unit price in the same dimension; otherwise the item is
+   `comparable: false`, its quotes are listed, and no store is called cheapest.
+4. **Picks are checked, not trusted.** A pick must be in stock and still match
+   the item's organic/brand preference to be a candidate; a pick that no
+   longer matches is reported as `conflict` and excluded.
+5. **Cost.** A price-only search path skips shelf placement (`_place`), and a
+   request carries at most 30 items; the UI asks for the rest in pages.
+6. **Honest reasons.** Each item carries per-store status (`ok`, `no_match`,
+   `unasked`); "no organic/brand match" is claimed only when every priced store
+   answered. `unasked` stores are named in the UI.
+7. **Only server-backed items** are sent to `/api/where`; pending adds are
+   shown without a price.
+8. **Brand matching** folds with `db.canonical` and matches brand/sub-brand
+   exactly or the name on word boundaries ("Ann" ≠ "Annie's").
+9. **Rejected: permanent id redirects** for rows the merge script deletes.
+   The alias merge in `enrich()` has always deleted rows the same way; none of
+   the five live duplicates is on the list or has a pick, so no queued phone
+   op can reference them. Not worth threading redirects through every apply
+   path for a one-time fold. The script says so in its docstring.
+10. **Two splits to stay under the 600-line ceiling** (not a ceiling raise):
+    `criteria.py` takes budget parsing and the catalog-level edit fields out of
+    `app.py`; `chain_lookup.py` takes the which-chain-answers-how dispatch and
+    shelf placement out of `lookup.py`. `chain_lookup` sends nothing itself —
+    every request is still made by a `lookup.*` function, reached as a module
+    attribute so the tests' monkeypatching of `lookup` holds — so lookup.py
+    remains the one file to read for what leaves the box.
+
+### 2026-09-27 — Organic is ONE household setting, not per item (owner's decision)
+
+The owner asked for Organic to be a global selection instead of a per-item one.
+Supersedes the per-item parts of 7A and 7C (never merged; phones ran them for a
+few hours):
+
+- `meta.organic` ('0'/'1'), synced as `state.settings.organic`, set by a new
+  `settings` op (`organic` required; a no-op change bumps nothing). The switch
+  lives at the top of ⚙️ Settings; the editor toggle and the row 🌱 are gone.
+  `item_catalog.organic` is dropped by migration.
+- Typing "organic onion" still lands on the Onion (one item, one history) — it
+  no longer sets anything, and never flips the household setting. An edit op
+  still carrying the retired `organic` field is ignored.
+- `/api/where` reads the setting. With it on: search "organic X", keep organic
+  products only; an item that EVERY store answered with no organic product is
+  asked again for the regular product and marked `organic_fallback` ("no
+  organic found — regular price") — some things (paper towels) do not come
+  organic. No fallback while any store went unasked.
+- The phone holds the whole price ask while a `settings` op is queued (the
+  server would price with its old setting) and says so; the setting is part of
+  the answer's input key, so a change from either phone re-asks.
+- `merge_organic.py` now only folds duplicates (it already ran on the live DB).
+
+### 2026-09-27 (evening) — 🍃 gets a header button; ✈️ Travel moves into ⚙️
+
+Owner: Organic deserves a button; Travel may move to Settings if the header
+has no room (it has none — the title is already cut to "T"). So: a 🍃 button
+in the header toggles the household setting (lit "🍃 ON" when on, a toast with
+undo says what it means); ✈️ Travel is the first section of ⚙️, and ⚙️ itself
+turns amber while trips wait for review. 🍃 not 🌱 — 🌱 is the plants counter.
+
+Also reported: tapping a suggestion "also opens the purchase-history based
+suggestions" (the Purchase cycles panel). Not reproduced — jsdom, and a
+Pixel-7-emulated Chromium tapping tray chips, typing candidates and cycle rows
+against a throwaway copy of the live DB all behaved. Per the long-press lesson
+(fix on evidence, not theory), every opening of Purchase cycles and every chip
+tap now lands in the ⚙️ trace; the owner reproduces once and reads it.
