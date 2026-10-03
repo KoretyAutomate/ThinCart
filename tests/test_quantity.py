@@ -168,3 +168,13 @@ def test_a_stated_oz_size_is_not_overridden_by_a_rounded_unit_price():
     got = q.comparable(q.quantities(rec), liquid=True)
     assert got["volume"] == 59.0
     assert q.cost_to_cover(7.59, got["volume"], 128) == (22.77, 3)
+
+
+def test_a_variable_weight_item_is_measured_by_its_price_not_its_basis():
+    """Codex review, cached Wegmans bananas: '1 lb.' at $1.46 and '$0.73/lb.'."""
+    rec = {"pack_size": "1 lb.", "amount": 1.46, "unit_price": "$0.73/lb.", "name": "Wegmans Organic Bananas"}
+    assert q.quantities(rec)["weight"] == 32.0
+    assert q.unit_label(1.46, 32.0, "weight") == "$0.05/oz"
+    # a real one-pound package priced as such is left alone
+    rec = {"pack_size": "1 lb.", "amount": 3.49, "unit_price": "$3.49/lb.", "name": "Organic Spinach"}
+    assert q.quantities(rec)["weight"] == 16.0

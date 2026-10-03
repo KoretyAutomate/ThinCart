@@ -145,6 +145,7 @@ _COMPOUND_WORDS = (
     "chocolate", "cream", "pie", "mix", "seasoning", "spread", "dip", "hummus", "salsa",
     "marinade", "marinated", "kit", "rice", "noodle", "noodles", "sprouts", "pudding", "jam",
     "relish", "pickle", "pickles", "vinaigrette", "aioli", "mayo", "mayonnaise", "ketchup", "mustard",
+    "frosting", "icing", "glaze", "filling",
     "jelly", "popsicle", "gummies", "granola", "muffin", "muffins", "pancake", "pancakes", "pizza",
     "sandwich", "dumpling", "dumplings",
 )
@@ -228,10 +229,12 @@ def _core_words(name: str, brand: str) -> list[str]:
     segs = [s for s in _DELIM.split(canonical(name)) if _words(s)]
     while segs and set(_words(segs[0])) <= brand_words:
         segs = segs[1:]
-    # The product's phrase and the one segment after it ("Squash, Butternut");
-    # further segments are ingredient or flavour lists ("…Puree, Organic,
-    # White Bean, Pumpkin, Apple") and cannot name the item (Codex review).
-    words = _words(" ".join(segs[:2]))
+    # Descriptive segments are few ("SoyBoy Tofu, Organic, Extra Firm";
+    # "Cheese Slices, Non-Smoked, Provolone"); ingredient and flavour lists are
+    # long ("Baby Puree, Organic, White Bean, Pumpkin, Apple"). A name of up to
+    # three segments is all description; a longer one is read only to its
+    # second, so a flavour list cannot name the item (Codex review).
+    words = _words(" ".join(segs if len(segs) <= 3 else segs[:2]))
     lead_brand = _words(brand)
     if lead_brand and words[:len(lead_brand)] == lead_brand:
         words = words[len(lead_brand):]

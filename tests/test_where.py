@@ -561,3 +561,12 @@ def test_the_organic_stand_in_warning_survives_into_state(monkeypatch, stores, o
     ask(cid)
     item = next(i for i in client.get("/api/state").json()["items"] if i["catalog_id"] == cid)
     assert item["price"]["organic_fallback"] is True
+
+
+def test_descriptors_in_later_segments_still_count_and_frosting_is_not_cheese():
+    """Codex review, cached: SoyBoy and Organic Valley put descriptors in the
+    third segment; Duncan Hines frosting is not whipped cream cheese."""
+    assert where.relevant("SoyBoy Tofu, Organic, Extra Firm", "extra firm tofu", "SoyBoy") is True
+    assert where.relevant("Organic Valley Cheese Slices, Non-Smoked, Provolone", "cheese slices provolone",
+                          "Organic Valley") is True
+    assert where.relevant("Duncan Hines Whipped Cream Cheese Frosting", "whipped cream cheese", "Duncan Hines") is False

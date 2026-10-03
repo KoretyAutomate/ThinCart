@@ -283,6 +283,11 @@ def quantities(rec: dict) -> dict[str, float]:
     for dim, by_unit in from_unit_price(rec.get("amount"), rec.get("unit_price") or "").items():
         if dim in settled:      # the unit price already had its say there
             continue
+        if dim in pack_q and _sold_by(rec, dim, pack_q[dim]):
+            # "1 lb." at $1.46 and $0.73/lb is a ~2 lb bunch SOLD BY WEIGHT:
+            # the pack size names the pricing basis, the price is for the bunch
+            out[dim] = by_unit
+            continue
         # "…2% Milk, 59 oz" at "$0.12/fluid ounce": the product STATES 59 (in
         # oz). A rounded unit price must not invent a different fl oz size
         # beside it — for a liquid, comparable() reads the 59 as fl oz.
@@ -294,6 +299,16 @@ def quantities(rec: dict) -> dict[str, float]:
         elif abs(by_unit - out[dim]) / out[dim] > DISAGREE and not _rounding_explains(rec, dim, out[dim]):
             del out[dim]
     return out
+
+
+def _sold_by(rec: dict, dim: str, pack_qty: float) -> bool:
+    """The pack size is exactly ONE of the unit the store prices by ("1 lb."
+    with "$0.73/lb."): a variable-weight item, not a one-pound package."""
+    m = _UNIT_PRICE.search(_norm(rec.get("unit_price") or ""))
+    if m is None:
+        return False
+    unit_dim, unit_size = UNITS[m.group(2)]
+    return unit_dim == dim and abs(unit_size - pack_qty) < 1e-6
 
 
 def _rounding_explains(rec: dict, dim: str, qty: float) -> bool:
