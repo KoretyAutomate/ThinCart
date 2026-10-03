@@ -177,7 +177,8 @@ def relevant(name: str, term: str) -> bool:
     "Tofu Firm Organic"), and no COMPOUND word follows it before the first
     comma. An item with no English name cannot be checked, and passes."""
     want = [w for w in _words(term) if w not in _NOT_CONTENT]
-    if not want or not term.isascii():
+    # decided on the NORMALIZED term: "２％ milk" is ASCII once folded
+    if not want or not canonical(term).isascii():
         return True
     # numbers that name the product ("2% milk") must match: words alone
     # would let a cheaper 1% win (Codex review)
@@ -187,8 +188,12 @@ def relevant(name: str, term: str) -> bool:
     got = _words(name)
     if any(w not in got for w in want):
         return False
-    first = _words(head)
-    after = first[first.index(want[0]) + 1:] if want[0] in first else []
+    # a product-type word AFTER any of the item's words in the leading phrase
+    # makes it another product: "Rice Cakes, Brown Rice" is cakes. One BEFORE
+    # them describes it: "Honey Roasted Peanuts" are peanuts.
+    lead = _words(head)
+    at = [i for i, w in enumerate(lead) if w in want]
+    after = lead[at[0] + 1:] if at else []
     return not any(w in COMPOUND and w not in want for w in after)
 
 

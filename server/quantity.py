@@ -114,6 +114,12 @@ def _one_value(values: list[float]) -> float | None:
     return values[0] if (hi - lo) / hi <= SAME else None
 
 
+def pack_count(text: str) -> int:
+    """N in "(Pack of N)", "N pack", "N cans" — 1 when not stated."""
+    m = _PACK_OF.search(_norm(text))
+    return int(m.group(1) or m.group(2)) if m else 1
+
+
 def _word_sizes(t: str) -> dict[str, float]:
     for rx, dim, qty in _WORD_SIZES:
         if rx.search(t):
@@ -214,10 +220,17 @@ def quantities(rec: dict) -> dict[str, float]:
     the store's unit price fills a missing weight/volume/area and vetoes a
     parsed one it contradicts by more than 15% (a rounded unit price — $0.03 a
     sq ft — is allowed to be loose; a different product is not)."""
-    out: dict[str, float] = {}
-    for got in (parse(rec.get("pack_size") or ""), parse(rec.get("name") or "")):
-        for dim, qty in got.items():
-            out.setdefault(dim, qty)
+    pack_q, name = parse(rec.get("pack_size") or ""), rec.get("name") or ""
+    name_q = parse(name)
+    out: dict[str, float] = dict(pack_q)
+    for dim, qty in name_q.items():
+        out.setdefault(dim, qty)
+    # pack size "12 fl oz" (one can) + name "…, 8 pack" (96 fl oz): when the
+    # name's total is exactly the pack size × N, the name's total is the package
+    n = pack_count(name)
+    for dim in ("weight", "volume"):
+        if n > 1 and dim in pack_q and dim in name_q and abs(pack_q[dim] * n - name_q[dim]) <= SAME * name_q[dim]:
+            out[dim] = name_q[dim]
     for dim, implied in from_unit_price(rec.get("amount"), rec.get("unit_price") or "").items():
         if dim not in out:
             out[dim] = implied

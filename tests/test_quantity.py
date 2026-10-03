@@ -125,3 +125,12 @@ def test_labels():
     assert q.unit_label(15.99, 627.3, "area") == "$0.03/sq ft"
     assert q.qty_label(32, "weight") == "2 lb" and q.qty_label(12, "weight") == "12 oz"
     assert q.qty_label(6, "roll") == "6 rolls"
+
+
+def test_a_pack_size_for_one_can_and_a_name_for_the_pack():
+    """Codex review: pack size '12 fl oz' + name '..., 8 pack' kept 12 fl oz."""
+    rec = {"pack_size": "12 fl oz", "amount": 4.0, "unit_price": "", "name": "Sparkling Water 12 fl oz, 8 pack"}
+    assert q.quantities(rec)["volume"] == 96.0
+    # a pack size that is already the total is left alone
+    rec = {"pack_size": "96 fl oz", "amount": 4.0, "unit_price": "", "name": "Sparkling Water 12 fl oz, 8 pack"}
+    assert q.quantities(rec)["volume"] == 96.0

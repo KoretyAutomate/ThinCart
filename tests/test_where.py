@@ -407,3 +407,13 @@ def test_the_price_age_is_the_fetch_not_the_comparison(monkeypatch, stores):
     ask(cid)
     item = next(i for i in client.get("/api/state").json()["items"] if i["catalog_id"] == cid)
     assert item["price"]["fetched_at"] == "2026-10-01T00:00:00+00:00"
+
+
+def test_relevance_checks_the_whole_leading_phrase_and_full_width_terms():
+    """Codex review: 'Rice Cakes, Brown Rice' passed for brown rice, and a
+    full-width '２％ milk' skipped every check."""
+    assert where.relevant("Rice Cakes, Brown Rice, 16 oz", "brown rice") is False
+    assert where.relevant("Lundberg Brown Rice, 2 lb", "brown rice") is True
+    assert where.relevant("Honey Roasted Peanuts, 16 oz", "peanuts") is True
+    assert where.relevant("1% Milk, 64 fl oz", "２％ milk") is False
+    assert where.relevant("2% Milk, 64 fl oz", "２％ milk") is True

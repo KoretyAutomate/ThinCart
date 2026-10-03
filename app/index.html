@@ -792,7 +792,7 @@ const STR = {
     why_conflict:'your chosen product no longer matches (brand / stock)',
     why_pick_missing:'your chosen product was not found',
     why_uncomparable:'different sizes/units — not ranked',
-    best_match:'best match', not_synced:'not synced yet',
+    best_match:'best match', not_synced:'not synced yet', not_compared:'not comparable',
     store_none:'no preference', new_store_inline:'new store…',
     store_cheapest:s=>`💲 Cheapest (${s})`,
     buyqty_label:'How much I want', buyqty_ph:'e.g. 2 lb, 6 rolls, 1 gal — empty = any size',
@@ -940,7 +940,7 @@ const STR = {
     why_conflict:'選んだ商品が条件に合いません（ブランド・在庫）',
     why_pick_missing:'選んだ商品が見つかりません',
     why_uncomparable:'サイズ・単位が違うため順位なし',
-    best_match:'近い商品', not_synced:'未同期',
+    best_match:'近い商品', not_synced:'未同期', not_compared:'比較不可',
     store_none:'指定なし', new_store_inline:'新しい店…',
     store_cheapest:s=>`💲 最安（${s}）`,
     buyqty_label:'買いたい量', buyqty_ph:'例: 2 lb、6 rolls、1 gal — 空欄 = サイズ問わず',
@@ -1700,9 +1700,14 @@ function whereLineMain(it, w, unsettled) {
   if (!w) return '';
   if (w.cheapest) {
     const q = w.cheapest;
+    // products that could not be measured in the winner's unit are still shown
+    const unranked = (w.quotes || []).filter(u => !u.unit_label && u.store_id !== q.store_id);
     return [q.total_label || `$${q.amount.toFixed(2)}`, q.unit_label || q.unit_price, q.product,
             q.exact ? '' : '(' + T().best_match + ')', w.organic_fallback ? T().no_organic : '',
-            agoLabel(q.fetched_at)].filter(Boolean).join(' · ');
+            agoLabel(q.fetched_at),
+            unranked.length ? T().not_compared + ': ' + unranked.map(u =>
+              `${u.store} $${u.amount.toFixed(2)} ${u.product}${u.pack_size ? ' ' + u.pack_size : ''}`).join(', ') : '',
+           ].filter(Boolean).join(' · ');
   }
   // No honest winner — but the prices found are still worth seeing, side by side.
   if (w.quotes && w.quotes.length)

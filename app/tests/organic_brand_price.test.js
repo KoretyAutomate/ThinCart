@@ -181,9 +181,13 @@ function openEditor(b, i) {
                { store: "Whole Foods", amount: 6.29, unit_price: "$6.29/count", product: "365 Milk",
                  pack_size: "64 fl oz", exact: true }] },
       "3": { cheapest: null, quotes: [], comparable: false, reason: "unasked" },
+      "4": { cheapest: { store_id: 7, store: "Wegmans", amount: 4, unit_label: "$0.33/oz", product: "Syrup 12 oz",
+                         exact: false, fetched_at: "" }, comparable: true,
+             quotes: [{ store_id: 7, store: "Wegmans", amount: 4, unit_label: "$0.33/oz", product: "Syrup 12 oz" },
+                      { store_id: 8, store: "Whole Foods", amount: 3, product: "Syrup", pack_size: "12 fl oz" }] },
     } };
     const b = boot({ items: [item(1, "milk", { store: "Wegmans", store_source: "history" }), item(2, "bread"),
-                             item(3, "eggs")],
+                             item(3, "eggs"), item(4, "syrup")],
                      queue: [{ op_id: "q3", type: "add", name: "tea", item_id: "n3", actor: "t" }], where });
     await settle();
     b.doc.getElementById("stores-btn").click();
@@ -191,9 +195,9 @@ function openEditor(b, i) {
     await settle(); await settle();
     const req = b.calls.find(c => c.url === "/api/where");
     check("asked for the server's items only (not the queued tea)",
-      req && JSON.stringify(req.body.catalog_ids) === "[1,2,3]", req && req.body);
+      req && JSON.stringify(req.body.catalog_ids) === "[1,2,3,4]", req && req.body);
     const groups = [...b.doc.querySelectorAll("#plan-groups .plangroup")].map(g => g.textContent);
-    const wf = groups.find(g => /Whole Foods/.test(g)) || "";
+    const wf = groups.find(g => g.startsWith("🏬 Whole Foods")) || "";   // the group headed Whole Foods
     check("milk moved to its cheapest store", /milk/.test(wf) && /\$3\.49/.test(wf) && /best match/.test(wf), groups);
     check("and the store left out says why (Codex review 2026-09-28)",
       /⚠ Wegmans: your chosen product no longer matches/.test(wf), wf);
@@ -203,6 +207,8 @@ function openEditor(b, i) {
       /Wegmans \$3\.99 Wegmans Milk 16 oz \$0\.25\/oz \(best match\)/.test(all)
       && /Whole Foods \$6\.29 365 Milk 64 fl oz/.test(all), all);
     check("an unreachable store is named as the reason", /unreachable/.test(all), all);
+    check("a product that cannot be compared is still shown beside the winner (Codex review)",
+      /not comparable: Whole Foods \$3\.00 Syrup 12 fl oz/.test(all), all);
     check("a queued item says it is not synced", /not synced/.test(all), all);
     check("nothing was saved", !b.ops().some(o => o.type === "edit"), b.ops());
     b.doc.getElementById("plan-byprice").click();
