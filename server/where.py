@@ -174,7 +174,9 @@ COMPOUND = frozenset(_sing(w) for w in _COMPOUND_WORDS)
 
 
 def _words(text: str) -> list[str]:
-    return [_sing(w) for w in re.findall(r"[a-z]+", canonical(text))]
+    # a hyphenated word stays ONE word: "Stir-In Paste" has no "in" that could
+    # read as an ingredient clause, and "grass-fed" is "grassfed" (Codex review)
+    return [_sing(w.replace("-", "")) for w in re.findall(r"[a-z]+(?:-[a-z]+)*", canonical(text))]
 
 
 def _leading_phrase(name: str, brand: str) -> str:
@@ -209,12 +211,29 @@ def _positions(lead: list[str], want: list[str]) -> list[int]:
             if t in want or t in pairs or (i + 1 < len(lead) and t + lead[i + 1] in want)]
 
 
+def _core_words(name: str, brand: str) -> list[str]:
+    """The words that describe THIS product: the name without leading
+    brand-only segments ("365 by Whole Foods Market, …"), cut at the first
+    ingredient clause ("… with Chicken & Pumpkin"). The item's words must be
+    found here — not in the brand, not among the ingredients."""
+    brand_words = set(_words(brand)) | {"by"}
+    segs = _DELIM.split(canonical(name))
+    while segs and _words(segs[0]) and set(_words(segs[0])) <= brand_words:
+        segs = segs[1:]
+    words = _words(" ".join(segs))
+    for i, w in enumerate(words):
+        if w in _INGREDIENT_INTRO:
+            return words[:i]
+    return words
+
+
 def relevant(name: str, term: str, brand: str = "") -> bool:
     """Is this product the item, rather than something made from it?
     Every content word of the item appears (any order — Whole Foods writes
     "Tofu Firm Organic"), and no COMPOUND word follows it before the first
     comma. An item with no English name cannot be checked, and passes."""
-    want = [w for w in _words(term) if w not in _NOT_CONTENT]
+    # a size typed into the item's name ("salmon 2 lb") is not a product word
+    want = [w for w in _words(term) if w not in _NOT_CONTENT and w not in quantity.UNITS]
     # decided on the NORMALIZED term: "２％ milk" is ASCII once folded
     if not want or not canonical(term).isascii():
         return True
@@ -223,7 +242,7 @@ def relevant(name: str, term: str, brand: str = "") -> bool:
     if any(p not in _percents(name) for p in _percents(term)):
         return False
     head = _leading_phrase(name, brand)
-    if not _covers(want, _words(name)):
+    if not _covers(want, _core_words(name, brand)):
         return False
     # a product-type word AFTER any of the item's words in the leading phrase
     # makes it another product: "Rice Cakes, Brown Rice" is cakes. One BEFORE

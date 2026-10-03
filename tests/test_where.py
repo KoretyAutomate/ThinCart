@@ -498,3 +498,26 @@ def test_joined_and_separated_spellings_match():
     assert where.relevant("Grassfed 2% Milk, 64 fl oz", "grass fed 2% milk") is True
     assert where.relevant("Oatmilk Creamer, 32 fl oz", "oat milk") is True       # creamer is not excluded
     assert where.relevant("Oat Cereal, 12 oz", "oat milk") is False
+
+
+def test_brand_and_ingredient_words_do_not_name_the_item():
+    """Codex review, cached products: 'Whole' only in the store brand, and
+    'Pumpkin' only among a cat treat's ingredients."""
+    assert where.relevant("365 By Whole Foods Market, Organic Baby Carrots, 2 lb", "whole carrot",
+                          "365 By Whole Foods Market") is False
+    assert where.relevant("Fancy Feast Savory Purees with Chicken & Pumpkin Cat Treats", "pumpkin puree") is False
+    # a variety written after the comma still counts: Wegmans writes it that way
+    assert where.relevant("Wegmans Organic Squash, Butternut", "butternut squash", "Wegmans") is True
+
+
+def test_a_hyphenated_descriptor_is_not_an_ingredient_clause():
+    """Codex review: 'Stir-In' split into 'stir' + 'in' cut the phrase before 'paste'."""
+    assert where.relevant("Wegmans Organic Dill Stir-In Paste", "dill", "Wegmans") is False
+    assert where.relevant("Grass-Fed 2% Milk, 64 fl oz", "grass fed 2% milk") is True
+
+
+def test_a_size_in_the_item_name_is_not_a_product_word():
+    """Found on cached data: 'salmon 2 lb' rejected every salmon fillet."""
+    assert where.relevant("Sockeye Salmon Fillet, 32 oz", "organic salmon 2 lb") is True
+    assert where.relevant("365 by Whole Foods Market Sockeye Salmon Fillets, 10 OZ", "salmon 2 lb",
+                          "365 by Whole Foods Market") is True
