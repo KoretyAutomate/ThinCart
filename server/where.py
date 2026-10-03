@@ -166,8 +166,10 @@ def _percents(text: str) -> set[str]:
 
 
 def _words(text: str) -> list[str]:
-    # a hyphenated word stays ONE word: "grass-fed" is "grassfed"
-    return [_sing(w.replace("-", "")) for w in re.findall(r"[a-z]+(?:-[a-z]+)*", canonical(text))]
+    # a hyphenated word stays ONE word: "grass-fed" is "grassfed" — also when
+    # the store spaced one side of it ("Choose-A- Size"); " - " stays a break
+    t = re.sub(r"(?<=[a-z])-\s+(?=[a-z])|(?<=[a-z])\s+-(?=[a-z])", "-", canonical(text))
+    return [_sing(w.replace("-", "")) for w in re.findall(r"[a-z]+(?:-[a-z]+)*", t)]
 
 
 def _covers(want: list[str], got: list[str]) -> bool:

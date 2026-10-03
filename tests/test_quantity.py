@@ -230,3 +230,9 @@ def test_a_pack_count_in_the_pack_size_is_already_the_total():
     """Codex review: '12 fl oz (Pack of 6)' lost its 72 fl oz to the count check."""
     rec = {"pack_size": "12 fl oz (Pack of 6)", "amount": 6.0, "unit_price": "", "name": "Seltzer"}
     assert q.quantities(rec) == {"volume": 72.0, "each": 6.0}
+
+
+def test_a_metric_label_beside_a_multipack_is_one_container():
+    """Codex review: '6 x 12 fl oz (355 ml)' read as 72 vs 12 fl oz and dropped."""
+    got = q.parse("Seltzer, 6 x 12 fl oz (355 ml)")
+    assert abs(got["volume"] - 72.0) < 0.5 and got["each"] == 6.0

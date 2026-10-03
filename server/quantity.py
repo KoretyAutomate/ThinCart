@@ -145,9 +145,11 @@ def parse(text: str) -> dict[str, float]:
     t = _norm(text)
     seen: dict[str, list[float]] = {}
     multi_spans = []
+    per_container: list[tuple[str, float, int]] = []   # (dim, one container, how many)
     for m in _MULTI.finditer(t):                # "6 x 16 oz" is 96 oz — and 6 of them
         dim, size = UNITS[m.group(3)]
         seen.setdefault(dim, []).append(round(int(m.group(1)) * float(m.group(2)) * size, 3))
+        per_container.append((dim, float(m.group(2)) * size, int(m.group(1))))
         if dim != "each":
             seen.setdefault("each", []).append(float(m.group(1)))
         multi_spans.append(m.span())
@@ -159,7 +161,10 @@ def parse(text: str) -> dict[str, float]:
         dim, size = UNITS[m.group(2)]
         if dim == "sheet" and _PER_ROLL.match(t, m.start()):
             continue                            # "103 sheets per roll" is not a total
-        seen.setdefault(dim, []).append(round(float(m.group(1)) * size, 3))
+        value = float(m.group(1)) * size
+        # "6 x 12 fl oz (355 ml)": the second label is ONE container again
+        same = next((k for d, one, k in per_container if d == dim and abs(value - one) <= SAME * one), 1)
+        seen.setdefault(dim, []).append(round(value * same, 3))
     out = {d: v for d, v in ((d, _one_value(vals)) for d, vals in seen.items()) if v is not None}
     for dim, qty in _word_sizes(t).items():
         if dim not in seen:          # never revive a size the numbers ruled out ("0 quart")
