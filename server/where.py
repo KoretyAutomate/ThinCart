@@ -151,6 +151,7 @@ _COMPOUND_WORDS = (
 # Words that say nothing about WHICH product: not required to appear.
 _NOT_CONTENT = frozenset(("organic", "fresh", "frozen", "conventional", "the", "and", "of", "with", "a", "an"))
 _DELIM = re.compile(r"[,|(\[]")
+_INGREDIENT_INTRO = frozenset(("with", "made", "in", "featuring", "plus", "infused"))
 
 
 def _sing(word: str) -> str:
@@ -214,6 +215,12 @@ def relevant(name: str, term: str, brand: str = "") -> bool:
         # ingredient ("Lemonade, made with real lemon"), not the item
         return False
     after = lead[at[0] + 1:]
+    # "Body Lotion with Virgin Coconut Oil": what follows "with" lists
+    # ingredients, it does not change what the product IS
+    for i, w in enumerate(after):
+        if w in _INGREDIENT_INTRO:
+            after = after[:i]
+            break
     return not any(w in COMPOUND and w not in want for w in after)
 
 

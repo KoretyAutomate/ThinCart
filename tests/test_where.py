@@ -446,3 +446,10 @@ def test_the_item_must_lead_the_product_not_trail_it():
     # a store-brand lead segment is skipped, not mistaken for the product
     assert where.relevant("365 By Whole Foods Market, Tofu Firm Organic, 14 Ounce", "firm tofu",
                           "365 By Whole Foods Market") is True
+
+
+def test_ingredients_after_with_do_not_change_the_product():
+    """Codex review: a cached body lotion was rejected for 'with ... Coconut Oil'."""
+    assert where.relevant("Shea Moisture Daily Hydration Body Lotion with Virgin Coconut Oil 16oz",
+                          "body lotion") is True
+    assert where.relevant("Wegmans Body Lotion Oil Blend", "body lotion") is False

@@ -37,11 +37,13 @@ import quantity as q
     ("Seventh Generation Paper Towels, 140 Sheets, 6 Rolls", {"sheet": 140.0, "roll": 6.0}),
     # Codex review round 5
     ("Reduced Fat 2% Milk, Half Gallon", {"volume": 64.0}),
-    ("Seltzer, 12 fl oz (Pack of 6)", {"volume": 72.0}),
+    ("Seltzer, 12 fl oz (Pack of 6)", {"volume": 72.0, "each": 6.0}),
     ("Sparkling Water 12 fl oz, 8 pack", {"volume": 96.0, "each": 8.0}),
     ("Spaghetti 12 oz (340 g)", {"weight": 12.0}),
     ("Whole Milk, 1 Gallon", {"volume": 128.0}),
     ("Heavy Cream, Half Pint", {"volume": 8.0}),      # Codex review: half halves
+    ("Eggs, 12-pack", {"each": 12.0}),                # Codex review: a pack count is a count
+    ("Large Eggs, Pack of 12", {"each": 12.0}),
     ("Half-and-Half, Quart", {"volume": 32.0}),
 ])
 def test_parse(text, want):

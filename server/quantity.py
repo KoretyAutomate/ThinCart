@@ -158,6 +158,8 @@ def parse(text: str) -> dict[str, float]:
         for dim in ("weight", "volume"):
             if dim in out:
                 out[dim] = round(out[dim] * n, 3)
+    if n > 1 and "each" not in seen:            # "Eggs, 12-pack" / "Pack of 12" is 12 of them
+        out["each"] = float(n)
     per = _PER_ROLL.search(t)
     if per and "roll" in out and "sheet" not in out:
         out["sheet"] = int(per.group(1)) * out["roll"]
