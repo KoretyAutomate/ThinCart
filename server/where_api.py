@@ -140,6 +140,10 @@ async def _persist(items: dict[int, dict], result: dict[str, dict]) -> None:
             organic_now = bool(old and old.get("organic_fallback") and r["cheapest"] and not r["organic_fallback"])
             if winner is not None and r["stores"].get(str(winner)) == "unasked" and not organic_now:
                 continue                          # the winner could not be checked: keep it
+            # a regular-product stand-in is only re-checked by the regular
+            # search; an organic search that found nothing says nothing about it
+            if old and old.get("organic_fallback") and not r["regular_checked"] and not organic_now:
+                continue
             if r["cheapest"]:
                 changed |= price_reco.save(conn, cid, it["key"], r, ts)
             elif not partial or winner is not None:
@@ -186,6 +190,9 @@ async def where_to_buy(req: WhereRequest) -> dict:
         cmp = where.compare(o["cands"], it["wanted"], quantity.is_liquid(it["name"]))
         result[str(cid)] = {
             **cmp, "stores": o["stores"], "brand": it["brand"], "organic_fallback": cid in fallback,
+            # the regular-product search ran for it (all items without organic,
+            # or the organic ones retried) — what can re-check a stand-in
+            "regular_checked": not it["organic"] or cid in retry,
             "buy_qty": it["buy_qty"], "buy_qty_ok": not it["buy_qty"] or it["wanted"] is not None,
             "reason": None if cmp["quotes"] else _reason(set(o["stores"].values())),
         }

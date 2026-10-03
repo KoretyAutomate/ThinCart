@@ -209,18 +209,18 @@ def relevant(name: str, term: str, brand: str = "") -> bool:
     # makes it another product: "Rice Cakes, Brown Rice" is cakes. One BEFORE
     # them describes it: "Honey Roasted Peanuts" are peanuts.
     lead = _words(head)
+    # "Body Lotion with Virgin Coconut Oil": what follows "with" lists
+    # ingredients — it neither names the item nor changes what the product is
+    for i, w in enumerate(lead):
+        if w in _INGREDIENT_INTRO:
+            lead = lead[:i]
+            break
     at = [i for i, w in enumerate(lead) if w in want]
     if not at:
-        # the item is only mentioned after the product's own phrase — an
+        # the item is only mentioned outside the product's own phrase — an
         # ingredient ("Lemonade, made with real lemon"), not the item
         return False
     after = lead[at[0] + 1:]
-    # "Body Lotion with Virgin Coconut Oil": what follows "with" lists
-    # ingredients, it does not change what the product IS
-    for i, w in enumerate(after):
-        if w in _INGREDIENT_INTRO:
-            after = after[:i]
-            break
     return not any(w in COMPOUND and w not in want for w in after)
 
 

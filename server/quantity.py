@@ -154,7 +154,8 @@ def parse(text: str) -> dict[str, float]:
             out[dim] = qty
     pack = _PACK_OF.search(t)
     n = int(pack.group(1) or pack.group(2)) if pack else 1
-    if n > 1 and not multi_spans:               # "6 x 12 oz" already counted the cans
+    # "6 x 12 oz" already counted the cans; "6 pack, 72 fl oz total" states the total
+    if n > 1 and not multi_spans and not re.search(r"\btotal\b", t):
         for dim in ("weight", "volume"):
             if dim in out:
                 out[dim] = round(out[dim] * n, 3)

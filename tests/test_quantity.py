@@ -43,6 +43,7 @@ import quantity as q
     ("Whole Milk, 1 Gallon", {"volume": 128.0}),
     ("Heavy Cream, Half Pint", {"volume": 8.0}),      # Codex review: half halves
     ("Eggs, 12-pack", {"each": 12.0}),                # Codex review: a pack count is a count
+    ("Sparkling Water, 6 pack, 72 fl oz total", {"volume": 72.0, "each": 6.0}),
     ("Large Eggs, Pack of 12", {"each": 12.0}),
     ("Half-and-Half, Quart", {"volume": 32.0}),
 ])

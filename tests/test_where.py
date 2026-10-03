@@ -453,3 +453,19 @@ def test_ingredients_after_with_do_not_change_the_product():
     assert where.relevant("Shea Moisture Daily Hydration Body Lotion with Virgin Coconut Oil 16oz",
                           "body lotion") is True
     assert where.relevant("Wegmans Body Lotion Oil Blend", "body lotion") is False
+    # and a match found only in the ingredient clause is not the item (Codex review)
+    assert where.relevant("Body Lotion with Virgin Coconut Oil, 16 fl oz", "coconut oil") is False
+    assert where.relevant("Nutiva Organic Coconut Oil, 15 fl oz", "coconut oil") is True
+
+
+def test_a_conventional_stand_in_is_kept_until_its_regular_product_is_checked(monkeypatch, stores, organic_on):
+    """Codex review: A's stand-in was dropped when A said 'no organic' while B
+    was unreachable — the regular search never ran, so A never contradicted it."""
+    cid = add("quillchard", food=True)
+    stub(monkeypatch, {"901": {"organic quillchard": [], "quillchard": [rec("Quillchard 16 oz", 2.0, "")]},
+                       "902": {"organic quillchard": [], "quillchard": [rec("Quillchard 16 oz", 3.0, "")]}})
+    assert ask(cid)["organic_fallback"] is True
+    stub(monkeypatch, {"901": {"organic quillchard": []}}, fail={"902"})
+    client.post("/api/where", json={"catalog_ids": [cid]})
+    item = next(i for i in client.get("/api/state").json()["items"] if i["catalog_id"] == cid)
+    assert item["price"] and item["price"]["store"] == "Where A"
