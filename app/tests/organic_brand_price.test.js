@@ -548,6 +548,14 @@ function openEditor(b, i) {
     const weg = groups.find(g => g.startsWith("🏬 Wegmans")) || "";
     check("the item stays under the store you chose", /milk/.test(weg), groups);
     check("and the cheaper store is named beside it", /Cheapest: Whole Foods[^]*you chose Wegmans/.test(weg), weg);
+    const f = boot({ items: [item(1, "milk", { store: "Wegmans", store_source: "preferred" })],
+                     where: { partial: false, items: { "1": { ...where.items["1"], organic_fallback: true } } } });
+    await settle();
+    f.doc.getElementById("stores-btn").click();
+    f.doc.getElementById("plan-byprice").click();
+    await settle(); await settle();
+    const fg = [...f.doc.querySelectorAll("#plan-groups .plangroup")].map(g => g.textContent).join("|");
+    check("a regular-product stand-in says so under your pick too (Codex review)", /no organic found/.test(fg), fg);
   }
 
   console.log("\n--- 8d. the plan and the chip agree on a partial check (Codex review)");

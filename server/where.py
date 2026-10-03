@@ -183,18 +183,6 @@ def _words(text: str) -> list[str]:
     return [_sing(w.replace("-", "")) for w in re.findall(r"[a-z]+(?:-[a-z]+)*", canonical(text))]
 
 
-def _leading_phrase(name: str, brand: str) -> str:
-    """The product's own phrase: the first comma/bar-separated segment that is
-    not just its brand — "365 by Whole Foods Market, Tofu Firm Organic" leads
-    with the tofu, not the store brand."""
-    brand_words = set(_words(brand)) | {"by"}
-    for seg in _DELIM.split(canonical(name)):
-        words = _words(seg)
-        if words and not set(words) <= brand_words:
-            return seg
-    return ""
-
-
 def _covers(want: list[str], got: list[str]) -> bool:
     """Every wanted word is in the product — written apart or joined:
     "oat milk" matches "Oatmilk", "oatmilk" matches "Oat Milk", "grass fed"
@@ -260,7 +248,6 @@ def relevant(name: str, term: str, brand: str = "") -> bool:
     # would let a cheaper 1% win (Codex review)
     if any(p not in _percents(name) for p in _percents(term)):
         return False
-    head = _leading_phrase(name, brand)
     # "Daisy sour cream": the item names the product's WHOLE brand, so those
     # words are satisfied by the brand. A brand only partly in the item
     # ("Pumpkin Tree" for pumpkin puree) satisfies nothing (Codex review).
@@ -270,18 +257,15 @@ def relevant(name: str, term: str, brand: str = "") -> bool:
         if not rest:
             return True   # the item IS the brand ("Nutella"): any of its products
         want = rest
-    if not _covers(want, _core_words(name, brand)):
+    core = _core_words(name, brand)
+    if not _covers(want, core):
         return False
-    # a product-type word AFTER any of the item's words in the leading phrase
-    # makes it another product: "Rice Cakes, Brown Rice" is cakes. One BEFORE
-    # them describes it: "Honey Roasted Peanuts" are peanuts.
-    lead = _words(head)
-    # "Body Lotion with Virgin Coconut Oil": what follows "with" lists
-    # ingredients — it neither names the item nor changes what the product is
-    for i, w in enumerate(lead):
-        if w in _INGREDIENT_INTRO:
-            lead = lead[:i]
-            break
+    # a product-type word AFTER any of the item's words makes it another
+    # product: "Rice Cakes, Brown Rice" is cakes. One BEFORE them describes
+    # it: "Honey Roasted Peanuts" are peanuts. Read over the same span as the
+    # word check — brand off, cut at the ingredient clause — so a variety in a
+    # later segment ("Cheese Slices, Non-Smoked, Provolone") still counts.
+    lead = core
     at = _positions(lead, want)
     if not at:
         # the item is only mentioned outside the product's own phrase — an

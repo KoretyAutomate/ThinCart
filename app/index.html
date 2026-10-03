@@ -1702,12 +1702,14 @@ function whereLineMain(it, w, unsettled) {
   if (!w) return '';
   if (w.cheapest) {
     const q = w.cheapest;
+    const how = [q.total_label || q.unit_label || '$' + q.amount.toFixed(2),
+                 w.organic_fallback ? T().no_organic : ''].filter(Boolean).join(' · ');
     // grouped under the owner's pick: name the store the cheaper price is at
     if (it.store_source === 'preferred' && it.store !== q.store)
-      return T().price_line(q.store, q.total_label || q.unit_label, agoLabel(q.fetched_at), it.store);
+      return T().price_line(q.store, how, agoLabel(q.fetched_at), it.store);
     // a partial check that could not reach the stored winner: shown, not obeyed
     if (it.store_source === 'price' && it.store !== q.store)
-      return T().partial_check(q.store, q.total_label || q.unit_label || '$' + q.amount.toFixed(2));
+      return T().partial_check(q.store, how);
     // products that could not be measured in the winner's unit are still shown
     const unranked = (w.quotes || []).filter(u => !u.unit_label && u.store_id !== q.store_id);
     return [q.total_label || `$${q.amount.toFixed(2)}`, q.unit_label || q.unit_price, q.product,

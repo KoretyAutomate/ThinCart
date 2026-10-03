@@ -580,3 +580,8 @@ def test_brand_only_items_and_ie_plurals():
     assert where.relevant("Chocolate Chip Cookies, 12 oz", "cookie") is True
     assert where.relevant("Chocolate Brownies, 12 oz", "brownie") is True
     assert where.relevant("Oatmeal Cookie, 2 oz", "cookies") is True
+
+
+def test_a_variety_in_a_later_segment_is_where_the_item_is_named():
+    """Codex review: 'provolone' was only looked for in the first segment."""
+    assert where.relevant("Organic Valley Cheese Slices, Non-Smoked, Provolone", "provolone", "Organic Valley") is True

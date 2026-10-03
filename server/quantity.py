@@ -204,7 +204,6 @@ _UNIT_PRICE = re.compile(rf"\$\s*([\d,]*\.?\d+)\s*(?:/|per\s+|\s+)\s*(?:1\s*)?({
 # Only physical measures: a store's per-sheet/each/roll price is unreliable
 # ("$2.78/Sheets" on a two-roll pack), and per-count is often per package.
 _TRUSTED_UNIT_DIMS = ("weight", "volume", "area")
-DISAGREE = 0.15
 
 
 # Common package sizes, oz / fl oz. A size implied by a unit price shown to
@@ -284,24 +283,35 @@ def quantities(rec: dict) -> dict[str, float]:
         else:
             del out[dim]
         settled.add(dim)
-    for dim, by_unit in from_unit_price(rec.get("amount"), rec.get("unit_price") or "").items():
-        if dim in settled:      # the unit price already had its say there
+    implied = from_unit_price(rec.get("amount"), rec.get("unit_price") or "")
+    for dim in _TRUSTED_UNIT_DIMS:
+        rng = _unit_price_range(rec, dim)
+        if dim in settled or rng is None:
             continue
+        lo, hi = rng[0] * (1 - SAME), rng[1] * (1 + SAME)
         if dim in pack_q and _sold_by(rec, dim, pack_q[dim]):
             # "1 lb." at $1.46 and $0.73/lb is a ~2 lb bunch SOLD BY WEIGHT:
             # the pack size names the pricing basis, the price is for the bunch
-            out[dim] = by_unit
+            if dim in implied:
+                out[dim] = implied[dim]
+            else:
+                del out[dim]
             continue
-        # "…2% Milk, 59 oz" at "$0.12/fluid ounce": the product STATES 59 (in
-        # oz). A rounded unit price must not invent a different fl oz size
-        # beside it — for a liquid, comparable() reads the 59 as fl oz.
+        if dim in out:
+            # a stated size the unit price rules out is not this product's
+            # size ("627.3 sq ft" at "$0.10/sq ft") — checked against the
+            # whole range the cent rounding allows, guess or no guess
+            if not lo <= out[dim] <= hi:
+                del out[dim]
+            continue
+        # "…2% Milk, 59 oz" at "$0.12/fluid ounce": the product STATES its
+        # size; the unit price must not invent a different fl oz one beside
+        # it — for a liquid, comparable() reads the 59 as fl oz.
         sibling = {"weight": "volume", "volume": "weight"}.get(dim)
-        if dim not in out and sibling in out and abs(by_unit - out[sibling]) > SAME * out[sibling]:
+        if sibling in out:
             continue
-        if dim not in out:
-            out[dim] = by_unit
-        elif abs(by_unit - out[dim]) / out[dim] > DISAGREE and not _rounding_explains(rec, dim, out[dim]):
-            del out[dim]
+        if dim in implied:
+            out[dim] = implied[dim]
     return out
 
 
@@ -313,18 +323,6 @@ def _sold_by(rec: dict, dim: str, pack_qty: float) -> bool:
         return False
     unit_dim, unit_size = UNITS[m.group(2)]
     return unit_dim == dim and abs(unit_size - pack_qty) < 1e-6
-
-
-def _rounding_explains(rec: dict, dim: str, qty: float) -> bool:
-    """A unit price shown to the cent is coarse: $15.99 over 627.3 sq ft is
-    $0.0255, displayed "$0.03". If the parsed size reproduces the displayed
-    unit price once rounded to cents, the disagreement is rounding."""
-    m = _UNIT_PRICE.search(_norm(rec.get("unit_price") or ""))
-    if not m or rec.get("amount") is None:
-        return False
-    shown = float(m.group(1).replace(",", ""))
-    _, size = UNITS[m.group(2)]
-    return round(float(rec["amount"]) / (qty / size), 2) == round(shown, 2)
 
 
 # Items that are ONLY ever sold as a liquid. Only for these is "59 oz" read as

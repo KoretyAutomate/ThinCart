@@ -187,3 +187,10 @@ def test_an_ambiguous_size_from_a_rounded_unit_price_is_unknown():
     assert q.from_unit_price(3.19, "$0.05/fl oz") == {}
     assert q.from_unit_price(3.09, "$0.05/fl oz") == {}                    # 59 and 64 both fit
     assert q.from_unit_price(1.46, "$0.73/lb.") == {"weight": 32.0}
+
+
+def test_a_stated_size_is_checked_even_when_no_size_can_be_inferred():
+    """Codex review: '627.3 sq ft' at $15.99 and '$0.10/sq ft' (≈160 sq ft)
+    was kept because the unit price could not pin an exact size itself."""
+    rec = {"pack_size": "627.3 sq ft", "amount": 15.99, "unit_price": "$0.10/sq ft", "name": "Paper Towels"}
+    assert "area" not in q.quantities(rec)
