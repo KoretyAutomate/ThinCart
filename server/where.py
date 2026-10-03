@@ -129,35 +129,27 @@ def rank(quotes: list[dict]) -> tuple[dict | None, bool]:
 
 
 # --- Phase 8: relevance, and the comparison in units we compute ----------------
-
-# Words that turn the item into a DIFFERENT product when they follow it in a
-# product name: "Lime Juice" is not lime, "Egg White Wraps" not egg whites,
-# "Cauliflower Rice" not cauliflower. Drawn from the false positives in the
-# cached search results (PLAN.md Phase 8, review delta 6). Ignored when the
-# item's own name contains the word ("lime juice" may match "Lime Juice").
-_COMPOUND_WORDS = (
-    "juice", "drink", "drinks", "water", "soda", "tea", "coffee", "kombucha", "smoothie", "shake",
-    "chicken", "beef", "pork", "turkey", "cutlet", "cutlets", "breast", "ravioli", "wrap", "wraps",
-    "bite", "bites", "blend", "waffle", "waffles", "honey", "syrup", "chip", "chips", "tortilla",
-    "tortillas", "yogurt", "bake", "bowl", "bowls", "burrito", "sauce", "dressing", "paste",
-    "flour", "cake", "cakes", "cracker", "crackers", "cereal", "vinegar", "wine", "soup", "broth",
-    "probiotic", "oil", "butter", "bread", "bar", "bars", "cookie", "cookies", "candy",
-    "chocolate", "cream", "pie", "mix", "seasoning", "spread", "dip", "hummus", "salsa",
-    "marinade", "marinated", "kit", "rice", "noodle", "noodles", "sprouts", "pudding", "jam",
-    "relish", "pickle", "pickles", "vinaigrette", "aioli", "mayo", "mayonnaise", "ketchup", "mustard",
-    "frosting", "icing", "glaze", "filling",
-    "jelly", "popsicle", "gummies", "granola", "muffin", "muffins", "pancake", "pancakes", "pizza",
-    "sandwich", "dumpling", "dumplings",
-)
+#
+# PLAN.md §2026-10-04. The STORE's own search ranking decides which product
+# an item is: its first fitting result. Relevance is only a plain word check
+# that this result names the item at all, and sizes of that same product are
+# compared with it. Heuristics that tried to judge products on their own
+# (product-type word lists, segment counts, ingredient clauses) were removed:
+# each fix opened the next edge case on real names.
 
 # Words that say nothing about WHICH product: not required to appear.
 _NOT_CONTENT = frozenset(("organic", "fresh", "frozen", "conventional", "the", "and", "of", "with", "a", "an"))
 _DELIM = re.compile(r"[,|(\[]")
-_INGREDIENT_INTRO = frozenset(("with", "made", "in", "featuring", "plus", "infused"))
+# Packaging words: two listings differing only in these (and size) are one
+# product in two sizes ("…Paper Towels, 12 Rolls, Family Pack" / "…6 Rolls").
+_PACK_WORDS = frozenset((
+    "family", "value", "pack", "bulk", "size", "bag", "bagged", "box", "jar", "can", "bottle", "carton",
+    "tub", "count", "ct", "each", "ea", "multipack", "club", "mega", "jumbo", "big", "large",
+))
 
 
 def _sing(word: str) -> str:
-    # "cookies" and "cookie" must fold alike: both to "cooky" (Codex review)
+    # "cookies" and "cookie" must fold alike: both to "cooky"
     if word.endswith("ies") and len(word) > 4:
         return word[:-3] + "y"
     if word.endswith("ie") and len(word) > 4:
@@ -173,21 +165,17 @@ def _percents(text: str) -> set[str]:
     return {f"{float(m):g}%" for m in re.findall(r"(\d+(?:\.\d+)?)\s*%", canonical(text))}
 
 
-# folded exactly as product words are, or "cookies" (-> "cooky") slips past it
-COMPOUND = frozenset(_sing(w) for w in _COMPOUND_WORDS)
-
-
 def _words(text: str) -> list[str]:
-    # a hyphenated word stays ONE word: "Stir-In Paste" has no "in" that could
-    # read as an ingredient clause, and "grass-fed" is "grassfed" (Codex review)
+    # a hyphenated word stays ONE word: "grass-fed" is "grassfed"
     return [_sing(w.replace("-", "")) for w in re.findall(r"[a-z]+(?:-[a-z]+)*", canonical(text))]
 
 
 def _covers(want: list[str], got: list[str]) -> bool:
     """Every wanted word is in the product — written apart or joined:
-    "oat milk" matches "Oatmilk", "oatmilk" matches "Oat Milk", "grass fed"
-    matches "Grassfed" (Codex review: real Wegmans oat milks were rejected)."""
+    "oat milk" matches "Oatmilk", "grass fed" matches "Grassfed"."""
     have = set(got) | {a + b for a, b in zip(got, got[1:], strict=False)}
+    # "Riced Cauliflower" is cauliflower rice; "Sliced Turkey", turkey slices
+    have |= {w[:-1] for w in got if w.endswith("ed")} | {w[:-2] for w in got if w.endswith("ed")}
     for i, w in enumerate(want):
         joined_next = i + 1 < len(want) and w + want[i + 1] in have
         joined_prev = i > 0 and want[i - 1] + w in have
@@ -196,100 +184,69 @@ def _covers(want: list[str], got: list[str]) -> bool:
     return True
 
 
-def _positions(lead: list[str], want: list[str]) -> list[int]:
-    """Where in the product's phrase the item is named, either spelling."""
-    pairs = {a + b for a, b in zip(want, want[1:], strict=False)}
-    return [i for i, t in enumerate(lead)
-            if t in want or t in pairs or (i + 1 < len(lead) and t + lead[i + 1] in want)]
-
-
 def _term_words(term: str) -> list[str]:
-    """The item's words, minus a size typed into its name: "salmon 2 lb" and
-    "milk 64 fl oz" are salmon and milk. Only whole size PHRASES go — "eggs"
-    alone is the product, not a count (Codex review)."""
+    """The item's words, minus a size typed into its name ("salmon 2 lb",
+    "milk 64 fl oz"). When that would empty it ("12 eggs") the noun stays."""
     words = _words(quantity.strip_sizes(term))
-    # "12 eggs": the count IS the product's own noun — keep the noun
     return words or _words(term)
 
 
-def _core_words(name: str, brand: str) -> list[str]:
-    """The words that describe THIS product: the name without its brand —
-    a brand-only segment ("365 by Whole Foods Market, …") or a brand written
-    inline at the front ("Pumpkin Tree Strawberry … Puree") — cut at the
-    first ingredient clause ("… with Chicken & Pumpkin"). The item's words
-    must be found here — not in the brand, not among the ingredients."""
+def _own_words(name: str, brand: str) -> list[str]:
+    """The product's words without its brand — a brand-only segment ("365 by
+    Whole Foods Market, …") or a brand written inline at the front."""
     brand_words = set(_words(brand)) | {"by"}
     segs = [s for s in _DELIM.split(canonical(name)) if _words(s)]
     while segs and set(_words(segs[0])) <= brand_words:
         segs = segs[1:]
-    # Descriptive segments are few ("SoyBoy Tofu, Organic, Extra Firm";
-    # "Cheese Slices, Non-Smoked, Provolone"); ingredient and flavour lists are
-    # long ("Baby Puree, Organic, White Bean, Pumpkin, Apple"). A name of up to
-    # three segments is all description; a longer one is read only to its
-    # second, so a flavour list cannot name the item (Codex review).
-    words = _words(" ".join(segs if len(segs) <= 3 else segs[:2]))
-    lead_brand = _words(brand)
-    if lead_brand and words[:len(lead_brand)] == lead_brand:
-        words = words[len(lead_brand):]
-    for i, w in enumerate(words):
-        if w in _INGREDIENT_INTRO:
-            return words[:i]
+    words = _words(quantity.strip_sizes(" ".join(segs)))
+    lead = _words(brand)
+    if lead and words[:len(lead)] == lead:
+        words = words[len(lead):]
     return words
 
 
 def relevant(name: str, term: str, brand: str = "") -> bool:
-    """Is this product the item, rather than something made from it?
-    Every content word of the item appears (any order — Whole Foods writes
-    "Tofu Firm Organic"), and no COMPOUND word follows it before the first
-    comma. An item with no English name cannot be checked, and passes."""
+    """Does this product name the item? Every content word of the item
+    appears in the product's own words (any order, joined or apart), and a
+    percentage in the item ("2% milk") matches. Nothing more: WHICH of the
+    matching products is the item is the store's ranking, not this check."""
     want = [w for w in _term_words(term) if w not in _NOT_CONTENT]
-    # decided on the NORMALIZED term: "２％ milk" is ASCII once folded
     if not want or not canonical(term).isascii():
         return True
-    # numbers that name the product ("2% milk") must match: words alone
-    # would let a cheaper 1% win (Codex review)
     if any(p not in _percents(name) for p in _percents(term)):
         return False
-    # "Daisy sour cream": the item names the product's WHOLE brand, so those
-    # words are satisfied by the brand. A brand only partly in the item
-    # ("Pumpkin Tree" for pumpkin puree) satisfies nothing (Codex review).
+    # "Daisy sour cream": an item naming the product's WHOLE brand has those
+    # words satisfied by the brand; an item that is only the brand matches all
     brand_w = _words(brand)
     if brand_w and all(w in want for w in brand_w):
-        rest = [w for w in want if w not in brand_w]
-        if not rest:
-            return True   # the item IS the brand ("Nutella"): any of its products
-        want = rest
-    core = _core_words(name, brand)
-    if not _covers(want, core):
-        return False
-    # a product-type word AFTER any of the item's words makes it another
-    # product: "Rice Cakes, Brown Rice" is cakes. One BEFORE them describes
-    # it: "Honey Roasted Peanuts" are peanuts. Read over the same span as the
-    # word check — brand off, cut at the ingredient clause — so a variety in a
-    # later segment ("Cheese Slices, Non-Smoked, Provolone") still counts.
-    lead = core
-    at = _positions(lead, want)
-    if not at:
-        # the item is only mentioned outside the product's own phrase — an
-        # ingredient ("Lemonade, made with real lemon"), not the item
-        return False
-    after = lead[at[0] + 1:]
-    return not any(w in COMPOUND and w not in want for w in after)
+        want = [w for w in want if w not in brand_w]
+        if not want:
+            return True
+    return _covers(want, _own_words(name, brand))
+
+
+def _identity(rec: dict) -> tuple[str, tuple[str, ...]]:
+    """One product across its sizes: brand + name without sizes and pack words."""
+    words = _words(quantity.strip_sizes(rec.get("name") or ""))
+    return canonical(rec.get("brand") or ""), tuple(w for w in words if w not in _PACK_WORDS)
 
 
 def fitting(recs: list[dict], pick_sku: str | None, organic: bool, brand: str,
             term: str) -> tuple[list[tuple[dict, bool]], str]:
-    """Every candidate this store offers for the item, and a status.
-    A pick is the only candidate at its chain (checked, not trusted);
-    otherwise each in-stock, priced, organic-if-asked, brand-matching AND
-    relevant result is one."""
+    """This store's candidates for the item, and a status.
+    A pick is the only candidate at its chain (checked, not trusted).
+    Otherwise the store's FIRST fitting result (in stock, priced, organic if
+    asked, the preferred brand) that names the item is the product, and other
+    sizes of that same product join it."""
     rec, status, exact = choose(recs, pick_sku, organic, brand)
     if pick_sku:
         return ([(rec, True)] if rec else []), status
-    out = [(r, False) for r in recs
-           if r.get("available") and r.get("amount") is not None
-           and fits(r, organic, brand) and relevant(r.get("name") or "", term, r.get("brand") or "")]
-    return out, ("ok" if out else "no_match")
+    fit = [r for r in recs if r.get("available") and r.get("amount") is not None and fits(r, organic, brand)]
+    first = next((r for r in fit if relevant(r.get("name") or "", term, r.get("brand") or "")), None)
+    if first is None:
+        return [], "no_match"
+    same = _identity(first)
+    return [(r, False) for r in fit if r is first or _identity(r) == same], "ok"
 
 
 def compare(cands: list[tuple[dict, dict, bool]], wanted: tuple[str, float] | None,

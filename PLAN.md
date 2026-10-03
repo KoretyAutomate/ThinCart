@@ -2745,3 +2745,32 @@ price after the fix (journal/DB evidence).
 8. **Offline projection.** `state()` also sends each item's history store, so
    the phone can fall back preferred → price → history itself; a queued
    edit touching name/brand/buy_qty hides the item's price chip until synced.
+
+### 2026-10-04 — Codex round 23: relevance is anchored to the store's own ranking
+
+23 pre-push rounds converged on everything except one class: "is this
+product the item?". Every heuristic added (product-type word list, segment
+counts, ingredient clauses, head-noun position) produced the next edge case
+on real names — chicken breast rejected for chicken, "Riced Cauliflower"
+rejected for cauliflower rice, a size segment flipping the answer, a broth
+accepted for chicken. The cause was a Phase 8 design choice, not a missing
+rule: each store was represented by the cheapest of ALL its fitting results,
+so the relevance heuristic decided which product won. Before Phase 8 the
+store's own search ranking chose the product (its first fitting result), and
+Codex twice pointed at that ("previously, that store's first candidate was
+dill weed").
+
+Decision:
+- **A store's product is its FIRST fitting result** (in stock, priced,
+  organic if asked, brand) that names every word of the item — the store's
+  own ranking picks WHICH product.
+- **Sizes of that same product** at that store (same brand, same name once
+  sizes and pack words are removed) join it as candidates, so "how much I
+  want" still chooses 2 × 1 lb over a 20 lb bag of the same rice.
+- **Relevance is a plain word check**: every content word of the item (sizes
+  removed, "Oatmilk" = "oat milk", plural-folded) appears in the product's
+  own words (brand removed). The product-type list, segment counting and
+  ingredient-clause rules are removed — they were the source of the churn.
+- A product the store ranks first that is genuinely the wrong thing is the
+  store's search problem, as it was before Phase 8; the fix for one item is
+  the existing exact-product pick, which bypasses all of this.

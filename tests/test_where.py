@@ -212,15 +212,17 @@ def test_an_unreadable_amount_is_flagged_not_guessed(monkeypatch, stores):
     assert it["buy_qty_ok"] is False and it["dim"] == "weight"              # compared per unit instead
 
 
-def test_rice_is_not_rice_cakes(monkeypatch, stores):
+def test_the_stores_ranking_picks_the_product_not_the_cheapest_match(monkeypatch, stores):
+    """PLAN.md §2026-10-04: the store's first matching result IS the product;
+    a cheaper, different product further down ("…Cakes") is not a size of it."""
     cid = add("quillrye")
-    stub(monkeypatch, {"901": {"quillrye": [rec("Quillrye Cakes, 4 oz", 0.5, ""),
-                                            rec("Quillrye, 2 lb", 4.0, "")]}})
+    stub(monkeypatch, {"901": {"quillrye": [rec("Quillrye, 2 lb", 4.0, ""),
+                                            rec("Quillrye Cakes, 4 oz", 0.5, "")]}})
     it = ask(cid)
     assert [q["product"] for q in it["quotes"]] == ["Quillrye, 2 lb"]
 
 
-def test_each_store_is_represented_by_its_best_candidate_not_its_first(monkeypatch, stores):
+def test_sizes_of_the_same_product_compete_at_a_store(monkeypatch, stores):
     cid = add("quilloats")
     stub(monkeypatch, {"901": {"quilloats": [rec("Quilloats, 16 oz", 4.0, ""), rec("Quilloats, 42 oz", 6.0, "")]}})
     it = ask(cid)

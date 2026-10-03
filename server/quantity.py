@@ -52,7 +52,8 @@ _ADJ = r"(?:(?:double|triple|mega|plus|family|huge|big|giant|regular|jumbo|selec
 # "12 count", "12-count", "16-ounce" (Codex review: hyphenated sizes were lost)
 _AMOUNT = re.compile(rf"{_NUM}\s*-?\s*{_ADJ}({_UNIT_RE})(?![a-z])")
 _MULTI = re.compile(rf"(\d+)\s*(?:x|×)\s*{_NUM}\s*({_UNIT_RE})(?![a-z])")
-_PER_ROLL = re.compile(r"(\d+)\s*sheets?\s*per\s*roll")
+# "103 Sheets Per Roll", "240 Sheets/roll"
+_PER_ROLL = re.compile(r"(\d+)\s*sheets?\s*(?:per|/)\s*roll")
 # nutrition facts in names are not package sizes: "48g protein", "5 g sugar"
 _NUTRIENT = re.compile(r"\s*(?:of\s+)?(?:protein|fat|sugar|sugars|carb|carbs|fiber|fibre|sodium|calorie)")
 
@@ -100,7 +101,8 @@ _WORD_SIZE = re.compile(r"(?<![\d.])(?<![\d.]\s)\b(half[\s-]+)?(gallon|quart|pin
 _WORD_UNIT = {"gallon": 128.0, "quart": 32.0, "pint": 16.0}
 # "(Pack of 6)", "6 pack", "6-pack", "6 cans", "12 bottles": a count of the
 # stated size, not a size of its own.
-_PACK_OF = re.compile(r"\bpack\s+of\s+(\d+)\b|(?<![\d.])(\d+)\s*-?\s*(?:pack|pk|cans|bottles|cartons|jars|boxes)\b")
+_PACK_OF = re.compile(
+    r"\bpack\s+of\s+(\d+)\b|(?<![\d.])(\d+)\s*(?:-|/)?\s*(?:pack|pk|cans|bottles|cartons|jars|boxes)\b")
 # "12 oz (340 g)" is one package stated in two units; values this close are
 # the same size, rounded differently.
 SAME = 0.03
@@ -171,6 +173,8 @@ def parse(text: str) -> dict[str, float]:
     if n > 1 and "each" not in seen:            # "Eggs, 12-pack" / "Pack of 12" is 12 of them
         out["each"] = float(n)
     per = _PER_ROLL.search(t)
+    if per and n > 1 and "roll" not in out:     # "240 Sheets/roll, 24/Pack" is 24 rolls
+        out["roll"] = float(n)
     if per and "roll" in out and "sheet" not in out:
         out["sheet"] = int(per.group(1)) * out["roll"]
     return {d: q for d, q in out.items() if q > 0}
