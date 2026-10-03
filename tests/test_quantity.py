@@ -56,11 +56,12 @@ def test_parse(text, want):
     assert q.parse(text) == want
 
 
-def test_a_rounded_unit_price_snaps_to_the_standard_package():
-    """$3.09 at "$0.05/fl oz" is 61.8 — but a half gallon (64) is the only
-    standard size the cent rounding allows; 61.8 made '1 gal' need 3 cartons."""
-    assert q.from_unit_price(3.09, "$0.05/fl oz") == {"volume": 64.0}
-    rec = {"pack_size": "", "amount": 3.09, "unit_price": "$0.05/fl oz", "name": "Reduced Fat Milk"}
+def test_a_rounded_unit_price_snaps_only_when_one_standard_size_fits():
+    """A size a cent-rounded unit price implies is used only when exactly one
+    standard package fits its range: $6.79 at '$0.68/oz' is the 10 oz block."""
+    assert q.from_unit_price(6.79, "$0.68/ounce") == {"weight": 10.0}
+    # the real half-gallon record states its size in words, which wins
+    rec = {"pack_size": "", "amount": 3.09, "unit_price": "$0.05/fl oz", "name": "Reduced Fat 2% Milk, Half Gallon"}
     assert q.cost_to_cover(3.09, q.quantities(rec)["volume"], 128) == (6.18, 2)
 
 
@@ -178,3 +179,11 @@ def test_a_variable_weight_item_is_measured_by_its_price_not_its_basis():
     # a real one-pound package priced as such is left alone
     rec = {"pack_size": "1 lb.", "amount": 3.49, "unit_price": "$3.49/lb.", "name": "Organic Spinach"}
     assert q.quantities(rec)["weight"] == 16.0
+
+
+def test_an_ambiguous_size_from_a_rounded_unit_price_is_unknown():
+    """Codex review: a 59 fl oz carton at $3.19 shows '$0.05/fl oz' — so do
+    64 fl oz ones. Guessing 64 miscounted cartons for '1 gal'."""
+    assert q.from_unit_price(3.19, "$0.05/fl oz") == {}
+    assert q.from_unit_price(3.09, "$0.05/fl oz") == {}                    # 59 and 64 both fit
+    assert q.from_unit_price(1.46, "$0.73/lb.") == {"weight": 32.0}

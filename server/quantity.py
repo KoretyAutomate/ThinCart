@@ -233,9 +233,13 @@ def from_unit_price(amount, unit_price: str) -> dict[str, float]:
     fits = [s for s in _STANDARD.get(dim, ()) if lo <= s <= hi]
     if len(fits) == 1:
         return {dim: float(fits[0])}
-    if len(fits) > 1:   # several standard sizes fit: take the nearest to the estimate
-        return {dim: float(min(fits, key=lambda s: abs(s - estimate)))}
-    return {dim: round(estimate, 3)}
+    # Several standard sizes fit (59 and 64 fl oz both show "$0.05/fl oz" at
+    # $3.19), or none does and the rounding is wide: the size is UNKNOWN, and
+    # inventing one would miscount packages (Codex review). Only an estimate
+    # the rounding pins within 4% is used as is.
+    if not fits and (hi - lo) / estimate <= 0.04:
+        return {dim: round(estimate, 3)}
+    return {}
 
 
 def _unit_price_range(rec: dict, dim: str) -> tuple[float, float] | None:

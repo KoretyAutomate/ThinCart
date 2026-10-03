@@ -570,3 +570,13 @@ def test_descriptors_in_later_segments_still_count_and_frosting_is_not_cheese():
     assert where.relevant("Organic Valley Cheese Slices, Non-Smoked, Provolone", "cheese slices provolone",
                           "Organic Valley") is True
     assert where.relevant("Duncan Hines Whipped Cream Cheese Frosting", "whipped cream cheese", "Duncan Hines") is False
+
+
+def test_brand_only_items_and_ie_plurals():
+    """Codex review: 'Nutella' and 'Cheetos' matched nothing; 'cookie' never
+    matched 'Cookies'."""
+    assert where.relevant("Nutella Hazelnut Spread, 13 oz", "Nutella", "Nutella") is True
+    assert where.relevant("Jif Creamy Peanut Butter", "Nutella", "Jif") is False
+    assert where.relevant("Chocolate Chip Cookies, 12 oz", "cookie") is True
+    assert where.relevant("Chocolate Brownies, 12 oz", "brownie") is True
+    assert where.relevant("Oatmeal Cookie, 2 oz", "cookies") is True

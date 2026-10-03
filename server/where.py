@@ -157,8 +157,11 @@ _INGREDIENT_INTRO = frozenset(("with", "made", "in", "featuring", "plus", "infus
 
 
 def _sing(word: str) -> str:
+    # "cookies" and "cookie" must fold alike: both to "cooky" (Codex review)
     if word.endswith("ies") and len(word) > 4:
         return word[:-3] + "y"
+    if word.endswith("ie") and len(word) > 4:
+        return word[:-2] + "y"
     if word.endswith("oes") or word.endswith("ches") or word.endswith("shes"):
         return word[:-2]
     if word.endswith("s") and not word.endswith("ss") and len(word) > 3:
@@ -263,7 +266,10 @@ def relevant(name: str, term: str, brand: str = "") -> bool:
     # ("Pumpkin Tree" for pumpkin puree) satisfies nothing (Codex review).
     brand_w = _words(brand)
     if brand_w and all(w in want for w in brand_w):
-        want = [w for w in want if w not in brand_w] or want
+        rest = [w for w in want if w not in brand_w]
+        if not rest:
+            return True   # the item IS the brand ("Nutella"): any of its products
+        want = rest
     if not _covers(want, _core_words(name, brand)):
         return False
     # a product-type word AFTER any of the item's words in the leading phrase
