@@ -68,11 +68,21 @@ def _fraction(m: re.Match) -> str:
     return f"{whole + num / den:g}" if den else " ?? "
 
 
+def _vulgar(text: str) -> str:
+    """"1½" must read 1 1/2, but NFKC alone turns it into "11⁄2" (eleven
+    halves). So each fraction character becomes " n/d" BEFORE normalizing."""
+    return "".join(
+        " " + unicodedata.normalize("NFKC", ch).replace("\u2044", "/") + " "
+        if unicodedata.name(ch, "").startswith("VULGAR FRACTION") else ch
+        for ch in text
+    )
+
+
 def _norm(text: str) -> str:
-    t = unicodedata.normalize("NFKC", text or "").lower()
-    t = t.replace("\u2044", "/")                                   # NFKC turns "½" into "1⁄2"
+    t = unicodedata.normalize("NFKC", _vulgar(text or "")).lower()
+    t = t.replace("\u2044", "/")
     t = re.sub(r"(?<=\d),(?=\d{3}(?!\d))", "", t)                 # "1,100 sheets" -> "1100 sheets"
-    t = re.sub(r"(?:(\d+)\s+)?(\d+)\s*/\s*(\d+)", _fraction, t)   # "1 1/2 lb" -> "1.5 lb"
+    t = re.sub(r"(?:(\d+)(?:\s+|\s*-\s*))?(\d+)\s*/\s*(\d+)", _fraction, t)  # "1 1/2", "1-1/2" -> "1.5"
     t = re.sub(r"(?<![\d])\.(\d)", r"0.\1", t)                    # ".5 lb" -> "0.5 lb"
     t = re.sub(r"(?<=[a-z])\.", "", t)          # "fl. oz." -> "fl oz", keep "0.5"
     t = t.replace("fluid oz", "fl oz").replace("fl.oz", "fl oz")

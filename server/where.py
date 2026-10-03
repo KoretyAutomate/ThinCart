@@ -163,6 +163,10 @@ def _sing(word: str) -> str:
     return word
 
 
+def _percents(text: str) -> set[str]:
+    return {f"{float(m):g}%" for m in re.findall(r"(\d+(?:\.\d+)?)\s*%", canonical(text))}
+
+
 def _words(text: str) -> list[str]:
     return [_sing(w) for w in re.findall(r"[a-z]+", canonical(text))]
 
@@ -175,6 +179,10 @@ def relevant(name: str, term: str) -> bool:
     want = [w for w in _words(term) if w not in _NOT_CONTENT]
     if not want or not term.isascii():
         return True
+    # numbers that name the product ("2% milk") must match: words alone
+    # would let a cheaper 1% win (Codex review)
+    if any(p not in _percents(name) for p in _percents(term)):
+        return False
     head = canonical(_DELIM.split(canonical(name), 1)[0])
     got = _words(name)
     if any(w not in got for w in want):

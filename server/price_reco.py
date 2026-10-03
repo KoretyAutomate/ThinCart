@@ -73,6 +73,12 @@ def save(conn: sqlite3.Connection, catalog_id: int, key: str, answer: dict, ts: 
     return True
 
 
+def stored_for(conn: sqlite3.Connection, catalog_id: int, key: str) -> bool:
+    """An answer to this very question is already stored."""
+    row = conn.execute("SELECT input_key FROM price_reco WHERE catalog_id=?", (catalog_id,)).fetchone()
+    return bool(row and row["input_key"] == key)
+
+
 def forget(conn: sqlite3.Connection, catalog_id: int, key: str) -> None:
     """Every store answered the current question and none gives a cheapest
     store. A failure to ask is NOT this — the last answer is kept, with its age."""

@@ -397,7 +397,9 @@ def _price_brief(answer: dict | None, store_names: dict) -> dict | None:
         return None
     return {"store": store, "amount": c["amount"], "product": c["product"],
             "unit_label": c.get("unit_label", ""), "total_label": c.get("total_label", ""),
-            "exact": c.get("exact", False), "computed_at": answer.get("computed_at", "")}
+            "exact": c.get("exact", False), "computed_at": answer.get("computed_at", ""),
+            # some store could not be checked when this was decided
+            "partial": "unasked" in (answer.get("stores") or {}).values()}
 
 
 def organic_setting(conn: sqlite3.Connection) -> bool:

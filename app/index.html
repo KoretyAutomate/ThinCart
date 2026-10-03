@@ -797,6 +797,7 @@ const STR = {
     store_cheapest:s=>`💲 Cheapest (${s})`,
     buyqty_label:'How much I want', buyqty_ph:'e.g. 2 lb, 6 rolls, 1 gal — empty = any size',
     buyqty_bad:'Not understood — try "2 lb", "6 rolls", "1 gal" or "12". Prices compare per unit meanwhile.',
+    price_partial:' (not every store could be checked)',
     price_line:(st, how, ago, mine)=>`💲 Cheapest: ${st}${how ? ' · ' + how : ''}${ago ? ' · ' + ago : ''}${mine ? ' · you chose ' + mine : ''}`,
     stores_title:'🏬 Stores & plan', at_h:'I’m at… (tags purchases for 6 h)',
     plan_h:'Where to buy today', manage_h:'Stores', at_none:'— none —',
@@ -944,6 +945,7 @@ const STR = {
     store_cheapest:s=>`💲 最安（${s}）`,
     buyqty_label:'買いたい量', buyqty_ph:'例: 2 lb、6 rolls、1 gal — 空欄 = サイズ問わず',
     buyqty_bad:'読み取れません — 「2 lb」「6 rolls」「1 gal」「12」のように入力してください。それまでは単価で比較します。',
+    price_partial:'（一部の店は未確認）',
     price_line:(st, how, ago, mine)=>`💲 最安: ${st}${how ? ' · ' + how : ''}${ago ? ' · ' + ago : ''}${mine ? ' · 指定: ' + mine : ''}`,
     stores_title:'🏬 店舗とプラン', at_h:'いまいる店（6時間有効）',
     plan_h:'今日どこで買う？', manage_h:'店舗リスト', at_none:'— なし —',
@@ -2644,7 +2646,8 @@ function fillSheet(it) {
   // the price suggestion beside the owner's own pick (PLAN.md Phase 8.1)
   const pr = it.price;
   $('sheet-price').textContent = pr ? T().price_line(pr.store, pr.total_label || pr.unit_label,
-    agoLabel(pr.computed_at), it.store_source === 'preferred' && it.store !== pr.store ? it.store : '') : '';
+    agoLabel(pr.computed_at), it.store_source === 'preferred' && it.store !== pr.store ? it.store : '')
+    + (pr.partial ? T().price_partial : '') : '';
   // Prices are looked up on demand, never on open: opening the editor to change
   // a quantity must not fire a network request describing what you are buying.
   $('sheet-prices').innerHTML = '';

@@ -130,6 +130,11 @@ async def _persist(items: dict[int, dict], result: dict[str, dict]) -> None:
         ts = _ctx.now_iso()
         for cid, it in items.items():
             r = result[str(cid)]
+            partial = "unasked" in r["stores"].values()
+            if r["cheapest"] and partial and price_reco.stored_for(conn, cid, it["key"]):
+                # A store that could not be asked may still be the cheapest:
+                # an incomplete comparison does not replace a complete one.
+                continue
             if r["cheapest"]:
                 changed |= price_reco.save(conn, cid, it["key"], r, ts)
             elif "unasked" not in r["stores"].values():

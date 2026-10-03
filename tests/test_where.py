@@ -350,3 +350,23 @@ def test_weight_and_volume_stay_apart_except_for_liquids(monkeypatch, stores):
                        "902": {"quill milk": [rec("Quill Milk 64 fl oz", 6.0, "")]}})
     it = ask(milk)
     assert it["comparable"] and {q["store"] for q in it["quotes"]} == {"Where A", "Where B"}
+
+
+def test_a_percentage_names_the_product():
+    """Codex review: '2% milk' and '1% milk' were the same words."""
+    assert where.relevant("Wegmans 2% Reduced Fat Milk, 1 gal", "grass fed 2% milk") is False  # grass fed missing
+    assert where.relevant("Grass Fed 2% Milk, 64 fl oz", "grass fed 2% milk") is True
+    assert where.relevant("Grass Fed 1% Milk, 64 fl oz", "grass fed 2% milk") is False
+
+
+def test_a_partial_refresh_does_not_replace_a_complete_answer(monkeypatch, stores):
+    """Codex review: the cheapest store unreachable on refresh let the next one
+    take its place as 'cheapest' with no warning."""
+    cid = add("quillpeas")
+    stub(monkeypatch, {"901": {"quillpeas": [rec("Quillpeas 16 oz", 2.0, "")]},
+                       "902": {"quillpeas": [rec("Quillpeas 16 oz", 5.0, "")]}})
+    ask(cid)
+    stub(monkeypatch, {"902": {"quillpeas": [rec("Quillpeas 16 oz", 5.0, "")]}}, fail={"901"})
+    client.post("/api/where", json={"catalog_ids": [cid]})
+    item = next(i for i in client.get("/api/state").json()["items"] if i["catalog_id"] == cid)
+    assert item["price"]["store"] == "Where A" and item["price"]["partial"] is False
