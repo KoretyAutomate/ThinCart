@@ -188,3 +188,17 @@ def test_an_impossible_amount_never_breaks_the_list():
     assert r.status_code == 200
     it = next(i for i in r.json()["items"] if i["catalog_id"] == added["catalog_id"])
     assert it["buy_qty"] == "1/0 lb" and it["buy_qty_ok"] is False
+
+
+def test_state_carries_the_price_question_and_it_moves_with_hidden_inputs():
+    """Codex review: enrichment can make an item food (organic then applies)
+    with no change the phone can see; the server's key must change."""
+    added = op(type="add", name="hiddenkey-8a2", item_id=str(uuid.uuid4()))
+    before = state_item("hiddenkey-8a2")["price_key"]
+    op(type="settings", organic=True)
+    try:
+        appmod.conn.execute("UPDATE item_catalog SET is_edible=1 WHERE id=?", (added["catalog_id"],))
+        appmod.conn.commit()
+        assert state_item("hiddenkey-8a2")["price_key"] != before
+    finally:
+        op(type="settings", organic=False)

@@ -179,11 +179,13 @@ def _rounding_explains(rec: dict, dim: str, qty: float) -> bool:
     return round(float(rec["amount"]) / (qty / size), 2) == round(shown, 2)
 
 
-# Items sold as a liquid. Only for these is "59 oz" read as fluid ounces too —
-# 12 oz of honey is not 12 fl oz (Codex review).
+# Items that are ONLY ever sold as a liquid. Only for these is "59 oz" read as
+# fluid ounces too — 12 oz of honey is not 12 fl oz. Words that name both a
+# dry and a liquid product are left out on purpose: coffee (ground vs cold
+# brew), tea (leaves vs bottled), cream (sour vs heavy), sauce (Codex review).
 LIQUIDS = frozenset((
-    "milk", "juice", "water", "oil", "vinegar", "broth", "stock", "cream", "kefir", "drink", "soda",
-    "tea", "coffee", "kombucha", "wine", "beer", "lemonade", "creamer", "oatmilk", "seltzer", "sauce",
+    "milk", "juice", "water", "oil", "vinegar", "broth", "stock", "kefir", "drink", "soda",
+    "kombucha", "wine", "beer", "lemonade", "creamer", "oatmilk", "seltzer",
 ))
 
 

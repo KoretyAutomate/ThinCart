@@ -376,6 +376,17 @@ function openEditor(b, i) {
     await settle(); await settle();
     check("(b2) a changed pick at another chain re-asks", t.asked.length === before + 1, t.asked);
 
+    // (b3) the server's price question changes with nothing the phone can see
+    t = mk([item(1, "milk", { price_key: "k1" })]);
+    b = boot({ items: t.state.items, fetchImpl: t.fetch });
+    await settle();
+    b.doc.getElementById("stores-btn").click(); b.doc.getElementById("plan-byprice").click();
+    await settle(); await settle();
+    const n0 = t.asked.length;
+    t.push(b, st([item(1, "milk", { price_key: "k2" })]));
+    await settle(); await settle();
+    check("(b3) a new server-side question re-asks", t.asked.length === n0 + 1, t.asked);
+
     // (c) price mode on before any store is linked; linking one asks
     t = mk([item(1, "milk")], []);
     b = boot({ items: t.state.items, stores: [], fetchImpl: t.fetch });

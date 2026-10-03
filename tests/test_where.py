@@ -370,3 +370,16 @@ def test_a_partial_refresh_does_not_replace_a_complete_answer(monkeypatch, store
     client.post("/api/where", json={"catalog_ids": [cid]})
     item = next(i for i in client.get("/api/state").json()["items"] if i["catalog_id"] == cid)
     assert item["price"]["store"] == "Where A" and item["price"]["partial"] is False
+
+
+def test_a_store_moved_to_another_chain_is_a_new_question(stores):
+    import price_reco
+    cid = add("quillchain")
+    before = price_reco.input_key(appmod.conn, cid)
+    appmod.conn.execute("UPDATE stores SET chain='shoprite' WHERE id=?", (stores["Where A"],))
+    appmod.conn.commit()
+    try:
+        assert price_reco.input_key(appmod.conn, cid) != before
+    finally:
+        appmod.conn.execute("UPDATE stores SET chain='wegmans' WHERE id=?", (stores["Where A"],))
+        appmod.conn.commit()

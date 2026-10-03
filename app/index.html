@@ -1622,8 +1622,10 @@ function whereInput() {
   const picks = base.picks_by_chain || {};
   const key = JSON.stringify([
     organicSetting(),
-    pricedStores().map(s => s.id + ':' + s.chain_store_id),
-    ask.map(i => [i.catalog_id, i.name, i.name_en || '', i.brand || '', i.buy_qty || '',
+    pricedStores().map(s => s.id + ':' + s.chain + ':' + s.chain_store_id),
+    // price_key is the server's own question for the item (it sees things the
+    // phone cannot, e.g. enrichment making an item food under 🍃)
+    ask.map(i => [i.catalog_id, i.price_key || '', i.name, i.name_en || '', i.brand || '', i.buy_qty || '',
                   picks[String(i.catalog_id)] || {}]),
     items.filter(i => i.pending || unsettled(i)).map(i => i.catalog_id || i.id),
   ]);

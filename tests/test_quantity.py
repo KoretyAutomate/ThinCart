@@ -72,6 +72,8 @@ def test_oz_and_fl_oz_compare_only_for_liquids():
     # 12 oz of honey is not 12 fl oz (Codex review)
     assert q.comparable({"weight": 12.0}) == {"weight": 12.0}
     assert q.is_liquid("oat milk") and q.is_liquid("Tart Cherry Juice") and not q.is_liquid("honey")
+    # both dry and liquid products exist: weight and volume stay apart (Codex review)
+    assert not q.is_liquid("coffee") and not q.is_liquid("green tea") and not q.is_liquid("cream")
 
 
 @pytest.mark.parametrize("text, want", [

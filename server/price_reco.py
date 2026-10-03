@@ -52,7 +52,9 @@ def input_key(conn: sqlite3.Connection, catalog_id: int, stores: list[dict] | No
     )
     stores = priced_stores(conn) if stores is None else stores
     parts = [term, (r["brand"] or "").strip().lower(), (r["buy_qty"] or "").strip().lower(),
-             organic_applies(conn, catalog_id), picks, [(s["id"], s["chain_store_id"]) for s in stores]]
+             organic_applies(conn, catalog_id), picks,
+             # the chain too: the same branch number at another chain is another catalogue
+             [(s["id"], s["chain"], s["chain_store_id"]) for s in stores]]
     return hashlib.sha256(json.dumps(parts, ensure_ascii=False).encode()).hexdigest()[:24]
 
 

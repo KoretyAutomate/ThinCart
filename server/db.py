@@ -419,6 +419,7 @@ def state(conn: sqlite3.Connection, now=None) -> dict:
     import quantity
 
     prices = price_reco.current(conn)
+    priced = price_reco.priced_stores(conn)
     rec = recommended_stores(conn, prices)
     hist = history_stores(conn)
     items = []
@@ -438,6 +439,10 @@ def state(conn: sqlite3.Connection, now=None) -> dict:
         # price → history, and to show the price beside your pick
         d["history_store"] = store_names.get(hist.get(d["catalog_id"]))
         d["buy_qty_ok"] = not d["buy_qty"] or quantity.parse_wanted(d["buy_qty"]) is not None
+        # the exact question a price answer must have answered — the phone keys
+        # its open price view on it, so a change only the server can see (an
+        # enrichment making the item food, under 🍃) is still a new question
+        d["price_key"] = price_reco.input_key(conn, d["catalog_id"], priced)
         d["price"] = _price_brief(prices.get(d["catalog_id"]), store_names)
         items.append(d)
     import catalog
