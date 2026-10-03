@@ -80,3 +80,16 @@ def test_a_hyphen_spaced_on_one_side_is_still_one_word():
     """Codex review, cached Wegmans: 'Choose-A- Size' beside 'Choose-A-Size'."""
     assert where._words("Choose-A- Size") == where._words("Choose-A-Size")
     assert where._words("milk - organic") == ["milk", "organic"]
+
+
+def test_leaf_and_leaves_both_ways():
+    """Codex review: both forms are in the cached records."""
+    assert where.relevant("Organic Bay Leaves, 0.15 Ounce", "bay leaf") is True
+    assert where.relevant("McCormick Bay Leaf, 0.12 oz", "bay leaves") is True
+
+
+def test_a_zero_shelf_price_is_not_a_candidate():
+    """Codex review: amount 0 with a unit price divided by zero and failed the batch."""
+    recs = [{"name": "Bay Leaves, 0.15 oz", "brand": "", "available": True, "amount": 0.0,
+             "unit_price": "$1.00/oz", "pack_size": "", "sku": "1"}]
+    assert where.fitting(recs, None, False, "", "bay leaves") == ([], "no_match")
