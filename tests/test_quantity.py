@@ -35,13 +35,27 @@ import quantity as q
     # Codex plan review: a dimension stated twice with different amounts is ambiguous
     ("365 by Whole Foods Market Recycled Paper Towel 6ct, 110 CT", {}),
     ("Seventh Generation Paper Towels, 140 Sheets, 6 Rolls", {"sheet": 140.0, "roll": 6.0}),
+    # Codex review round 5
+    ("Reduced Fat 2% Milk, Half Gallon", {"volume": 64.0}),
+    ("Seltzer, 12 fl oz (Pack of 6)", {"volume": 72.0}),
+    ("Sparkling Water 12 fl oz, 8 pack", {"volume": 96.0, "each": 8.0}),
+    ("Spaghetti 12 oz (340 g)", {"weight": 12.0}),
+    ("Whole Milk, 1 Gallon", {"volume": 128.0}),
 ])
 def test_parse(text, want):
     assert q.parse(text) == want
 
 
+def test_a_rounded_unit_price_snaps_to_the_standard_package():
+    """$3.09 at "$0.05/fl oz" is 61.8 — but a half gallon (64) is the only
+    standard size the cent rounding allows; 61.8 made '1 gal' need 3 cartons."""
+    assert q.from_unit_price(3.09, "$0.05/fl oz") == {"volume": 64.0}
+    rec = {"pack_size": "", "amount": 3.09, "unit_price": "$0.05/fl oz", "name": "Reduced Fat Milk"}
+    assert q.cost_to_cover(3.09, q.quantities(rec)["volume"], 128) == (6.18, 2)
+
+
 def test_the_stores_unit_price_implies_only_physical_sizes():
-    assert q.from_unit_price(6.79, "$0.68/ounce") == {"weight": 9.985}
+    assert q.from_unit_price(6.79, "$0.68/ounce") == {"weight": 10.0}
     assert q.from_unit_price(3.49, "$3.49/lb") == {"weight": 16.0}
     # counts, sheets and rolls are never derived from a store's unit price
     assert q.from_unit_price(6.29, "$6.29/count") == {}
@@ -60,7 +74,7 @@ def test_quantities_from_real_records():
     assert q.quantities(rec)["weight"] == 16.0
     # no size in the name: the unit price fills it
     rec = {"pack_size": "", "amount": 6.79, "unit_price": "$0.68/ounce", "name": "Hodo Extra Firm Organic Tofu"}
-    assert q.quantities(rec) == {"weight": 9.985}
+    assert q.quantities(rec) == {"weight": 10.0}     # 9.985 snapped to the standard 10 oz
     # a name size the unit price contradicts (here: 4x off) is dropped, not trusted
     rec = {"pack_size": "", "amount": 8.0, "unit_price": "$0.50/ounce", "name": "Thing, 4 oz"}
     assert "weight" not in q.quantities(rec)

@@ -89,17 +89,47 @@ def _norm(text: str) -> str:
     return re.sub(r"\s+", " ", t)
 
 
+# Size words with no number: "Milk, Half Gallon", "Cream, Quart".
+_WORD_SIZES = (
+    (re.compile(r"\bhalf[\s-]+gallon\b"), "volume", 64.0),
+    (re.compile(r"(?<![\d.\s])\s*\bgallon\b|^gallon\b"), "volume", 128.0),
+    (re.compile(r"(?<![\d.])\s*\bquart\b"), "volume", 32.0),
+    (re.compile(r"(?<![\d.])\s*\bpint\b"), "volume", 16.0),
+)
+# "(Pack of 6)", "6 pack", "6-pack", "6 cans", "12 bottles": a count of the
+# stated size, not a size of its own.
+_PACK_OF = re.compile(r"\bpack\s+of\s+(\d+)\b|(?<![\d.])(\d+)\s*-?\s*(?:pack|pk|cans|bottles|cartons|jars|boxes)\b")
+# "12 oz (340 g)" is one package stated in two units; values this close are
+# the same size, rounded differently.
+SAME = 0.03
+
+
+def _one_value(values: list[float]) -> float | None:
+    """The single size a dimension was stated as — as first stated ("12 oz
+    (340 g)" is 12 oz) — or None if it was stated as genuinely different sizes."""
+    lo, hi = min(values), max(values)
+    return values[0] if (hi - lo) / hi <= SAME else None
+
+
+def _word_sizes(t: str) -> dict[str, float]:
+    for rx, dim, qty in _WORD_SIZES:
+        if rx.search(t):
+            return {dim: qty}
+    return {}
+
+
 def parse(text: str) -> dict[str, float]:
     """Every amount the text states, per dimension, in base units.
-    "6 Double Plus Rolls, 103 Sheets Per Roll" -> {"roll": 6, "sheet": 618}.
-    A dimension stated twice with different amounts is ambiguous and dropped:
+    "6 Double Plus Rolls, 103 Sheets Per Roll" -> {"roll": 6, "sheet": 618};
+    "Seltzer, 12 fl oz (Pack of 6)" -> 72 fl oz; "Milk, Half Gallon" -> 64.
+    A dimension stated as genuinely different sizes is ambiguous and dropped:
     "Paper Towel 6ct, 110 CT" is 6 rolls of 110 — or 110 of something."""
     t = _norm(text)
-    seen: dict[str, set[float]] = {}
+    seen: dict[str, list[float]] = {}
     multi_spans = []
     for m in _MULTI.finditer(t):                # "6 x 16 oz" is 96 oz
         dim, size = UNITS[m.group(3)]
-        seen.setdefault(dim, set()).add(round(int(m.group(1)) * float(m.group(2)) * size, 3))
+        seen.setdefault(dim, []).append(round(int(m.group(1)) * float(m.group(2)) * size, 3))
         multi_spans.append(m.span())
     for m in _AMOUNT.finditer(t):
         if _NUTRIENT.match(t, m.end()) or any(a <= m.start() < b for a, b in multi_spans):
@@ -107,8 +137,16 @@ def parse(text: str) -> dict[str, float]:
         dim, size = UNITS[m.group(2)]
         if dim == "sheet" and _PER_ROLL.match(t, m.start()):
             continue                            # "103 sheets per roll" is not a total
-        seen.setdefault(dim, set()).add(round(float(m.group(1)) * size, 3))
-    out = {d: next(iter(v)) for d, v in seen.items() if len(v) == 1}
+        seen.setdefault(dim, []).append(round(float(m.group(1)) * size, 3))
+    out = {d: v for d, v in ((d, _one_value(vals)) for d, vals in seen.items()) if v is not None}
+    for dim, qty in _word_sizes(t).items():
+        out.setdefault(dim, qty)
+    pack = _PACK_OF.search(t)
+    n = int(pack.group(1) or pack.group(2)) if pack else 1
+    if n > 1 and not multi_spans:               # "6 x 12 oz" already counted the cans
+        for dim in ("weight", "volume"):
+            if dim in out:
+                out[dim] = round(out[dim] * n, 3)
     per = _PER_ROLL.search(t)
     if per and "roll" in out and "sheet" not in out:
         out["sheet"] = int(per.group(1)) * out["roll"]
@@ -137,9 +175,19 @@ _TRUSTED_UNIT_DIMS = ("weight", "volume", "area")
 DISAGREE = 0.15
 
 
+# Common package sizes, oz / fl oz. A size implied by a unit price shown to
+# the cent is only known to a range — $3.09 at "$0.05/fl oz" is 56–69 fl oz —
+# and the half gallon (64) in that range is the package, not 61.8.
+_STANDARD = {
+    "weight": (1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 14, 16, 20, 24, 28, 32, 40, 48, 64, 80, 96, 128, 160, 320),
+    "volume": (8, 10, 12, 16, 20, 24, 25.4, 32, 33.8, 46, 48, 52, 59, 64, 67.6, 89, 96, 101.4, 128, 192, 256),
+}
+
+
 def from_unit_price(amount, unit_price: str) -> dict[str, float]:
     """The size a store's own unit price implies: amount ÷ price-per-unit —
-    weight, volume and area only."""
+    weight, volume and area only — snapped to a standard size when the cent
+    rounding of the unit price allows exactly one."""
     m = _UNIT_PRICE.search(_norm(unit_price))
     if not m or amount is None:
         return {}
@@ -147,7 +195,15 @@ def from_unit_price(amount, unit_price: str) -> dict[str, float]:
     dim, size = UNITS[m.group(2)]
     if per <= 0 or dim not in _TRUSTED_UNIT_DIMS:
         return {}
-    return {dim: round(float(amount) / per * size, 3)}
+    amount = float(amount)
+    estimate = amount / per * size
+    lo, hi = amount / (per + 0.005) * size, amount / max(per - 0.005, 1e-9) * size
+    fits = [s for s in _STANDARD.get(dim, ()) if lo <= s <= hi]
+    if len(fits) == 1:
+        return {dim: float(fits[0])}
+    if len(fits) > 1:   # several standard sizes fit: take the nearest to the estimate
+        return {dim: float(min(fits, key=lambda s: abs(s - estimate)))}
+    return {dim: round(estimate, 3)}
 
 
 def quantities(rec: dict) -> dict[str, float]:
