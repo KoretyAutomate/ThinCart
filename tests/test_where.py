@@ -497,3 +497,11 @@ def test_pack_counts_are_sizes_of_one_product(monkeypatch, stores):
     it = ask(cid)
     assert it["cheapest"]["product"] == "Quillfizz, 12 fl oz (Pack of 12)"
     assert it["cheapest"]["total_label"].endswith("$9.00")
+
+
+def test_another_size_must_still_name_the_item(monkeypatch, stores):
+    """Codex review: 'Large Shrimp' joined 'Jumbo Shrimp' as a size of it."""
+    cid = add("jumbo quillshrimp")
+    stub(monkeypatch, {"901": {"jumbo quillshrimp": [rec("Brand Jumbo Quillshrimp, 1 lb", 12.0, ""),
+                                                     rec("Brand Large Quillshrimp, 1 lb", 8.0, "")]}})
+    assert [q["product"] for q in ask(cid)["quotes"]] == ["Brand Jumbo Quillshrimp, 1 lb"]

@@ -224,3 +224,9 @@ def test_an_explicit_multiplier_is_already_the_total():
     """Codex review: pack size '6 x 12 fl oz' lost its 72 fl oz to the count check."""
     rec = {"pack_size": "6 x 12 fl oz", "amount": 6.0, "unit_price": "", "name": "Seltzer"}
     assert q.quantities(rec) == {"volume": 72.0, "each": 6.0}
+
+
+def test_a_pack_count_in_the_pack_size_is_already_the_total():
+    """Codex review: '12 fl oz (Pack of 6)' lost its 72 fl oz to the count check."""
+    rec = {"pack_size": "12 fl oz (Pack of 6)", "amount": 6.0, "unit_price": "", "name": "Seltzer"}
+    assert q.quantities(rec) == {"volume": 72.0, "each": 6.0}
