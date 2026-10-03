@@ -139,11 +139,13 @@ async def _persist(items: dict[int, dict], result: dict[str, dict]) -> None:
             # an organic one now found replaces it, wherever the old one was
             # organic products found at all — ranked or not — end the stand-in
             organic_now = bool(old and old.get("organic_fallback") and r["quotes"] and not r["organic_fallback"])
-            if winner is not None and r["stores"].get(str(winner)) == "unasked" and not organic_now:
-                continue                          # the winner could not be checked: keep it
-            # a regular-product stand-in is only re-checked by the regular
-            # search; an organic search that found nothing says nothing about it
-            if old and old.get("organic_fallback") and not r["regular_checked"] and not organic_now:
+            # Judge the stored winner by the search that can speak for it: a
+            # regular-product stand-in by the regular search, an organic winner
+            # by the organic one. Not asked there (unreachable, or that search
+            # did not run) means not contradicted — keep it (Codex review).
+            checked_by = r["regular_stores"] if (old and old.get("organic_fallback")) or not it["organic"] \
+                else r["organic_stores"]
+            if winner is not None and checked_by.get(str(winner), "unasked") == "unasked" and not organic_now:
                 continue
             if r["cheapest"]:
                 changed |= price_reco.save(conn, cid, it["key"], r, ts)
@@ -169,6 +171,10 @@ async def where_to_buy(req: WhereRequest) -> dict:
     stores = price_reco.priced_stores(conn)
     items = _items(conn, req.catalog_ids)
     out, partial = await _ask_all(stores, items, True)
+    # each pass keeps its own statuses: one store can answer the organic search
+    # and be unreachable for the regular one
+    first_pass = {cid: dict(o["stores"]) for cid, o in out.items()}
+    regular_pass: dict[int, dict] = {}
     if partial and items and all(
         not o["cands"] and all(s == "unasked" for s in o["stores"].values()) for o in out.values()
     ):
@@ -180,6 +186,7 @@ async def where_to_buy(req: WhereRequest) -> dict:
         again, more = await _ask_all(stores, retry, False)
         partial = partial or more
         for cid, o in again.items():
+            regular_pass[cid] = dict(o["stores"])
             if o["cands"]:
                 out[cid] = o
                 fallback.add(cid)
@@ -191,9 +198,9 @@ async def where_to_buy(req: WhereRequest) -> dict:
         cmp = where.compare(o["cands"], it["wanted"], quantity.is_liquid(it["name"]))
         result[str(cid)] = {
             **cmp, "stores": o["stores"], "brand": it["brand"], "organic_fallback": cid in fallback,
-            # the regular-product search ran for it (all items without organic,
-            # or the organic ones retried) — what can re-check a stand-in
-            "regular_checked": not it["organic"] or cid in retry,
+            # per-pass statuses, so a stored answer is judged by its own search
+            "organic_stores": first_pass[cid] if it["organic"] else {},
+            "regular_stores": first_pass[cid] if not it["organic"] else regular_pass.get(cid, {}),
             "buy_qty": it["buy_qty"], "buy_qty_ok": not it["buy_qty"] or it["wanted"] is not None,
             "reason": None if cmp["quotes"] else _reason(set(o["stores"].values())),
         }

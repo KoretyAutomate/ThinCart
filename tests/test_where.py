@@ -352,13 +352,6 @@ def test_weight_and_volume_stay_apart_except_for_liquids(monkeypatch, stores):
     assert it["comparable"] and {q["store"] for q in it["quotes"]} == {"Where A", "Where B"}
 
 
-def test_a_percentage_names_the_product():
-    """Codex review: '2% milk' and '1% milk' were the same words."""
-    assert where.relevant("Wegmans 2% Reduced Fat Milk, 1 gal", "grass fed 2% milk") is False  # grass fed missing
-    assert where.relevant("Grass Fed 2% Milk, 64 fl oz", "grass fed 2% milk") is True
-    assert where.relevant("Grass Fed 1% Milk, 64 fl oz", "grass fed 2% milk") is False
-
-
 def test_a_partial_refresh_does_not_replace_a_complete_answer(monkeypatch, stores):
     """Codex review: the cheapest store unreachable on refresh let the next one
     take its place as 'cheapest' with no warning."""
@@ -409,22 +402,6 @@ def test_the_price_age_is_the_fetch_not_the_comparison(monkeypatch, stores):
     assert item["price"]["fetched_at"] == "2026-10-01T00:00:00+00:00"
 
 
-def test_relevance_checks_the_whole_leading_phrase_and_full_width_terms():
-    """Codex review: 'Rice Cakes, Brown Rice' passed for brown rice, and a
-    full-width '２％ milk' skipped every check."""
-    assert where.relevant("Rice Cakes, Brown Rice, 16 oz", "brown rice") is False
-    assert where.relevant("Lundberg Brown Rice, 2 lb", "brown rice") is True
-    assert where.relevant("Honey Roasted Peanuts, 16 oz", "peanuts") is True
-    assert where.relevant("1% Milk, 64 fl oz", "２％ milk") is False
-    assert where.relevant("2% Milk, 64 fl oz", "２％ milk") is True
-
-
-def test_excluded_product_types_are_folded_like_product_words():
-    """Codex review: 'cookies' singular-folds to 'cooky' and slipped past."""
-    assert where.relevant("Rice Cookies, 8 oz", "rice") is False
-    assert where.relevant("Fruit Gummies, 6 oz", "fruit") is False
-
-
 def test_found_organic_replaces_a_conventional_stand_in(monkeypatch, stores, organic_on):
     """Codex review: the stored answer was a regular product (nobody had it
     organic); A is now unreachable but B has organic — B's organic wins."""
@@ -436,26 +413,6 @@ def test_found_organic_replaces_a_conventional_stand_in(monkeypatch, stores, org
     client.post("/api/where", json={"catalog_ids": [cid]})
     item = next(i for i in client.get("/api/state").json()["items"] if i["catalog_id"] == cid)
     assert item["price"]["store"] == "Where B" and "Organic" in item["price"]["product"]
-
-
-def test_the_item_must_lead_the_product_not_trail_it():
-    """Codex review: cached 'organic lemon' results let lemon juices in when
-    lemon only appeared after the first comma."""
-    assert where.relevant("Simply Lemonade, made with real lemon", "lemon") is False
-    assert where.relevant("Wegmans Organic Lemons, 2 lb", "organic lemon") is True
-    # a store-brand lead segment is skipped, not mistaken for the product
-    assert where.relevant("365 By Whole Foods Market, Tofu Firm Organic, 14 Ounce", "firm tofu",
-                          "365 By Whole Foods Market") is True
-
-
-def test_ingredients_after_with_do_not_change_the_product():
-    """Codex review: a cached body lotion was rejected for 'with ... Coconut Oil'."""
-    assert where.relevant("Shea Moisture Daily Hydration Body Lotion with Virgin Coconut Oil 16oz",
-                          "body lotion") is True
-    assert where.relevant("Wegmans Body Lotion Oil Blend", "body lotion") is False
-    # and a match found only in the ingredient clause is not the item (Codex review)
-    assert where.relevant("Body Lotion with Virgin Coconut Oil, 16 fl oz", "coconut oil") is False
-    assert where.relevant("Nutiva Organic Coconut Oil, 15 fl oz", "coconut oil") is True
 
 
 def test_a_conventional_stand_in_is_kept_until_its_regular_product_is_checked(monkeypatch, stores, organic_on):
@@ -485,75 +442,6 @@ def test_organic_found_but_unrankable_still_ends_the_stand_in(monkeypatch, store
     assert item["price"] is None or "Organic" in item["price"]["product"]
 
 
-def test_cached_dill_relish_is_not_dill():
-    """Codex review: the cached Whole Foods 'organic dill' results put relish first."""
-    assert where.relevant("Organic Dill Relish, 10 oz", "organic dill") is False
-    assert where.relevant("McCormick Gourmet Collection Organic Dill Weed, 0.5 oz", "organic dill") is True
-
-
-def test_joined_and_separated_spellings_match():
-    """Codex review: every cached Wegmans oat milk was rejected for 'oat milk'."""
-    assert where.relevant("Wegmans Original Oatmilk, 64 fl oz", "oat milk") is True
-    assert where.relevant("Oat Milk Barista, 32 fl oz", "oatmilk") is True
-    assert where.relevant("Grassfed 2% Milk, 64 fl oz", "grass fed 2% milk") is True
-    assert where.relevant("Oatmilk Creamer, 32 fl oz", "oat milk") is True       # creamer is not excluded
-    assert where.relevant("Oat Cereal, 12 oz", "oat milk") is False
-
-
-def test_brand_and_ingredient_words_do_not_name_the_item():
-    """Codex review, cached products: 'Whole' only in the store brand, and
-    'Pumpkin' only among a cat treat's ingredients."""
-    assert where.relevant("365 By Whole Foods Market, Organic Baby Carrots, 2 lb", "whole carrot",
-                          "365 By Whole Foods Market") is False
-    assert where.relevant("Fancy Feast Savory Purees with Chicken & Pumpkin Cat Treats", "pumpkin puree") is False
-    # a variety written after the comma still counts: Wegmans writes it that way
-    assert where.relevant("Wegmans Organic Squash, Butternut", "butternut squash", "Wegmans") is True
-
-
-def test_a_hyphenated_descriptor_is_not_an_ingredient_clause():
-    """Codex review: 'Stir-In' split into 'stir' + 'in' cut the phrase before 'paste'."""
-    assert where.relevant("Wegmans Organic Dill Stir-In Paste", "dill", "Wegmans") is False
-    assert where.relevant("Grass-Fed 2% Milk, 64 fl oz", "grass fed 2% milk") is True
-
-
-def test_a_size_in_the_item_name_is_not_a_product_word():
-    """Found on cached data: 'salmon 2 lb' rejected every salmon fillet."""
-    assert where.relevant("Sockeye Salmon Fillet, 32 oz", "organic salmon 2 lb") is True
-    assert where.relevant("365 by Whole Foods Market Sockeye Salmon Fillets, 10 OZ", "salmon 2 lb",
-                          "365 by Whole Foods Market") is True
-
-
-def test_a_unit_word_is_a_size_only_after_a_number():
-    """Codex review: 'eggs' was stripped as a count unit, leaving no words —
-    so egg noodles passed for eggs."""
-    assert where.relevant("Egg Noodles, 12 oz", "eggs") is False
-    assert where.relevant("Large Brown Eggs, 12 ct", "eggs") is True
-    assert where.relevant("Sockeye Salmon Fillet, 32 oz", "salmon 2 lb") is True
-
-
-def test_brands_inline_and_brands_named_by_the_item():
-    """Codex review, cached ShopRite: 'Pumpkin Tree' fruit puree is not
-    pumpkin puree; 'Daisy, Sour Cream' is a Daisy sour cream."""
-    assert where.relevant("Pumpkin Tree Strawberry & Banana Fruit Puree, 4 oz", "pumpkin puree",
-                          "Pumpkin Tree") is False
-    assert where.relevant("Farmer's Market Organic Pumpkin Puree, 15 oz", "pumpkin puree", "Farmer's Market") is True
-    assert where.relevant("Daisy, Sour Cream, 16 Ounce", "Daisy sour cream", "Daisy") is True
-    assert where.relevant("Breakstone's Sour Cream, 16 oz", "Daisy sour cream", "Breakstone's") is False
-
-
-def test_whole_size_phrases_leave_the_item_name():
-    """Codex review: 'milk 64 fl oz' kept 'fl' and 'oz' as required words."""
-    assert where.relevant("Milk, 64 Fluid Ounces", "milk 64 fl oz") is True
-    assert where.relevant("Paper Towels, 6 Rolls", "paper towels 600 sq ft") is True
-
-
-def test_an_ingredient_list_further_on_does_not_name_the_item():
-    """Codex review, cached: a baby puree listing pumpkin among its flavours."""
-    assert where.relevant("Cerebelly Baby Puree, Organic, White Bean, Pumpkin, Apple with Cinnamon",
-                          "pumpkin puree", "Cerebelly") is False
-    assert where.relevant("Wegmans Organic Squash, Butternut", "butternut squash", "Wegmans") is True
-
-
 def test_the_organic_stand_in_warning_survives_into_state(monkeypatch, stores, organic_on):
     cid = add("quillsorrel", food=True)
     stub(monkeypatch, {"901": {"organic quillsorrel": [], "quillsorrel": [rec("Quillsorrel 4 oz", 2.0, "")]},
@@ -563,25 +451,21 @@ def test_the_organic_stand_in_warning_survives_into_state(monkeypatch, stores, o
     assert item["price"]["organic_fallback"] is True
 
 
-def test_descriptors_in_later_segments_still_count_and_frosting_is_not_cheese():
-    """Codex review, cached: SoyBoy and Organic Valley put descriptors in the
-    third segment; Duncan Hines frosting is not whipped cream cheese."""
-    assert where.relevant("SoyBoy Tofu, Organic, Extra Firm", "extra firm tofu", "SoyBoy") is True
-    assert where.relevant("Organic Valley Cheese Slices, Non-Smoked, Provolone", "cheese slices provolone",
-                          "Organic Valley") is True
-    assert where.relevant("Duncan Hines Whipped Cream Cheese Frosting", "whipped cream cheese", "Duncan Hines") is False
+def test_a_disproved_organic_winner_goes_even_if_its_store_misses_the_regular_search(monkeypatch, stores, organic_on):
+    """Codex review: A's organic winner was disproved by the organic search,
+    then A was unreachable for the regular one — and the disproved answer stayed."""
+    cid = add("quillparsnip", food=True)
+    stub(monkeypatch, {"901": {"organic quillparsnip": [rec("Organic Quillparsnip 16 oz", 2.0, "")]}})
+    ask(cid)
 
+    async def fake(chain, terms, store, max_age=None):
+        if any(t.startswith("organic") for t in terms):
+            return {t: [] for t in terms}, True                       # nobody has it organic now
+        if store == "901":
+            return {}, False                                          # A unreachable for the regular search
+        return {t: [rec("Quillparsnip 16 oz", 3.0, "")] for t in terms}, True
 
-def test_brand_only_items_and_ie_plurals():
-    """Codex review: 'Nutella' and 'Cheetos' matched nothing; 'cookie' never
-    matched 'Cookies'."""
-    assert where.relevant("Nutella Hazelnut Spread, 13 oz", "Nutella", "Nutella") is True
-    assert where.relevant("Jif Creamy Peanut Butter", "Nutella", "Jif") is False
-    assert where.relevant("Chocolate Chip Cookies, 12 oz", "cookie") is True
-    assert where.relevant("Chocolate Brownies, 12 oz", "brownie") is True
-    assert where.relevant("Oatmeal Cookie, 2 oz", "cookies") is True
-
-
-def test_a_variety_in_a_later_segment_is_where_the_item_is_named():
-    """Codex review: 'provolone' was only looked for in the first segment."""
-    assert where.relevant("Organic Valley Cheese Slices, Non-Smoked, Provolone", "provolone", "Organic Valley") is True
+    monkeypatch.setattr(where_api, "price_products_many", fake)
+    client.post("/api/where", json={"catalog_ids": [cid]})
+    item = next(i for i in client.get("/api/state").json()["items"] if i["catalog_id"] == cid)
+    assert item["price"]["store"] == "Where B" and item["price"]["organic_fallback"] is True

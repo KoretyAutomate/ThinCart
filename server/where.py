@@ -207,7 +207,9 @@ def _term_words(term: str) -> list[str]:
     """The item's words, minus a size typed into its name: "salmon 2 lb" and
     "milk 64 fl oz" are salmon and milk. Only whole size PHRASES go — "eggs"
     alone is the product, not a count (Codex review)."""
-    return _words(quantity.strip_sizes(term))
+    words = _words(quantity.strip_sizes(term))
+    # "12 eggs": the count IS the product's own noun — keep the noun
+    return words or _words(term)
 
 
 def _core_words(name: str, brand: str) -> list[str]:

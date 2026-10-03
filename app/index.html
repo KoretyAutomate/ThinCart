@@ -1676,6 +1676,9 @@ async function loadWhere() {
       merged.partial = merged.partial || d.partial;
     }
     done(merged);
+    // the server saved its recommendation; pull it now rather than wait for
+    // the socket, which may be down while plain requests work (Codex review)
+    resync();
   } catch (e) { done({ key, failed: true, msg: T().cmp_fail }); }
 }
 

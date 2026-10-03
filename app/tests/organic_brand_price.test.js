@@ -264,6 +264,10 @@ function openEditor(b, i) {
     const b = boot({ items: [item(1, "milk")], where: null });
     const answers = [];
     b.w.fetch = (url, opts) => {
+      if (String(url).startsWith("/api/state"))     // the post-check resync sees the same list
+        return Promise.resolve({ ok: true, status: 200, json: async () => (
+          { revision: 1, items: [item(1, "milk")], stores: STORES, settings: { organic: false }, picks: {},
+            suggestions: [], away_pending: 0 }) });
       if (String(url) !== "/api/where")
         return Promise.resolve({ ok: true, status: 200, json: async () => ({}), text: async () => "" });
       const n = answers.length;
@@ -605,6 +609,18 @@ function openEditor(b, i) {
     const req = b.calls.find(c => c.url === "/api/where");
     check("an unsynced amount is not priced on the old one", req && JSON.stringify(req.body.catalog_ids) === "[2]",
       req && req.body);
+  }
+
+  console.log("\n--- 4i. a price check pulls the saved recommendation (Codex review) -");
+  {
+    const b = boot({ items: [item(1, "milk")], where: { partial: false, items: {} } });
+    await settle();
+    const before = b.calls.filter(c => c.url.startsWith("/api/state")).length;
+    b.doc.getElementById("stores-btn").click();
+    b.doc.getElementById("plan-byprice").click();
+    await settle(); await settle();
+    const after = b.calls.filter(c => c.url.startsWith("/api/state")).length;
+    check("the list is re-fetched after the check, socket or not", after > before, [before, after]);
   }
 
   console.log("\n--- 5. no priced store: say what to do ------------------------------");
