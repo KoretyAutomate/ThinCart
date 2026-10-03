@@ -27,6 +27,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+import away_db
 import db
 import travel
 
@@ -244,8 +245,8 @@ async def ingest(push: CalendarPush) -> dict:
         # sync switched off, the calendar hidden — not that every trip was
         # cancelled. Pruning on that would wipe every proposal awaiting review.
         if read:
-            db.record_away_candidates(ctx.conn, found, ts)
-            dropped = db.sync_away_claims(ctx.conn, claims_now, read, *prune_window)
+            away_db.record_away_candidates(ctx.conn, found, ts)
+            dropped = away_db.sync_away_claims(ctx.conn, claims_now, read, *prune_window)
         summary = {"at": ts, "calendars": len(read), "events": len(events), "away_days": len(found)}
         ctx.conn.execute(
             "INSERT INTO meta(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -265,7 +266,7 @@ async def ingest(push: CalendarPush) -> dict:
 async def get_away():
     """The Travel panel: detected trips awaiting review, plus link health."""
     conn = _need().conn
-    rows = db.away_rows(conn)
+    rows = away_db.away_rows(conn)
     by_day = {
         date.fromisoformat(r["day"]): travel.AwayCandidate(
             day=date.fromisoformat(r["day"]),
@@ -312,7 +313,7 @@ async def post_away(op: AwayOp):
     ctx = _need()
     async with ctx.write_lock:
         try:
-            result = db.set_away_status(ctx.conn, op.day, op.status, ctx.now_iso())
+            result = away_db.set_away_status(ctx.conn, op.day, op.status, ctx.now_iso())
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         db.bump_revision(ctx.conn)

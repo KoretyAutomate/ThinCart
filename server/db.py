@@ -13,8 +13,9 @@ import sqlite3
 import unicodedata
 from pathlib import Path
 
+import away_db
 import emoji
-from datetime import date, UTC
+from datetime import UTC
 
 DB_PATH = Path(os.environ.get("THINCART_DB", Path(__file__).parent / "data" / "thincart.db"))
 
@@ -60,6 +61,16 @@ CREATE TABLE IF NOT EXISTS stores(
 -- Days the household was out of town (PLAN.md §Intelligence layer 1b). Detection
 -- from Google Calendar writes status='auto'; the user's own confirm/reject is a
 -- decision a later sync must never overwrite.
+-- the last price answer per item (PLAN.md Phase 8): shown only while its
+-- input_key still matches the item's current question (price_reco.py)
+CREATE TABLE IF NOT EXISTS price_reco(
+  catalog_id INTEGER PRIMARY KEY REFERENCES item_catalog(id) ON DELETE CASCADE,
+  store_id INTEGER NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+  input_key TEXT NOT NULL,
+  answer_json TEXT NOT NULL,
+  computed_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS away_days(
   day TEXT PRIMARY KEY,                  -- YYYY-MM-DD, home-local date
   status TEXT NOT NULL DEFAULT 'auto' CHECK(status IN ('auto','confirmed','rejected')),
@@ -169,6 +180,8 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
         "ALTER TABLE away_days ADD COLUMN claims TEXT NOT NULL DEFAULT '[]'",
         # Phase 7: a standing brand preference; '' means any brand will do.
         "ALTER TABLE item_catalog ADD COLUMN brand TEXT NOT NULL DEFAULT ''",
+        # Phase 8: how much the owner wants to buy ("2 lb"); '' = no preference
+        "ALTER TABLE item_catalog ADD COLUMN buy_qty TEXT NOT NULL DEFAULT ''",
     ):
         with contextlib.suppress(sqlite3.OperationalError):
             conn.execute(ddl)
@@ -242,10 +255,8 @@ def stores_list(conn: sqlite3.Connection) -> list[dict]:
     ]
 
 
-def recommended_stores(conn: sqlite3.Connection) -> dict[int, tuple[int, str]]:
-    """catalog_id -> (store_id, source). Explicit preference wins; else the
-    store the item was bought at most often (tie: most recently)."""
-    rec: dict[int, tuple[int, str]] = {}
+def history_stores(conn: sqlite3.Connection) -> dict[int, int]:
+    """catalog_id -> the store it was bought at most often (tie: most recently)."""
     hist: dict[int, int] = {}
     for r in conn.execute(
         """SELECT catalog_id, store_id, COUNT(*) AS n, MAX(bought_at) AS last
@@ -253,8 +264,16 @@ def recommended_stores(conn: sqlite3.Connection) -> dict[int, tuple[int, str]]:
            GROUP BY catalog_id, store_id ORDER BY n, last"""
     ):  # ascending order + dict overwrite → the (max n, latest) row wins
         hist[r["catalog_id"]] = r["store_id"]
-    for cid, sid in hist.items():
-        rec[cid] = (sid, "history")
+    return hist
+
+
+def recommended_stores(conn: sqlite3.Connection, prices: dict[int, dict] | None = None) -> dict[int, tuple[int, str]]:
+    """catalog_id -> (store_id, source). The owner's explicit pick wins; then
+    the cheapest store from the last price answer still current for the item
+    (PLAN.md Phase 8.1); else the store it was bought at most often."""
+    rec: dict[int, tuple[int, str]] = {cid: (sid, "history") for cid, sid in history_stores(conn).items()}
+    for cid, answer in (prices or {}).items():
+        rec[cid] = (answer["cheapest"]["store_id"], "price")
     for r in conn.execute("SELECT id, preferred_store_id FROM item_catalog WHERE preferred_store_id IS NOT NULL"):
         rec[r["id"]] = (r["preferred_store_id"], "preferred")
     return rec
@@ -312,141 +331,6 @@ def recent_history(conn: sqlite3.Connection, limit: int = 100) -> list[dict]:
     return out
 
 
-def away_set(conn: sqlite3.Connection):
-    """The days that count as out of town — CONFIRMED ones only.
-
-    Detection proposes; only a person decides (PLAN.md §1b). An 'auto' row is a
-    heuristic guess awaiting review, and letting it into this set would make the
-    review cosmetic: the first sync reads 180 days of calendar at once, so a
-    single bad match — the real 12-day hotel booking in the household's OWN
-    town — would silently reshape every cycle, every suggestion and every snooze
-    deadline in the app before anyone had seen it. That is precisely the
-    fully-automatic behaviour the review step exists to avoid.
-
-    Manual entries are born 'confirmed', so marking a day away by hand counts
-    immediately.
-    """
-    import cycles
-
-    rows = conn.execute("SELECT day FROM away_days WHERE status = 'confirmed'")
-    return cycles.Away(date.fromisoformat(r["day"]) for r in rows)
-
-
-def away_rows(conn: sqlite3.Connection) -> list[dict]:
-    """Every away day, oldest first — the substrate for the Travel review panel."""
-    return [dict(r) for r in conn.execute("SELECT * FROM away_days ORDER BY day")]
-
-
-def record_away_candidates(conn: sqlite3.Connection, candidates, detected_at: str) -> int:
-    """Upsert detected days, leaving the user's confirm/reject decisions alone.
-
-    The WHERE on the DO UPDATE is the whole point: re-running a sync refreshes
-    the event details behind a still-unreviewed 'auto' day, but a day the user
-    has already ruled on is never touched. Without it every poll would quietly
-    resurrect a trip the user had just rejected.
-    """
-    n = 0
-    for c in candidates:
-        cur = conn.execute(
-            """INSERT INTO away_days(day, status, source, event_id, summary, location, reason, detected_at)
-               VALUES(?, 'auto', 'calendar', ?, ?, ?, ?, ?)
-               ON CONFLICT(day) DO UPDATE SET
-                 event_id=excluded.event_id, summary=excluded.summary,
-                 location=excluded.location, reason=excluded.reason,
-                 detected_at=excluded.detected_at
-               WHERE away_days.status='auto' AND away_days.source='calendar'""",
-            (c.day.isoformat(), c.event_id, c.summary, c.location, c.reason, detected_at),
-        )
-        n += cur.rowcount
-    return n
-
-
-def prune_away_candidates(conn: sqlite3.Connection, start: str, end: str, keep: set) -> int:
-    """Drop unreviewed calendar days in [start, end] the calendar no longer claims.
-
-    A deleted or rescheduled trip has to stop counting, but only unreviewed
-    ('auto') calendar rows are eligible — a manual entry or a confirmed day
-    outlives whatever the calendar currently says.
-    """
-    stale = [
-        r["day"]
-        for r in conn.execute(
-            """SELECT day FROM away_days
-               WHERE status='auto' AND source='calendar' AND day BETWEEN ? AND ?""",
-            (start, end),
-        )
-        if r["day"] not in keep
-    ]
-    conn.executemany("DELETE FROM away_days WHERE day=?", [(d,) for d in stale])
-    return len(stale)
-
-
-_PHONE_EVENT_ID = re.compile(r"^(\d+):\d+:-?\d+$")
-
-
-def _claims_of(row) -> set[str] | None:
-    """A row's claimant calendars. None for a LEGACY row — proposed by the old
-    Google pull, whose event ids name no phone calendar — which any phone read
-    may therefore speak for; otherwise it could never be pruned at all."""
-    claims = set(json.loads(row["claims"] or "[]"))
-    if claims:
-        return claims
-    m = _PHONE_EVENT_ID.match(row["event_id"] or "")
-    return {m.group(1)} if m else None
-
-
-def sync_away_claims(
-    conn: sqlite3.Connection,
-    claims_now: dict[str, set[str]],
-    read: set[str],
-    start: str,
-    end: str,
-) -> int:
-    """Reconcile unreviewed calendar days with one phone read. Returns days dropped.
-
-    For each 'auto' calendar row: the calendars read this time are replaced by
-    what they claim now; calendars NOT read keep their earlier claim untouched.
-    A day is dropped only when no calendar claims it any more — and only inside
-    [start, end], the part of the window the read fully covered.
-
-    Call after `record_away_candidates`, which creates the rows for new days.
-    """
-    dropped = 0
-    rows = conn.execute("SELECT day, event_id, claims FROM away_days WHERE status='auto' AND source='calendar'")
-    for r in list(rows):
-        day = r["day"]
-        now = claims_now.get(day, set())
-        if not now and not (start <= day <= end):
-            continue  # outside what was fully read: this read says nothing about it
-        old = _claims_of(r)
-        claims = now if old is None else (old - read) | now
-        if claims:
-            conn.execute("UPDATE away_days SET claims=? WHERE day=?", (json.dumps(sorted(claims)), day))
-        else:
-            conn.execute("DELETE FROM away_days WHERE day=?", (day,))
-            dropped += 1
-    return dropped
-
-
-def set_away_status(conn: sqlite3.Connection, day: str, status: str, detected_at: str) -> dict:
-    """Review action: confirm/reject a detected day, or mark one away by hand.
-
-    A confirmed day with no calendar row behind it is a manual entry — the
-    household travelled and the calendar never knew.
-    """
-    if status not in ("auto", "confirmed", "rejected"):
-        raise ValueError(f"bad away status: {status}")
-    date.fromisoformat(day)  # reject malformed keys before they reach the table
-    cur = conn.execute("UPDATE away_days SET status=? WHERE day=?", (status, day))
-    if cur.rowcount == 0:
-        conn.execute(
-            """INSERT INTO away_days(day, status, source, reason, detected_at)
-               VALUES(?,?, 'manual', 'marked by hand', ?)""",
-            (day, status, detected_at),
-        )
-    return {"day": day, "status": status}
-
-
 def suggestions(conn: sqlite3.Connection, now) -> list[dict]:
     """Due items (cycles.suggest) minus already-listed and snoozed catalog rows."""
     import cycles
@@ -454,7 +338,7 @@ def suggestions(conn: sqlite3.Connection, now) -> list[dict]:
     on_list = {r["catalog_id"] for r in conn.execute("SELECT catalog_id FROM items")}
     now_iso = now.isoformat(timespec="seconds")
     out = []
-    for s in cycles.suggest(purchase_history(conn), now, away_set(conn)):
+    for s in cycles.suggest(purchase_history(conn), now, away_db.away_set(conn)):
         if s["catalog_id"] in on_list:
             continue
         row = conn.execute(
@@ -502,6 +386,20 @@ def _picks_by_chain(conn: sqlite3.Connection) -> dict[str, dict[str, str]]:
     return out
 
 
+def _price_brief(answer: dict | None, store_names: dict) -> dict | None:
+    """What the list needs from a stored price answer: the cheapest store and
+    how it was decided ("$0.21/oz", "2 × 1 lb = $5.98"), with its age."""
+    if not answer or not answer.get("cheapest"):
+        return None
+    c = answer["cheapest"]
+    store = store_names.get(c["store_id"])
+    if store is None:
+        return None
+    return {"store": store, "amount": c["amount"], "product": c["product"],
+            "unit_label": c.get("unit_label", ""), "total_label": c.get("total_label", ""),
+            "exact": c.get("exact", False), "computed_at": answer.get("computed_at", "")}
+
+
 def organic_setting(conn: sqlite3.Connection) -> bool:
     """The household buys organic where it can (PLAN.md Phase 7A, revised)."""
     row = conn.execute("SELECT value FROM meta WHERE key='organic'").fetchone()
@@ -515,11 +413,16 @@ def state(conn: sqlite3.Connection, now=None) -> dict:
     now = now or datetime.now(UTC)
     stores = stores_list(conn)
     store_names = {s["id"]: s["name"] for s in stores}
-    rec = recommended_stores(conn)
+    import price_reco
+    import quantity
+
+    prices = price_reco.current(conn)
+    rec = recommended_stores(conn, prices)
+    hist = history_stores(conn)
     items = []
     for r in conn.execute(
         """SELECT i.id, i.catalog_id, c.display_name AS name, c.aliases_json,
-                  c.category, c.emoji, c.note, c.budget, c.brand,
+                  c.category, c.emoji, c.note, c.budget, c.brand, c.buy_qty,
                   i.qty_note, i.added_by, i.added_at
            FROM items i JOIN item_catalog c ON c.id = i.catalog_id
            ORDER BY COALESCE(c.category, 'zzz'), i.added_at"""
@@ -529,6 +432,11 @@ def state(conn: sqlite3.Connection, now=None) -> dict:
         sid, source = rec.get(d["catalog_id"], (None, None))
         d["store"] = store_names.get(sid)
         d["store_source"] = source if d["store"] else None
+        # the phone needs these to fall back by itself (offline): your pick →
+        # price → history, and to show the price beside your pick
+        d["history_store"] = store_names.get(hist.get(d["catalog_id"]))
+        d["buy_qty_ok"] = not d["buy_qty"] or quantity.parse_wanted(d["buy_qty"]) is not None
+        d["price"] = _price_brief(prices.get(d["catalog_id"]), store_names)
         items.append(d)
     import catalog
     import plants as plantvocab

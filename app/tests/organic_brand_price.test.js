@@ -248,7 +248,7 @@ function openEditor(b, i) {
     await settle(); await settle();
     const note = c.doc.getElementById("plan-price-note").textContent;
     const all = [...c.doc.querySelectorAll("#plan-groups .plangroup")].map(g => g.textContent).join("|");
-    check("with 🌱 on, the note says organic", /🌱 Organic/.test(note), note);
+    check("with 🍃 on, the note says organic for food", /🍃 Organic for food/.test(note), note);
     check("an item nobody sells organic says it fell back", /no organic found/.test(all), all);
   }
 
@@ -458,6 +458,55 @@ function openEditor(b, i) {
     await settle(); await settle();
     check("an old one is", n === 2, n);
     b.w.Date.now = realNow;
+  }
+
+  console.log("\n--- 8. price-first where to buy (PLAN.md Phase 8) -------------------");
+  {
+    const price = { store: "Whole Foods", amount: 2.5, product: "Rice 1 lb", unit_label: "$0.16/oz",
+                    total_label: "2 × 1 lb = $5.00", exact: false, computed_at: new Date().toISOString() };
+    const priced = item(1, "rice", { store: "Whole Foods", store_source: "price", price, buy_qty: "2 lb",
+                                     buy_qty_ok: true, history_store: "Wegmans" });
+    const b = boot({ items: [priced] });
+    await settle();
+    const chip = b.rows()[0].querySelector(".stchip");
+    check("the chip says the price chose the store", chip && chip.classList.contains("price")
+      && /💲 Whole Foods/.test(chip.textContent), chip && chip.textContent);
+    openEditor(b, 0); await settle();
+    check("the editor shows how", /2 × 1 lb = \$5\.00/.test(b.doc.getElementById("sheet-price").textContent),
+      b.doc.getElementById("sheet-price").textContent);
+    const opts = [...b.doc.querySelectorAll("#sheet-stores .stopt")].map(o => o.textContent);
+    check("'no pick' reads as the cheapest store", opts[0] === "💲 Cheapest (Whole Foods)", opts);
+    check("the amount field shows what is set", b.doc.getElementById("sheet-buyqty").value === "2 lb");
+    b.doc.getElementById("sheet-buyqty").value = "3 lb";
+    b.doc.getElementById("sheet-save").click();
+    await settle();
+    const edit = b.ops().find(o => o.type === "edit");
+    check("a changed amount is sent", edit && edit.buy_qty === "3 lb", edit);
+    const row = b.rows()[0].textContent;
+    check("and until it syncs the old price is not shown — history stands in",
+      /🏬 Wegmans/.test(row) && !/Whole Foods/.test(row), row);
+
+    // the owner's own pick wins, and the editor shows the cheaper store beside it
+    const c = boot({ items: [item(2, "milk", { store: "Wegmans", store_source: "preferred", price,
+                                                history_store: null })] });
+    await settle();
+    openEditor(c, 0); await settle();
+    check("your pick and the cheapest are both shown",
+      /Cheapest: Whole Foods[^]*you chose Wegmans/.test(c.doc.getElementById("sheet-price").textContent),
+      c.doc.getElementById("sheet-price").textContent);
+    [...c.doc.querySelectorAll("#sheet-stores .stopt")][0].click();    // "use cheapest"
+    c.doc.getElementById("sheet-save").click();
+    await settle();
+    const clear = c.ops().find(o => o.type === "edit");
+    check("choosing the cheapest clears your pick", clear && clear.store === "", clear);
+    check("and the row moves to the cheapest store at once (offline too)",
+      /💲 Whole Foods/.test(c.rows()[0].textContent), c.rows()[0].textContent);
+
+    const d = boot({ items: [item(3, "beans", { buy_qty: "a few", buy_qty_ok: false })] });
+    await settle();
+    openEditor(d, 0); await settle();
+    check("an amount the server could not read is flagged",
+      /Not understood/.test(d.doc.getElementById("sheet-buyqty-warn").textContent));
   }
 
   console.log("\n--- 5. no priced store: say what to do ------------------------------");

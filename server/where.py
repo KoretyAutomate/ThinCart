@@ -18,6 +18,7 @@ claim honest:
 
 import re
 
+import quantity
 from db import canonical
 
 # unit word (dots removed, lower-case) -> (dimension, how many base units it is)
@@ -125,3 +126,112 @@ def rank(quotes: list[dict]) -> tuple[dict | None, bool]:
     if len({dim for dim, _, _ in valued}) != 1:
         return None, False
     return min(valued, key=lambda v: v[1])[2], True
+
+
+# --- Phase 8: relevance, and the comparison in units we compute ----------------
+
+# Words that turn the item into a DIFFERENT product when they follow it in a
+# product name: "Lime Juice" is not lime, "Egg White Wraps" not egg whites,
+# "Cauliflower Rice" not cauliflower. Drawn from the false positives in the
+# cached search results (PLAN.md Phase 8, review delta 6). Ignored when the
+# item's own name contains the word ("lime juice" may match "Lime Juice").
+COMPOUND = frozenset((
+    "juice", "drink", "drinks", "water", "soda", "tea", "coffee", "kombucha", "smoothie", "shake",
+    "chicken", "beef", "pork", "turkey", "cutlet", "cutlets", "breast", "ravioli", "wrap", "wraps",
+    "bite", "bites", "blend", "waffle", "waffles", "honey", "syrup", "chip", "chips", "tortilla",
+    "tortillas", "yogurt", "bake", "bowl", "bowls", "burrito", "sauce", "dressing", "paste",
+    "flour", "cake", "cakes", "cracker", "crackers", "cereal", "vinegar", "wine", "soup", "broth",
+    "probiotic", "oil", "butter", "bread", "bar", "bars", "cookie", "cookies", "candy",
+    "chocolate", "cream", "pie", "mix", "seasoning", "spread", "dip", "hummus", "salsa",
+    "marinade", "marinated", "kit", "rice", "noodle", "noodles", "sprouts", "pudding", "jam",
+    "jelly", "popsicle", "gummies", "granola", "muffin", "muffins", "pancake", "pancakes", "pizza",
+    "sandwich", "dumpling", "dumplings",
+))
+
+# Words that say nothing about WHICH product: not required to appear.
+_NOT_CONTENT = frozenset(("organic", "fresh", "frozen", "conventional", "the", "and", "of", "with", "a", "an"))
+_DELIM = re.compile(r"[,|(\[]")
+
+
+def _sing(word: str) -> str:
+    if word.endswith("ies") and len(word) > 4:
+        return word[:-3] + "y"
+    if word.endswith("oes") or word.endswith("ches") or word.endswith("shes"):
+        return word[:-2]
+    if word.endswith("s") and not word.endswith("ss") and len(word) > 3:
+        return word[:-1]
+    return word
+
+
+def _words(text: str) -> list[str]:
+    return [_sing(w) for w in re.findall(r"[a-z]+", canonical(text))]
+
+
+def relevant(name: str, term: str) -> bool:
+    """Is this product the item, rather than something made from it?
+    Every content word of the item appears (any order — Whole Foods writes
+    "Tofu Firm Organic"), and no COMPOUND word follows it before the first
+    comma. An item with no English name cannot be checked, and passes."""
+    want = [w for w in _words(term) if w not in _NOT_CONTENT]
+    if not want or not term.isascii():
+        return True
+    head = canonical(_DELIM.split(canonical(name), 1)[0])
+    got = _words(name)
+    if any(w not in got for w in want):
+        return False
+    first = _words(head)
+    after = first[first.index(want[0]) + 1:] if want[0] in first else []
+    return not any(w in COMPOUND and w not in want for w in after)
+
+
+def fitting(recs: list[dict], pick_sku: str | None, organic: bool, brand: str,
+            term: str) -> tuple[list[tuple[dict, bool]], str]:
+    """Every candidate this store offers for the item, and a status.
+    A pick is the only candidate at its chain (checked, not trusted);
+    otherwise each in-stock, priced, organic-if-asked, brand-matching AND
+    relevant result is one."""
+    rec, status, exact = choose(recs, pick_sku, organic, brand)
+    if pick_sku:
+        return ([(rec, True)] if rec else []), status
+    out = [(r, False) for r in recs
+           if r.get("available") and r.get("amount") is not None
+           and fits(r, organic, brand) and relevant(r.get("name") or "", term)]
+    return out, ("ok" if out else "no_match")
+
+
+def compare(cands: list[tuple[dict, dict, bool]], wanted: tuple[str, float] | None) -> dict:
+    """Rank (store, record, exact) candidates across stores, in ONE dimension:
+    the wanted amount's, else the one most candidates can be measured in.
+    With a wanted amount the measure is what it costs to buy at least that
+    much ("2 × 1 lb = $5.98"), so a huge bag cheaper per pound does not win by
+    costing more than the owner meant to spend; without one, the unit price.
+    Candidates that cannot be measured in that dimension are listed, unranked."""
+    measured = [(s, r, x, quantity.comparable(quantity.quantities(r))) for s, r, x in cands]
+    dim = quantity.choose_dim([m for *_, m in measured], wanted[0] if wanted else None)
+    rows = []
+    for store, r, exact, qtys in measured:
+        row = {"store_id": store["id"], "store": store["name"], "product": r["name"], "brand": r.get("brand", ""),
+               "pack_size": r.get("pack_size", ""), "amount": r["amount"], "unit_price": r.get("unit_price", ""),
+               "exact": exact, "source": r.get("source", ""), "source_url": r.get("source_url", ""),
+               "fetched_at": r.get("fetched_at", ""), "metric": None}
+        qty = qtys.get(dim) if dim else None
+        if qty and dim:
+            row["qty_label"] = quantity.qty_label(qty, dim)
+            row["unit_label"] = quantity.unit_label(r["amount"], qty, dim)
+            if wanted:
+                total, packs = quantity.cost_to_cover(r["amount"], qty, wanted[1])
+                row["packs"], row["total"] = packs, total
+                row["total_label"] = (f"{packs} × {row['qty_label']} = ${total:.2f}" if packs > 1
+                                      else f"{row['qty_label']} = ${total:.2f}")
+                row["metric"] = (total, packs * qty - wanted[1])
+            else:
+                row["metric"] = (r["amount"] / qty, 0)
+        rows.append(row)
+    ranked = sorted((r for r in rows if r["metric"] is not None), key=lambda r: r["metric"])
+    best_per_store: dict[int, dict] = {}
+    for r in ranked + [r for r in rows if r["metric"] is None]:
+        best_per_store.setdefault(r["store_id"], r)
+    for r in rows:
+        r.pop("metric", None)
+    return {"dim": dim, "cheapest": ranked[0] if ranked else None,
+            "comparable": bool(ranked), "quotes": list(best_per_store.values())}

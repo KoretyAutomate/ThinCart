@@ -221,7 +221,7 @@ async def enrich(conn, write_lock, catalog_id: int) -> bool:
         # it meanwhile. Re-read what is carried over now, under the lock.
         cur = (
             conn.execute(
-                "SELECT note, budget, preferred_store_id, brand FROM item_catalog WHERE id=?",
+                "SELECT note, budget, preferred_store_id, brand, buy_qty FROM item_catalog WHERE id=?",
                 (row["id"],),
             ).fetchone()
             if target
@@ -256,8 +256,9 @@ async def enrich(conn, write_lock, catalog_id: int) -> bool:
                 "note = CASE WHEN note='' THEN ? ELSE note END, "
                 "budget = COALESCE(budget, ?), "
                 "preferred_store_id = COALESCE(preferred_store_id, ?), "
-                "brand = CASE WHEN brand='' THEN ? ELSE brand END WHERE id=?",
-                (cur["note"], cur["budget"], cur["preferred_store_id"], cur["brand"], target["id"]),
+                "brand = CASE WHEN brand='' THEN ? ELSE brand END, "
+                "buy_qty = CASE WHEN buy_qty='' THEN ? ELSE buy_qty END WHERE id=?",
+                (cur["note"], cur["budget"], cur["preferred_store_id"], cur["brand"], cur["buy_qty"], target["id"]),
             )
             conn.execute("DELETE FROM item_catalog WHERE id=?", (row["id"],))
             log.info("alias-merged %r into %r", row["canonical_name"], alias_of)

@@ -12,6 +12,8 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "server"))
 
+import away_db
+
 import cycles
 import travel
 
@@ -298,18 +300,18 @@ def test_unreviewed_detections_do_not_touch_the_cycles(tmp_path):
     proposal = travel.AwayCandidate(
         day=date(2026, 8, 1), event_id="x", summary="Stay at Hotel", location="", reason="3-day all-day event"
     )
-    dbmod.record_away_candidates(conn, [proposal], "2026-08-11T00:00:00+00:00")
+    away_db.record_away_candidates(conn, [proposal], "2026-08-11T00:00:00+00:00")
     conn.commit()
-    assert dbmod.away_rows(conn)[0]["status"] == "auto"
-    assert dbmod.away_set(conn).days == frozenset()  # visible for review, inert
+    assert away_db.away_rows(conn)[0]["status"] == "auto"
+    assert away_db.away_set(conn).days == frozenset()  # visible for review, inert
 
-    dbmod.set_away_status(conn, "2026-08-01", "confirmed", "2026-08-11T00:00:00+00:00")
+    away_db.set_away_status(conn, "2026-08-01", "confirmed", "2026-08-11T00:00:00+00:00")
     conn.commit()
-    assert dbmod.away_set(conn).days == frozenset({date(2026, 8, 1)})
+    assert away_db.away_set(conn).days == frozenset({date(2026, 8, 1)})
 
-    dbmod.set_away_status(conn, "2026-08-01", "rejected", "2026-08-11T00:00:00+00:00")
+    away_db.set_away_status(conn, "2026-08-01", "rejected", "2026-08-11T00:00:00+00:00")
     conn.commit()
-    assert dbmod.away_set(conn).days == frozenset()
+    assert away_db.away_set(conn).days == frozenset()
 
 
 def test_a_day_marked_away_by_hand_counts_at_once():
@@ -319,10 +321,10 @@ def test_a_day_marked_away_by_hand_counts_at_once():
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
     conn.executescript(db_schema())
-    db_module().set_away_status(conn, "2026-08-01", "confirmed", "2026-08-11T00:00:00+00:00")
-    rows = db_module().away_rows(conn)
+    away_db.set_away_status(conn, "2026-08-01", "confirmed", "2026-08-11T00:00:00+00:00")
+    rows = away_db.away_rows(conn)
     assert rows[0]["source"] == "manual" and rows[0]["status"] == "confirmed"
-    assert db_module().away_set(conn).days == frozenset({date(2026, 8, 1)})
+    assert away_db.away_set(conn).days == frozenset({date(2026, 8, 1)})
 
 
 def db_module():
@@ -466,18 +468,18 @@ def test_prune_window_is_in_home_local_dates(tmp_path, monkeypatch):
         location="",
         reason="3-day all-day event",
     )
-    dbmod.record_away_candidates(conn, [stale], "2026-08-12T02:00:00+00:00")
+    away_db.record_away_candidates(conn, [stale], "2026-08-12T02:00:00+00:00")
     conn.commit()
-    assert len(dbmod.away_rows(conn)) == 1
+    assert len(away_db.away_rows(conn)) == 1
 
     # the window a sync computes, expressed the way the rows are keyed
     time_max = now + timedelta(days=awaymod.WINDOW_AHEAD_DAYS)
     time_min = now - timedelta(days=awaymod.WINDOW_BACK_DAYS)
-    dropped = dbmod.prune_away_candidates(
+    dropped = away_db.prune_away_candidates(
         conn,
         time_min.astimezone(travel.HOME_TZ).date().isoformat(),
         time_max.astimezone(travel.HOME_TZ).date().isoformat(),
         set(),  # the calendar no longer claims any day
     )
     assert dropped == 1
-    assert dbmod.away_rows(conn) == []
+    assert away_db.away_rows(conn) == []
