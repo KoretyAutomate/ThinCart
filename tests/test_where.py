@@ -469,3 +469,17 @@ def test_a_conventional_stand_in_is_kept_until_its_regular_product_is_checked(mo
     client.post("/api/where", json={"catalog_ids": [cid]})
     item = next(i for i in client.get("/api/state").json()["items"] if i["catalog_id"] == cid)
     assert item["price"] and item["price"]["store"] == "Where A"
+
+
+def test_organic_found_but_unrankable_still_ends_the_stand_in(monkeypatch, stores, organic_on):
+    """Codex review: organic kale sold by the bunch could not be ranked against
+    the stand-in sold by weight, so the conventional recommendation stayed."""
+    cid = add("quillcollard", food=True)
+    stub(monkeypatch, {"901": {"organic quillcollard": [], "quillcollard": [rec("Quillcollard 16 oz", 2.0, "")]},
+                       "902": {"organic quillcollard": [], "quillcollard": [rec("Quillcollard 16 oz", 3.0, "")]}})
+    assert ask(cid)["organic_fallback"] is True
+    stub(monkeypatch, {"901": {"organic quillcollard": [rec("Organic Quillcollard, 1 Bunch", 3.0, "")]},
+                       "902": {"organic quillcollard": []}})
+    client.post("/api/where", json={"catalog_ids": [cid]})
+    item = next(i for i in client.get("/api/state").json()["items"] if i["catalog_id"] == cid)
+    assert item["price"] is None or "Organic" in item["price"]["product"]

@@ -137,7 +137,8 @@ async def _persist(items: dict[int, dict], result: dict[str, dict]) -> None:
             winner = old["cheapest"]["store_id"] if old and old.get("cheapest") else None
             # a regular product stood in only because nobody had it organic;
             # an organic one now found replaces it, wherever the old one was
-            organic_now = bool(old and old.get("organic_fallback") and r["cheapest"] and not r["organic_fallback"])
+            # organic products found at all — ranked or not — end the stand-in
+            organic_now = bool(old and old.get("organic_fallback") and r["quotes"] and not r["organic_fallback"])
             if winner is not None and r["stores"].get(str(winner)) == "unasked" and not organic_now:
                 continue                          # the winner could not be checked: keep it
             # a regular-product stand-in is only re-checked by the regular
