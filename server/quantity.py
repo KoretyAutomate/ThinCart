@@ -55,6 +55,10 @@ _PER_ROLL = re.compile(r"(\d+)\s*sheets?\s*per\s*roll")
 # nutrition facts in names are not package sizes: "48g protein", "5 g sugar"
 _NUTRIENT = re.compile(r"\s*(?:of\s+)?(?:protein|fat|sugar|sugars|carb|carbs|fiber|fibre|sodium|calorie)")
 
+# The end of a range: "9-18 lbs", "12 to 18 lb" — a wearer's weight on
+# diapers or a fit, never the package (Codex review).
+_RANGE_BEFORE = re.compile(r"\d\s*(?:-|–|to)\s*$")
+
 # A comparison picks ONE dimension; this order breaks ties between equally
 # common ones — physical amounts before counts of things whose size varies.
 DIM_ORDER = ("weight", "volume", "area", "sheet", "each", "roll")
@@ -146,6 +150,8 @@ def parse(text: str) -> dict[str, float]:
     for m in _AMOUNT.finditer(t):
         if _NUTRIENT.match(t, m.end()) or any(a <= m.start() < b for a, b in multi_spans):
             continue
+        if _RANGE_BEFORE.search(t, 0, m.start()):
+            continue                            # "(9-18 lbs)" is who it fits, not what is in it
         dim, size = UNITS[m.group(2)]
         if dim == "sheet" and _PER_ROLL.match(t, m.start()):
             continue                            # "103 sheets per roll" is not a total

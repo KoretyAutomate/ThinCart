@@ -211,6 +211,21 @@ def _positions(lead: list[str], want: list[str]) -> list[int]:
             if t in want or t in pairs or (i + 1 < len(lead) and t + lead[i + 1] in want)]
 
 
+def _term_words(term: str) -> list[str]:
+    """The item's words, minus a size typed into its name: "salmon 2 lb" is
+    salmon. A unit word counts as a size only right after a number — "eggs"
+    alone is the product, not a count (Codex review)."""
+    tokens = re.findall(r"\d+(?:\.\d+)?|[a-z]+(?:-[a-z]+)*", canonical(term))
+    out = []
+    for i, tok in enumerate(tokens):
+        if tok[0].isdigit():
+            continue
+        if i > 0 and tokens[i - 1][0].isdigit() and tok in quantity.UNITS:
+            continue
+        out.append(_sing(tok.replace("-", "")))
+    return out
+
+
 def _core_words(name: str, brand: str) -> list[str]:
     """The words that describe THIS product: the name without leading
     brand-only segments ("365 by Whole Foods Market, …"), cut at the first
@@ -232,8 +247,7 @@ def relevant(name: str, term: str, brand: str = "") -> bool:
     Every content word of the item appears (any order — Whole Foods writes
     "Tofu Firm Organic"), and no COMPOUND word follows it before the first
     comma. An item with no English name cannot be checked, and passes."""
-    # a size typed into the item's name ("salmon 2 lb") is not a product word
-    want = [w for w in _words(term) if w not in _NOT_CONTENT and w not in quantity.UNITS]
+    want = [w for w in _term_words(term) if w not in _NOT_CONTENT]
     # decided on the NORMALIZED term: "２％ milk" is ASCII once folded
     if not want or not canonical(term).isascii():
         return True

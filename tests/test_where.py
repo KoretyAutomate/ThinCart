@@ -521,3 +521,11 @@ def test_a_size_in_the_item_name_is_not_a_product_word():
     assert where.relevant("Sockeye Salmon Fillet, 32 oz", "organic salmon 2 lb") is True
     assert where.relevant("365 by Whole Foods Market Sockeye Salmon Fillets, 10 OZ", "salmon 2 lb",
                           "365 by Whole Foods Market") is True
+
+
+def test_a_unit_word_is_a_size_only_after_a_number():
+    """Codex review: 'eggs' was stripped as a count unit, leaving no words —
+    so egg noodles passed for eggs."""
+    assert where.relevant("Egg Noodles, 12 oz", "eggs") is False
+    assert where.relevant("Large Brown Eggs, 12 ct", "eggs") is True
+    assert where.relevant("Sockeye Salmon Fillet, 32 oz", "salmon 2 lb") is True

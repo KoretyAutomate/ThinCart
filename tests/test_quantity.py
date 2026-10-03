@@ -42,6 +42,9 @@ import quantity as q
     ("Spaghetti 12 oz (340 g)", {"weight": 12.0}),
     ("Whole Milk, 1 Gallon", {"volume": 128.0}),
     ("Heavy Cream, Half Pint", {"volume": 8.0}),      # Codex review: half halves
+    # a weight RANGE is who the diaper fits, not the package (Codex review)
+    ("Millie Moon Unisex Size 2 Luxury Diapers (9-18 lbs), 96 Count", {"each": 96.0}),
+    ("Huggies Little Movers, Size 4 (22-37 lb), 29 Ct", {"each": 29.0}),
     ("Eggs, 12-pack", {"each": 12.0}),                # Codex review: a pack count is a count
     ("Sparkling Water, 6 pack, 72 fl oz total", {"volume": 72.0, "each": 6.0}),
     ("Large Eggs, Pack of 12", {"each": 12.0}),
