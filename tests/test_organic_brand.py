@@ -177,3 +177,14 @@ def test_state_carries_every_chains_pick():
            pick_name="p", pick_brand="", pick_size="")
     got = client.get("/api/state").json()["picks_by_chain"][str(added["catalog_id"])]
     assert got == {"wegmans": "W1", "wholefoods": "WF1"}
+
+
+def test_an_impossible_amount_never_breaks_the_list():
+    """Codex review 2026-10-03: a saved buy_qty of '1/0 lb' raised
+    ZeroDivisionError inside state(), breaking the list on both phones."""
+    added = op(type="add", name="impossible-8a1", item_id=str(uuid.uuid4()))
+    op(type="edit", item_id=added["item_id"], buy_qty="1/0 lb")
+    r = client.get("/api/state")
+    assert r.status_code == 200
+    it = next(i for i in r.json()["items"] if i["catalog_id"] == added["catalog_id"])
+    assert it["buy_qty"] == "1/0 lb" and it["buy_qty_ok"] is False

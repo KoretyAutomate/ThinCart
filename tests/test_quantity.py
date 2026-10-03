@@ -79,7 +79,10 @@ def test_oz_and_fl_oz_compare_only_for_liquids():
     ("12", ("each", 12.0)), ("two pounds", None), ("", None), ("2 lb 6 rolls", None),
     # Codex review: never the tail of a number
     (".5 lb", ("weight", 8.0)), ("1/2 lb", ("weight", 8.0)), ("1 1/2 lb", ("weight", 24.0)),
+    # Codex review round 2: unusual numbers are read whole or not at all
+    ("1/0 lb", None), ("½ lb", ("weight", 8.0)), ("1,100 sheets", ("sheet", 1100.0)),
 ])
+
 def test_parse_wanted(text, want):
     assert q.parse_wanted(text) == want
 

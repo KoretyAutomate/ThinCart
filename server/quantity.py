@@ -46,7 +46,7 @@ for _words, _dim, _size in (
 _UNIT_RE = "|".join(re.escape(u) for u in sorted(UNITS, key=len, reverse=True))
 # A whole number only: never the tail of ".5" or "1/2" (Codex review) — those
 # are rewritten to decimals by _norm before matching.
-_NUM = r"(?<![\d./])(\d+(?:\.\d+)?)"
+_NUM = r"(?<![\d.,/])(\d+(?:\.\d+)?)"
 # "6 Double Plus Rolls": size adjectives may sit between the number and the unit
 _ADJ = r"(?:(?:double|triple|mega|plus|family|huge|big|giant|regular|jumbo|select-a-size)\s+){0,3}"
 _AMOUNT = re.compile(rf"{_NUM}\s*{_ADJ}({_UNIT_RE})(?![a-z])")
@@ -61,12 +61,17 @@ DIM_ORDER = ("weight", "volume", "area", "sheet", "each", "roll")
 
 
 def _fraction(m: re.Match) -> str:
-    whole = int(m.group(1) or 0)
-    return f"{whole + int(m.group(2)) / int(m.group(3)):g}"
+    """"1 1/2" -> "1.5". A zero denominator is not a number: it becomes a
+    marker nothing matches, so the amount reads as "not understood" — never an
+    exception (a saved "1/0 lb" would otherwise break every state read)."""
+    whole, num, den = int(m.group(1) or 0), int(m.group(2)), int(m.group(3))
+    return f"{whole + num / den:g}" if den else " ?? "
 
 
 def _norm(text: str) -> str:
     t = unicodedata.normalize("NFKC", text or "").lower()
+    t = t.replace("\u2044", "/")                                   # NFKC turns "½" into "1⁄2"
+    t = re.sub(r"(?<=\d),(?=\d{3}(?!\d))", "", t)                 # "1,100 sheets" -> "1100 sheets"
     t = re.sub(r"(?:(\d+)\s+)?(\d+)\s*/\s*(\d+)", _fraction, t)   # "1 1/2 lb" -> "1.5 lb"
     t = re.sub(r"(?<![\d])\.(\d)", r"0.\1", t)                    # ".5 lb" -> "0.5 lb"
     t = re.sub(r"(?<=[a-z])\.", "", t)          # "fl. oz." -> "fl oz", keep "0.5"
