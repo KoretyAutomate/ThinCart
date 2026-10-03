@@ -89,13 +89,10 @@ def _norm(text: str) -> str:
     return re.sub(r"\s+", " ", t)
 
 
-# Size words with no number: "Milk, Half Gallon", "Cream, Quart".
-_WORD_SIZES = (
-    (re.compile(r"\bhalf[\s-]+gallon\b"), "volume", 64.0),
-    (re.compile(r"(?<![\d.\s])\s*\bgallon\b|^gallon\b"), "volume", 128.0),
-    (re.compile(r"(?<![\d.])\s*\bquart\b"), "volume", 32.0),
-    (re.compile(r"(?<![\d.])\s*\bpint\b"), "volume", 16.0),
-)
+# Size words with no number: "Milk, Half Gallon", "Cream, Half Pint", "Quart".
+# "half" halves; a number in front is handled by the numeric parse instead.
+_WORD_SIZE = re.compile(r"(?<![\d.])(?<![\d.]\s)\b(half[\s-]+)?(gallon|quart|pint)s?\b")
+_WORD_UNIT = {"gallon": 128.0, "quart": 32.0, "pint": 16.0}
 # "(Pack of 6)", "6 pack", "6-pack", "6 cans", "12 bottles": a count of the
 # stated size, not a size of its own.
 _PACK_OF = re.compile(r"\bpack\s+of\s+(\d+)\b|(?<![\d.])(\d+)\s*-?\s*(?:pack|pk|cans|bottles|cartons|jars|boxes)\b")
@@ -125,10 +122,10 @@ def pack_count(text: str) -> int:
 
 
 def _word_sizes(t: str) -> dict[str, float]:
-    for rx, dim, qty in _WORD_SIZES:
-        if rx.search(t):
-            return {dim: qty}
-    return {}
+    m = _WORD_SIZE.search(t)
+    if not m:
+        return {}
+    return {"volume": _WORD_UNIT[m.group(2)] * (0.5 if m.group(1) else 1.0)}
 
 
 def parse(text: str) -> dict[str, float]:

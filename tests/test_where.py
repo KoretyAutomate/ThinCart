@@ -436,3 +436,13 @@ def test_found_organic_replaces_a_conventional_stand_in(monkeypatch, stores, org
     client.post("/api/where", json={"catalog_ids": [cid]})
     item = next(i for i in client.get("/api/state").json()["items"] if i["catalog_id"] == cid)
     assert item["price"]["store"] == "Where B" and "Organic" in item["price"]["product"]
+
+
+def test_the_item_must_lead_the_product_not_trail_it():
+    """Codex review: cached 'organic lemon' results let lemon juices in when
+    lemon only appeared after the first comma."""
+    assert where.relevant("Simply Lemonade, made with real lemon", "lemon") is False
+    assert where.relevant("Wegmans Organic Lemons, 2 lb", "organic lemon") is True
+    # a store-brand lead segment is skipped, not mistaken for the product
+    assert where.relevant("365 By Whole Foods Market, Tofu Firm Organic, 14 Ounce", "firm tofu",
+                          "365 By Whole Foods Market") is True

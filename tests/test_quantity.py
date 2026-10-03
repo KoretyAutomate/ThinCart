@@ -41,6 +41,8 @@ import quantity as q
     ("Sparkling Water 12 fl oz, 8 pack", {"volume": 96.0, "each": 8.0}),
     ("Spaghetti 12 oz (340 g)", {"weight": 12.0}),
     ("Whole Milk, 1 Gallon", {"volume": 128.0}),
+    ("Heavy Cream, Half Pint", {"volume": 8.0}),      # Codex review: half halves
+    ("Half-and-Half, Quart", {"volume": 32.0}),
 ])
 def test_parse(text, want):
     assert q.parse(text) == want

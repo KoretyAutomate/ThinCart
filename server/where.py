@@ -175,7 +175,19 @@ def _words(text: str) -> list[str]:
     return [_sing(w) for w in re.findall(r"[a-z]+", canonical(text))]
 
 
-def relevant(name: str, term: str) -> bool:
+def _leading_phrase(name: str, brand: str) -> str:
+    """The product's own phrase: the first comma/bar-separated segment that is
+    not just its brand — "365 by Whole Foods Market, Tofu Firm Organic" leads
+    with the tofu, not the store brand."""
+    brand_words = set(_words(brand)) | {"by"}
+    for seg in _DELIM.split(canonical(name)):
+        words = _words(seg)
+        if words and not set(words) <= brand_words:
+            return seg
+    return ""
+
+
+def relevant(name: str, term: str, brand: str = "") -> bool:
     """Is this product the item, rather than something made from it?
     Every content word of the item appears (any order — Whole Foods writes
     "Tofu Firm Organic"), and no COMPOUND word follows it before the first
@@ -188,7 +200,7 @@ def relevant(name: str, term: str) -> bool:
     # would let a cheaper 1% win (Codex review)
     if any(p not in _percents(name) for p in _percents(term)):
         return False
-    head = canonical(_DELIM.split(canonical(name), 1)[0])
+    head = _leading_phrase(name, brand)
     got = _words(name)
     if any(w not in got for w in want):
         return False
@@ -197,7 +209,11 @@ def relevant(name: str, term: str) -> bool:
     # them describes it: "Honey Roasted Peanuts" are peanuts.
     lead = _words(head)
     at = [i for i, w in enumerate(lead) if w in want]
-    after = lead[at[0] + 1:] if at else []
+    if not at:
+        # the item is only mentioned after the product's own phrase — an
+        # ingredient ("Lemonade, made with real lemon"), not the item
+        return False
+    after = lead[at[0] + 1:]
     return not any(w in COMPOUND and w not in want for w in after)
 
 
@@ -212,7 +228,7 @@ def fitting(recs: list[dict], pick_sku: str | None, organic: bool, brand: str,
         return ([(rec, True)] if rec else []), status
     out = [(r, False) for r in recs
            if r.get("available") and r.get("amount") is not None
-           and fits(r, organic, brand) and relevant(r.get("name") or "", term)]
+           and fits(r, organic, brand) and relevant(r.get("name") or "", term, r.get("brand") or "")]
     return out, ("ok" if out else "no_match")
 
 
