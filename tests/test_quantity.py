@@ -23,6 +23,9 @@ import quantity as q
     ("1 gallon", {"volume": 128.0}),
     ("12 ct.", {"each": 12.0}),
     ("Oatmilk Unsweetened, 48 Fl Oz", {"volume": 48.0}),
+    ("Santa Cruz Organic Organic Tart Cherry Lemonade, 32 FZ", {"volume": 32.0}),   # Codex review
+    ("Seventh Generation Nat Paper Towels, 120 Cnt", {"each": 120.0}),           # found by scanning cache
+    ("Herb Dill Organic, 1 Bunch", {"each": 1.0}),
     ("Fusilli #34, 16 Ounce", {"weight": 16.0}),
     ("6 x 16 oz bottles", {"weight": 96.0, "each": 6.0}),
     ("Seventh Generation 100% Recycled Paper Towels, 2 Ply, 140 Sheets", {"sheet": 140.0}),
