@@ -66,3 +66,11 @@ def test_sizes_in_the_item_name_are_not_required_words():
 
 def test_an_item_with_no_english_name_cannot_be_checked():
     assert where.relevant("Anything at all", "キッチンペーパー") is True
+
+
+def test_brands_with_ignored_words_and_counted_nouns():
+    """Codex review: 'Fresh Express' and 'Organic Valley' items, and eggs
+    counted in the product name."""
+    assert where.relevant("Fresh Express Spinach, 8 oz", "Fresh Express spinach", "Fresh Express") is True
+    assert where.relevant("Organic Valley Whole Milk, 64 fl oz", "Organic Valley whole milk", "Organic Valley") is True
+    assert where.relevant("Organic Free Range 12 Eggs", "eggs") is True

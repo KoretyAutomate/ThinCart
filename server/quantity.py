@@ -180,12 +180,15 @@ def parse(text: str) -> dict[str, float]:
     return {d: q for d, q in out.items() if q > 0}
 
 
-def strip_sizes(text: str) -> str:
+def strip_sizes(text: str, keep_counts: bool = False) -> str:
     """The text with every size phrase removed: "milk 64 fl oz" -> "milk".
-    Whole phrases, so a two-word unit ("fl oz", "sq ft") goes with its number."""
+    Whole phrases, so a two-word unit ("fl oz", "sq ft") goes with its number.
+    `keep_counts` leaves counts of things in place ("12 Eggs", "6 Rolls") —
+    their noun may be the product itself."""
     t = _norm(text)
     t = _MULTI.sub(" ", t)
-    t = _AMOUNT.sub(" ", t)
+    t = _AMOUNT.sub(lambda m: m.group(0) if keep_counts and UNITS[m.group(2)][0] in ("each", "roll", "sheet")
+                    else " ", t)
     t = _WORD_SIZE.sub(" ", t)            # "Half Gallon", "Quart" are sizes too
     t = _PACK_OF.sub(" ", t)              # "(Pack of 6)", "12-pack" are package counts
     return re.sub(r"\s+", " ", t).strip()
@@ -289,6 +292,20 @@ def quantities(rec: dict) -> dict[str, float]:
         else:
             del out[dim]
         settled.add(dim)
+    # "Seltzer, 12 fl oz, 6 ct": six cans of 12 — or 12 in all? The same
+    # per-container-or-total question as a pack count: the unit price decides
+    # when it holds exactly one reading, else the size is unknown (Codex review)
+    count = name_q.get("each") or pack_q.get("each") or 0
+    if n <= 1 and count > 1:
+        for dim in ("weight", "volume"):
+            if dim in out and dim not in settled:
+                rng = _unit_price_range(rec, dim)
+                holds = [v for v in (out[dim] * count, out[dim]) if rng and rng[0] <= v <= rng[1]]
+                if len(holds) == 1:
+                    out[dim] = holds[0]
+                else:
+                    del out[dim]
+                settled.add(dim)
     implied = from_unit_price(rec.get("amount"), rec.get("unit_price") or "")
     for dim in _TRUSTED_UNIT_DIMS:
         rng = _unit_price_range(rec, dim)

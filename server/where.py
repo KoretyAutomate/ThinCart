@@ -198,7 +198,8 @@ def _own_words(name: str, brand: str) -> list[str]:
     segs = [s for s in _DELIM.split(canonical(name)) if _words(s)]
     while segs and set(_words(segs[0])) <= brand_words:
         segs = segs[1:]
-    words = _words(quantity.strip_sizes(" ".join(segs)))
+    # measures go ("16 oz"); counts keep their noun ("12 Eggs" is eggs)
+    words = _words(quantity.strip_sizes(" ".join(segs), keep_counts=True))
     lead = _words(brand)
     if lead and words[:len(lead)] == lead:
         words = words[len(lead):]
@@ -210,7 +211,8 @@ def relevant(name: str, term: str, brand: str = "") -> bool:
     appears in the product's own words (any order, joined or apart), and a
     percentage in the item ("2% milk") matches. Nothing more: WHICH of the
     matching products is the item is the store's ranking, not this check."""
-    want = [w for w in _term_words(term) if w not in _NOT_CONTENT]
+    words = _term_words(term)
+    want = [w for w in words if w not in _NOT_CONTENT]
     if not want or not canonical(term).isascii():
         return True
     if any(p not in _percents(name) for p in _percents(term)):
@@ -218,7 +220,9 @@ def relevant(name: str, term: str, brand: str = "") -> bool:
     # "Daisy sour cream": an item naming the product's WHOLE brand has those
     # words satisfied by the brand; an item that is only the brand matches all
     brand_w = _words(brand)
-    if brand_w and all(w in want for w in brand_w):
+    # matched against ALL the item's words: "Fresh Express spinach" names the
+    # whole brand even though "fresh" alone is not a product word
+    if brand_w and all(w in words for w in brand_w):
         want = [w for w in want if w not in brand_w]
         if not want:
             return True

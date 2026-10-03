@@ -204,3 +204,14 @@ def test_a_liquid_stated_in_oz_is_checked_against_a_fl_oz_unit_price():
     rec = {"pack_size": "", "amount": 4.0, "unit_price": "$0.13/fl oz", "name": "Milk, 128 oz"}
     assert "weight" not in q.quantities(rec)
     assert q.strip_sizes("Whole Milk, Half Gallon") == "whole milk,"
+
+
+def test_a_count_beside_a_size_is_reconciled_or_left_unknown():
+    """Codex review: 'Seltzer, 12 fl oz, 6 ct' priced the six-pack as 12 fl oz."""
+    rec = {"pack_size": "", "amount": 6.0, "unit_price": "", "name": "Seltzer, 12 fl oz, 6 ct"}
+    assert "volume" not in q.quantities(rec)
+    rec["unit_price"] = "$0.08/fl oz"                                  # $6 / 72 fl oz
+    assert q.quantities(rec)["volume"] == 72.0
+    rec = {"pack_size": "", "amount": 4.0, "unit_price": "$0.53/oz",
+           "name": "Sargento Sliced Provolone, 20 count, 7.6 oz"}      # 20 slices, 7.6 oz in all
+    assert q.quantities(rec)["weight"] == 7.6
