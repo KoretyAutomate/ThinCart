@@ -423,3 +423,16 @@ def test_excluded_product_types_are_folded_like_product_words():
     """Codex review: 'cookies' singular-folds to 'cooky' and slipped past."""
     assert where.relevant("Rice Cookies, 8 oz", "rice") is False
     assert where.relevant("Fruit Gummies, 6 oz", "fruit") is False
+
+
+def test_found_organic_replaces_a_conventional_stand_in(monkeypatch, stores, organic_on):
+    """Codex review: the stored answer was a regular product (nobody had it
+    organic); A is now unreachable but B has organic — B's organic wins."""
+    cid = add("quillkale", food=True)
+    stub(monkeypatch, {"901": {"organic quillkale": [], "quillkale": [rec("Quillkale 16 oz", 2.0, "")]},
+                       "902": {"organic quillkale": [], "quillkale": [rec("Quillkale 16 oz", 3.0, "")]}})
+    assert ask(cid)["organic_fallback"] is True
+    stub(monkeypatch, {"902": {"organic quillkale": [rec("Organic Quillkale 16 oz", 4.0, "")]}}, fail={"901"})
+    client.post("/api/where", json={"catalog_ids": [cid]})
+    item = next(i for i in client.get("/api/state").json()["items"] if i["catalog_id"] == cid)
+    assert item["price"]["store"] == "Where B" and "Organic" in item["price"]["product"]

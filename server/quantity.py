@@ -115,8 +115,12 @@ def _one_value(values: list[float]) -> float | None:
 
 
 def pack_count(text: str) -> int:
-    """N in "(Pack of N)", "N pack", "N cans" — 1 when not stated."""
-    m = _PACK_OF.search(_norm(text))
+    """N in "6 x 12 fl oz", "(Pack of N)", "N pack", "N cans" — 1 when not stated."""
+    t = _norm(text)
+    multi = _MULTI.search(t)
+    if multi:
+        return int(multi.group(1))
+    m = _PACK_OF.search(t)
     return int(m.group(1) or m.group(2)) if m else 1
 
 

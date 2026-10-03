@@ -132,6 +132,9 @@ def test_a_pack_size_for_one_can_and_a_name_for_the_pack():
     """Codex review: pack size '12 fl oz' + name '..., 8 pack' kept 12 fl oz."""
     rec = {"pack_size": "12 fl oz", "amount": 4.0, "unit_price": "", "name": "Sparkling Water 12 fl oz, 8 pack"}
     assert q.quantities(rec)["volume"] == 96.0
+    # an explicit multiplier is a pack count too (Codex review)
+    rec = {"pack_size": "12 fl oz", "amount": 4.0, "unit_price": "", "name": "Sparkling Water, 6 x 12 fl oz"}
+    assert q.quantities(rec)["volume"] == 72.0
     # a pack size that is already the total is left alone
     rec = {"pack_size": "96 fl oz", "amount": 4.0, "unit_price": "", "name": "Sparkling Water 12 fl oz, 8 pack"}
     assert q.quantities(rec)["volume"] == 96.0

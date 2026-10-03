@@ -133,8 +133,12 @@ async def _persist(items: dict[int, dict], result: dict[str, dict]) -> None:
         for cid, it in items.items():
             r = result[str(cid)]
             partial = "unasked" in r["stores"].values()
-            winner = price_reco.stored_winner(conn, cid, it["key"])
-            if winner is not None and r["stores"].get(str(winner)) == "unasked":
+            old = price_reco.stored_answer(conn, cid, it["key"])
+            winner = old["cheapest"]["store_id"] if old and old.get("cheapest") else None
+            # a regular product stood in only because nobody had it organic;
+            # an organic one now found replaces it, wherever the old one was
+            organic_now = bool(old and old.get("organic_fallback") and r["cheapest"] and not r["organic_fallback"])
+            if winner is not None and r["stores"].get(str(winner)) == "unasked" and not organic_now:
                 continue                          # the winner could not be checked: keep it
             if r["cheapest"]:
                 changed |= price_reco.save(conn, cid, it["key"], r, ts)
