@@ -276,7 +276,7 @@ def compare(cands: list[tuple[dict, dict, bool]], wanted: tuple[str, float] | No
     much ("2 × 1 lb = $5.98"), so a huge bag cheaper per pound does not win by
     costing more than the owner meant to spend; without one, the unit price.
     Candidates that cannot be measured in that dimension are listed, unranked."""
-    measured = [(s, r, x, quantity.comparable(quantity.quantities(r), liquid)) for s, r, x in cands]
+    measured = [(s, r, x, quantity.comparable(quantity.quantities(r, liquid), liquid)) for s, r, x in cands]
     dim = quantity.choose_dim([m for *_, m in measured], wanted[0] if wanted else None)
     rows = []
     for store, r, exact, qtys in measured:

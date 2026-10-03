@@ -205,7 +205,10 @@ def test_a_stated_size_is_checked_even_when_no_size_can_be_inferred():
 def test_a_liquid_stated_in_oz_is_checked_against_a_fl_oz_unit_price():
     """Codex review: 'Milk, 128 oz' at $4 and '$0.13/fl oz' (≈31 fl oz) ranked as a gallon."""
     rec = {"pack_size": "", "amount": 4.0, "unit_price": "$0.13/fl oz", "name": "Milk, 128 oz"}
-    assert "weight" not in q.quantities(rec)
+    assert "weight" not in q.quantities(rec, liquid=True)
+    # not a liquid: oz is a weight, and a fl oz price does not rule it out
+    honey = {"pack_size": "", "amount": 6.0, "unit_price": "$0.75/fl oz", "name": "Honey, 12 oz"}
+    assert q.quantities(honey)["weight"] == 12.0
     assert q.strip_sizes("Whole Milk, Half Gallon") == "whole milk,"
 
 
@@ -240,3 +243,9 @@ def test_a_metric_label_beside_a_multipack_is_one_container():
 
 def test_zero_amount_infers_nothing():
     assert q.from_unit_price(0.0, "$1.00/oz") == {}
+
+
+@pytest.mark.parametrize("text", ["two gallons", "1 gallon and a half", "about 2 lb", "2 lb or so"])
+def test_a_wanted_amount_with_words_left_over_is_not_read(text):
+    """Codex review: 'two gallons' read as one gallon, without the warning."""
+    assert q.parse_wanted(text) is None
