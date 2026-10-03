@@ -266,7 +266,7 @@ def _unit_price_range(rec: dict, dim: str) -> tuple[float, float] | None:
     return amount / (per + 0.005) * size, amount / max(per - 0.005, 1e-9) * size
 
 
-def quantities(rec: dict) -> dict[str, float]:
+def quantities(rec: dict, liquid: bool = False) -> dict[str, float]:
     """What is in this product, per dimension. Pack size first, then the name;
     the store's unit price fills a missing weight/volume/area and vetoes a
     parsed one it contradicts by more than 15% (a rounded unit price — $0.03 a
@@ -341,10 +341,11 @@ def quantities(rec: dict) -> dict[str, float]:
         # it — for a liquid, comparable() reads the 59 as fl oz.
         sibling = {"weight": "volume", "volume": "weight"}.get(dim)
         if sibling in out:
-            # …but that stated size is still checked against this unit price,
-            # since for a liquid it will be read in this unit ("Milk, 128 oz"
-            # at "$0.13/fl oz" is not a gallon)
-            if not lo <= out[sibling] <= hi:
+            # …but for a LIQUID that stated size is checked against this unit
+            # price, since it will be read in this unit ("Milk, 128 oz" at
+            # "$0.13/fl oz" is not a gallon). Honey's 12 oz is a weight, and a
+            # fl oz price says nothing about it (Codex review).
+            if liquid and not lo <= out[sibling] <= hi:
                 del out[sibling]
             continue
         if dim in implied:
