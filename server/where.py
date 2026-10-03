@@ -135,7 +135,7 @@ def rank(quotes: list[dict]) -> tuple[dict | None, bool]:
 # "Cauliflower Rice" not cauliflower. Drawn from the false positives in the
 # cached search results (PLAN.md Phase 8, review delta 6). Ignored when the
 # item's own name contains the word ("lime juice" may match "Lime Juice").
-COMPOUND = frozenset((
+_COMPOUND_WORDS = (
     "juice", "drink", "drinks", "water", "soda", "tea", "coffee", "kombucha", "smoothie", "shake",
     "chicken", "beef", "pork", "turkey", "cutlet", "cutlets", "breast", "ravioli", "wrap", "wraps",
     "bite", "bites", "blend", "waffle", "waffles", "honey", "syrup", "chip", "chips", "tortilla",
@@ -146,7 +146,7 @@ COMPOUND = frozenset((
     "marinade", "marinated", "kit", "rice", "noodle", "noodles", "sprouts", "pudding", "jam",
     "jelly", "popsicle", "gummies", "granola", "muffin", "muffins", "pancake", "pancakes", "pizza",
     "sandwich", "dumpling", "dumplings",
-))
+)
 
 # Words that say nothing about WHICH product: not required to appear.
 _NOT_CONTENT = frozenset(("organic", "fresh", "frozen", "conventional", "the", "and", "of", "with", "a", "an"))
@@ -165,6 +165,10 @@ def _sing(word: str) -> str:
 
 def _percents(text: str) -> set[str]:
     return {f"{float(m):g}%" for m in re.findall(r"(\d+(?:\.\d+)?)\s*%", canonical(text))}
+
+
+# folded exactly as product words are, or "cookies" (-> "cooky") slips past it
+COMPOUND = frozenset(_sing(w) for w in _COMPOUND_WORDS)
 
 
 def _words(text: str) -> list[str]:

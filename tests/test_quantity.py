@@ -99,6 +99,7 @@ def test_oz_and_fl_oz_compare_only_for_liquids():
     ("1/0 lb", None), ("½ lb", ("weight", 8.0)), ("1,100 sheets", ("sheet", 1100.0)),
     ("1½ lb", ("weight", 24.0)), ("1-1/2 lb", ("weight", 24.0)),
     ("0 lb", None), ("0 rolls", None),
+    ("1 quart 1 pint", None), ("0 quart", None), ("quart", ("volume", 32.0)),
 ])
 
 def test_parse_wanted(text, want):
@@ -134,3 +135,13 @@ def test_a_pack_size_for_one_can_and_a_name_for_the_pack():
     # a pack size that is already the total is left alone
     rec = {"pack_size": "96 fl oz", "amount": 4.0, "unit_price": "", "name": "Sparkling Water 12 fl oz, 8 pack"}
     assert q.quantities(rec)["volume"] == 96.0
+
+
+def test_a_count_only_in_the_name_is_reconciled_or_left_unknown():
+    """Codex review: pack size '12 fl oz' + name '(8 cans)' treated the pack as 12 fl oz."""
+    rec = {"pack_size": "12 fl oz", "amount": 4.0, "unit_price": "", "name": "Sparkling Water (8 cans)"}
+    assert "volume" not in q.quantities(rec)                       # ambiguous: unranked, not guessed
+    rec["unit_price"] = "$0.04/fl oz"                                # $4 / 96 fl oz
+    assert q.quantities(rec)["volume"] == 96.0
+    rec["unit_price"] = "$0.33/fl oz"                                # $4 / 12 fl oz
+    assert q.quantities(rec)["volume"] == 12.0

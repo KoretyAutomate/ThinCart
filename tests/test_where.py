@@ -417,3 +417,9 @@ def test_relevance_checks_the_whole_leading_phrase_and_full_width_terms():
     assert where.relevant("Honey Roasted Peanuts, 16 oz", "peanuts") is True
     assert where.relevant("1% Milk, 64 fl oz", "２％ milk") is False
     assert where.relevant("2% Milk, 64 fl oz", "２％ milk") is True
+
+
+def test_excluded_product_types_are_folded_like_product_words():
+    """Codex review: 'cookies' singular-folds to 'cooky' and slipped past."""
+    assert where.relevant("Rice Cookies, 8 oz", "rice") is False
+    assert where.relevant("Fruit Gummies, 6 oz", "fruit") is False

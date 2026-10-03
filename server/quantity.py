@@ -149,7 +149,8 @@ def parse(text: str) -> dict[str, float]:
         seen.setdefault(dim, []).append(round(float(m.group(1)) * size, 3))
     out = {d: v for d, v in ((d, _one_value(vals)) for d, vals in seen.items()) if v is not None}
     for dim, qty in _word_sizes(t).items():
-        out.setdefault(dim, qty)
+        if dim not in seen:          # never revive a size the numbers ruled out ("0 quart")
+            out[dim] = qty
     pack = _PACK_OF.search(t)
     n = int(pack.group(1) or pack.group(2)) if pack else 1
     if n > 1 and not multi_spans:               # "6 x 12 oz" already counted the cans
@@ -215,6 +216,16 @@ def from_unit_price(amount, unit_price: str) -> dict[str, float]:
     return {dim: round(estimate, 3)}
 
 
+def _unit_price_range(rec: dict, dim: str) -> tuple[float, float] | None:
+    """The sizes a cent-rounded unit price allows, in base units: $4 at
+    "$0.04/fl oz" is anything from 89 to 114 fl oz."""
+    m = _UNIT_PRICE.search(_norm(rec.get("unit_price") or ""))
+    if not m or rec.get("amount") is None or UNITS[m.group(2)][0] != dim or dim not in _TRUSTED_UNIT_DIMS:
+        return None
+    per, size, amount = float(m.group(1).replace(",", "")), UNITS[m.group(2)][1], float(rec["amount"])
+    return amount / (per + 0.005) * size, amount / max(per - 0.005, 1e-9) * size
+
+
 def quantities(rec: dict) -> dict[str, float]:
     """What is in this product, per dimension. Pack size first, then the name;
     the store's unit price fills a missing weight/volume/area and vetoes a
@@ -225,16 +236,34 @@ def quantities(rec: dict) -> dict[str, float]:
     out: dict[str, float] = dict(pack_q)
     for dim, qty in name_q.items():
         out.setdefault(dim, qty)
-    # pack size "12 fl oz" (one can) + name "…, 8 pack" (96 fl oz): when the
-    # name's total is exactly the pack size × N, the name's total is the package
+    settled: set[str] = set()   # decided by the pack-count reconciliation below
     n = pack_count(name)
     for dim in ("weight", "volume"):
-        if n > 1 and dim in pack_q and dim in name_q and abs(pack_q[dim] * n - name_q[dim]) <= SAME * name_q[dim]:
-            out[dim] = name_q[dim]
-    for dim, implied in from_unit_price(rec.get("amount"), rec.get("unit_price") or "").items():
+        if n <= 1 or dim not in pack_q:
+            continue
+        if dim in name_q:
+            # pack size "12 fl oz" (one can) + name "…, 8 pack" (96 fl oz): when
+            # the name's total is the pack size × N, it is the package
+            if abs(pack_q[dim] * n - name_q[dim]) <= SAME * name_q[dim]:
+                out[dim] = name_q[dim]
+            continue
+        # "Sparkling Water (8 cans)" with pack size "12 fl oz": per can, or the
+        # whole pack? The unit price decides when its rounding range holds one
+        # reading and not the other; otherwise the size is unknown — unranked.
+        rng = _unit_price_range(rec, dim)
+        whole, one = pack_q[dim] * n, pack_q[dim]
+        holds = [v for v in (whole, one) if rng and rng[0] <= v <= rng[1]]
+        if len(holds) == 1:
+            out[dim] = holds[0]
+        else:
+            del out[dim]
+        settled.add(dim)
+    for dim, by_unit in from_unit_price(rec.get("amount"), rec.get("unit_price") or "").items():
+        if dim in settled:      # the unit price already had its say there
+            continue
         if dim not in out:
-            out[dim] = implied
-        elif abs(implied - out[dim]) / out[dim] > DISAGREE and not _rounding_explains(rec, dim, out[dim]):
+            out[dim] = by_unit
+        elif abs(by_unit - out[dim]) / out[dim] > DISAGREE and not _rounding_explains(rec, dim, out[dim]):
             del out[dim]
     return out
 
