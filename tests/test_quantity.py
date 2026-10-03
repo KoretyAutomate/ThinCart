@@ -24,7 +24,7 @@ import quantity as q
     ("12 ct.", {"each": 12.0}),
     ("Oatmilk Unsweetened, 48 Fl Oz", {"volume": 48.0}),
     ("Fusilli #34, 16 Ounce", {"weight": 16.0}),
-    ("6 x 16 oz bottles", {"weight": 96.0}),
+    ("6 x 16 oz bottles", {"weight": 96.0, "each": 6.0}),
     ("Seventh Generation 100% Recycled Paper Towels, 2 Ply, 140 Sheets", {"sheet": 140.0}),
     # sheets per roll x rolls, with size adjectives between number and unit
     ("Bounty Paper Towels Select-A-Size White, 6 Double Plus Rolls, 103 Sheets Per Roll",

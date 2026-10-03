@@ -1700,6 +1700,9 @@ function whereLineMain(it, w, unsettled) {
   if (!w) return '';
   if (w.cheapest) {
     const q = w.cheapest;
+    // grouped under the owner's pick: name the store the cheaper price is at
+    if (it.store_source === 'preferred' && it.store !== q.store)
+      return T().price_line(q.store, q.total_label || q.unit_label, agoLabel(q.fetched_at), it.store);
     // products that could not be measured in the winner's unit are still shown
     const unranked = (w.quotes || []).filter(u => !u.unit_label && u.store_id !== q.store_id);
     return [q.total_label || `$${q.amount.toFixed(2)}`, q.unit_label || q.unit_price, q.product,
@@ -1827,7 +1830,10 @@ function renderPlan() {
   const groups = new Map();
   for (const it of items) {
     const w = wOf(it);
-    const k = (w && w.cheapest) ? w.cheapest.store : (it.store || '');
+    // the owner's own pick holds even with price details showing (Phase 8.1):
+    // only an item without one is grouped under the cheapest store
+    const k = it.store_source === 'preferred' ? it.store
+      : (w && w.cheapest) ? w.cheapest.store : (it.store || '');
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k).push(it);
   }

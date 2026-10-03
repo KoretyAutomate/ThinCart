@@ -137,9 +137,11 @@ def parse(text: str) -> dict[str, float]:
     t = _norm(text)
     seen: dict[str, list[float]] = {}
     multi_spans = []
-    for m in _MULTI.finditer(t):                # "6 x 16 oz" is 96 oz
+    for m in _MULTI.finditer(t):                # "6 x 16 oz" is 96 oz — and 6 of them
         dim, size = UNITS[m.group(3)]
         seen.setdefault(dim, []).append(round(int(m.group(1)) * float(m.group(2)) * size, 3))
+        if dim != "each":
+            seen.setdefault("each", []).append(float(m.group(1)))
         multi_spans.append(m.span())
     for m in _AMOUNT.finditer(t):
         if _NUTRIENT.match(t, m.end()) or any(a <= m.start() < b for a, b in multi_spans):

@@ -526,6 +526,22 @@ function openEditor(b, i) {
       /Not understood/.test(d.doc.getElementById("sheet-buyqty-warn").textContent));
   }
 
+  console.log("\n--- 8c. your pick holds with price details showing (Codex review) ---");
+  {
+    const where = { partial: false, items: {
+      "1": { cheapest: { store_id: 8, store: "Whole Foods", amount: 3, unit_label: "$0.05/fl oz", product: "Milk",
+                         exact: false, fetched_at: "" }, quotes: [{}], comparable: true } } };
+    const b = boot({ items: [item(1, "milk", { store: "Wegmans", store_source: "preferred" })], where });
+    await settle();
+    b.doc.getElementById("stores-btn").click();
+    b.doc.getElementById("plan-byprice").click();
+    await settle(); await settle();
+    const groups = [...b.doc.querySelectorAll("#plan-groups .plangroup")].map(g => g.textContent);
+    const weg = groups.find(g => g.startsWith("🏬 Wegmans")) || "";
+    check("the item stays under the store you chose", /milk/.test(weg), groups);
+    check("and the cheaper store is named beside it", /Cheapest: Whole Foods[^]*you chose Wegmans/.test(weg), weg);
+  }
+
   console.log("\n--- 8b. pending 🍃 / pick / amount changes hide the stored price ----");
   {
     const price = { store: "Whole Foods", amount: 2.5, product: "Rice 1 lb", unit_label: "$0.16/oz",

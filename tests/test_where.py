@@ -483,3 +483,9 @@ def test_organic_found_but_unrankable_still_ends_the_stand_in(monkeypatch, store
     client.post("/api/where", json={"catalog_ids": [cid]})
     item = next(i for i in client.get("/api/state").json()["items"] if i["catalog_id"] == cid)
     assert item["price"] is None or "Organic" in item["price"]["product"]
+
+
+def test_cached_dill_relish_is_not_dill():
+    """Codex review: the cached Whole Foods 'organic dill' results put relish first."""
+    assert where.relevant("Organic Dill Relish, 10 oz", "organic dill") is False
+    assert where.relevant("McCormick Gourmet Collection Organic Dill Weed, 0.5 oz", "organic dill") is True

@@ -144,6 +144,7 @@ _COMPOUND_WORDS = (
     "probiotic", "oil", "butter", "bread", "bar", "bars", "cookie", "cookies", "candy",
     "chocolate", "cream", "pie", "mix", "seasoning", "spread", "dip", "hummus", "salsa",
     "marinade", "marinated", "kit", "rice", "noodle", "noodles", "sprouts", "pudding", "jam",
+    "relish", "pickle", "pickles", "vinaigrette", "aioli", "mayo", "mayonnaise", "ketchup", "mustard",
     "jelly", "popsicle", "gummies", "granola", "muffin", "muffins", "pancake", "pancakes", "pizza",
     "sandwich", "dumpling", "dumplings",
 )
