@@ -2648,7 +2648,7 @@ function fillSheet(it) {
   // the price suggestion beside the owner's own pick (PLAN.md Phase 8.1)
   const pr = it.price;
   $('sheet-price').textContent = pr ? T().price_line(pr.store, pr.total_label || pr.unit_label,
-    agoLabel(pr.computed_at), it.store_source === 'preferred' && it.store !== pr.store ? it.store : '')
+    agoLabel(pr.fetched_at || pr.computed_at), it.store_source === 'preferred' && it.store !== pr.store ? it.store : '')
     + (pr.partial ? T().price_partial : '') : '';
   // Prices are looked up on demand, never on open: opening the editor to change
   // a quantity must not fire a network request describing what you are buying.

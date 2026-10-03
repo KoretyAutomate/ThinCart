@@ -383,3 +383,27 @@ def test_a_store_moved_to_another_chain_is_a_new_question(stores):
     finally:
         appmod.conn.execute("UPDATE stores SET chain='wegmans' WHERE id=?", (stores["Where A"],))
         appmod.conn.commit()
+
+
+def test_a_winner_its_own_store_contradicts_is_dropped_even_on_a_partial_refresh(monkeypatch, stores):
+    """Codex review: A had been cheapest; A now says its product is gone while
+    B is unreachable — A's old recommendation must not stand."""
+    cid = add("quilllentils")
+    stub(monkeypatch, {"901": {"quilllentils": [rec("Quilllentils 16 oz", 2.0, "")]},
+                       "902": {"quilllentils": [rec("Quilllentils 16 oz", 5.0, "")]}})
+    ask(cid)
+    stub(monkeypatch, {"901": {"quilllentils": [rec("Quilllentils 16 oz", 2.0, "", available=False)]}},
+         fail={"902"})
+    client.post("/api/where", json={"catalog_ids": [cid]})
+    item = next(i for i in client.get("/api/state").json()["items"] if i["catalog_id"] == cid)
+    assert item["price"] is None
+
+
+def test_the_price_age_is_the_fetch_not_the_comparison(monkeypatch, stores):
+    cid = add("quillbarley")
+    old = rec("Quillbarley 16 oz", 2.0, "")
+    old["fetched_at"] = "2026-10-01T00:00:00+00:00"
+    stub(monkeypatch, {"901": {"quillbarley": [old]}})
+    ask(cid)
+    item = next(i for i in client.get("/api/state").json()["items"] if i["catalog_id"] == cid)
+    assert item["price"]["fetched_at"] == "2026-10-01T00:00:00+00:00"

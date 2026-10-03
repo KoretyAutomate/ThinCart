@@ -118,10 +118,12 @@ def _reason(statuses: set[str]) -> str:
 
 
 async def _persist(items: dict[int, dict], result: dict[str, dict]) -> None:
-    """Keep each cheapest answer. Without one, drop the stored answer when every
-    store DID answer — nothing fits, the picked product is gone or out of
-    stock, or what was found cannot be compared: the old recommendation is now
-    wrong. Only a failure to ask keeps the last answer (it carries its age)."""
+    """Keep each cheapest answer. A stored answer survives a refresh only when
+    its own winning store could not be asked — that store may still be the
+    cheapest. When the winner's store DID answer (with something else, or with
+    nothing), the stored answer is contradicted: the new comparison replaces
+    it, or it is dropped. With no stored answer, a definitive "nothing gives a
+    cheapest store" (every store answered) records nothing."""
     if _ctx is None:  # pragma: no cover — wiring error
         return
     conn = _db()
@@ -131,14 +133,13 @@ async def _persist(items: dict[int, dict], result: dict[str, dict]) -> None:
         for cid, it in items.items():
             r = result[str(cid)]
             partial = "unasked" in r["stores"].values()
-            if r["cheapest"] and partial and price_reco.stored_for(conn, cid, it["key"]):
-                # A store that could not be asked may still be the cheapest:
-                # an incomplete comparison does not replace a complete one.
-                continue
+            winner = price_reco.stored_winner(conn, cid, it["key"])
+            if winner is not None and r["stores"].get(str(winner)) == "unasked":
+                continue                          # the winner could not be checked: keep it
             if r["cheapest"]:
                 changed |= price_reco.save(conn, cid, it["key"], r, ts)
-            elif "unasked" not in r["stores"].values():
-                price_reco.forget(conn, cid, it["key"])
+            elif not partial or winner is not None:
+                price_reco.forget(conn, cid, it["key"])   # definitive, or the winner contradicted
                 changed = True
         if changed:
             db.bump_revision(conn)

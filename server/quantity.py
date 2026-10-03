@@ -107,6 +107,9 @@ SAME = 0.03
 def _one_value(values: list[float]) -> float | None:
     """The single size a dimension was stated as — as first stated ("12 oz
     (340 g)" is 12 oz) — or None if it was stated as genuinely different sizes."""
+    values = [v for v in values if v > 0]   # "0 lb" is not a size — and must never divide
+    if not values:
+        return None
     lo, hi = min(values), max(values)
     return values[0] if (hi - lo) / hi <= SAME else None
 
@@ -158,7 +161,7 @@ def parse_wanted(text: str) -> tuple[str, float] | None:
     is a count ("12" -> 12 each). None when it cannot be read — never guessed."""
     t = _norm(text).strip()
     if re.fullmatch(_NUM, t):
-        return "each", float(t)
+        return ("each", float(t)) if float(t) > 0 else None
     got = parse(t)
     if len(got) != 1:
         return None

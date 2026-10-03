@@ -75,10 +75,10 @@ def save(conn: sqlite3.Connection, catalog_id: int, key: str, answer: dict, ts: 
     return True
 
 
-def stored_for(conn: sqlite3.Connection, catalog_id: int, key: str) -> bool:
-    """An answer to this very question is already stored."""
-    row = conn.execute("SELECT input_key FROM price_reco WHERE catalog_id=?", (catalog_id,)).fetchone()
-    return bool(row and row["input_key"] == key)
+def stored_winner(conn: sqlite3.Connection, catalog_id: int, key: str) -> int | None:
+    """The store of the answer already stored for this very question, if any."""
+    row = conn.execute("SELECT input_key, store_id FROM price_reco WHERE catalog_id=?", (catalog_id,)).fetchone()
+    return row["store_id"] if row and row["input_key"] == key else None
 
 
 def forget(conn: sqlite3.Connection, catalog_id: int, key: str) -> None:

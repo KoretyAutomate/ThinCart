@@ -398,6 +398,9 @@ def _price_brief(answer: dict | None, store_names: dict) -> dict | None:
     return {"store": store, "amount": c["amount"], "product": c["product"],
             "unit_label": c.get("unit_label", ""), "total_label": c.get("total_label", ""),
             "exact": c.get("exact", False), "computed_at": answer.get("computed_at", ""),
+            # when the store's price was FETCHED — a comparison over a cached
+            # quote is not a fresh price, and must not read as one
+            "fetched_at": c.get("fetched_at", ""),
             # some store could not be checked when this was decided
             "partial": "unasked" in (answer.get("stores") or {}).values()}
 
