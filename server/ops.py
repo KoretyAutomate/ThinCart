@@ -48,6 +48,8 @@ class Op(BaseModel):
     # edit (Phase 7): a standing brand preference. None = leave unchanged —
     # phones with ops queued before this field existed do not send it. "" = any.
     brand: str | None = Field(None, max_length=60)
+    # edit (Phase 8): how much the owner wants to buy ("2 lb", "6 rolls"); "" clears
+    buy_qty: str | None = Field(None, max_length=30)
     # settings: the household-wide organic preference
     organic: bool | None = None
     # store_upsert

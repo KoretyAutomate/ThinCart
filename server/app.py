@@ -29,12 +29,14 @@ import away
 import catalog
 import criteria
 import cycles
+import away_db
 import db
 import ideas
 import shell
 import updates
 import lookup
 import lookup_api
+import where_api
 from ops import Op
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -270,7 +272,7 @@ def apply_snooze(op: Op, ts: str) -> dict:
     if op.catalog_id is None:
         raise HTTPException(422, "snooze requires catalog_id")
     hist = db.purchase_history(conn).get(op.catalog_id, [])
-    away = db.away_set(conn)
+    away = away_db.away_set(conn)
     # a potential item's own gap is a better snooze basis than the 7-day
     # default; only a bought-once item has nothing of its own to go on
     cycle = cycles.estimate(hist, away).cycle
@@ -473,7 +475,7 @@ async def get_cycles():
     otherwise indistinguishable from a bug.
     """
     now = datetime.now(UTC)
-    away = db.away_set(conn)
+    away = away_db.away_set(conn)
     now_iso_s = now.isoformat(timespec="seconds")
     on_list = {r["catalog_id"] for r in conn.execute("SELECT catalog_id FROM items")}
     out = []
@@ -570,6 +572,8 @@ away.bind(away.Context(conn=conn, write_lock=write_lock, broadcast=broadcast_sta
 app.include_router(away.router)
 app.include_router(ideas.router)
 app.include_router(lookup_api.router)
+where_api.bind(where_api.Context(write_lock=write_lock, broadcast=broadcast_state, now_iso=now_iso))
+app.include_router(where_api.router)
 app.include_router(shell.router)
 app.include_router(updates.router)
 # Registered here rather than declared in shell.py: middleware attaches to the

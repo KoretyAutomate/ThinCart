@@ -120,3 +120,32 @@ async def products_many(chain: str, terms: list[str], store: str,
         else:
             found[t] = recs
     return found, complete
+
+
+PRICE_LIMIT = 10  # a price question looks at each store's first 10 matches (PLAN.md Phase 8, delta 4)
+
+
+async def price_products_many(chain: str, terms: list[str], store: str,
+                              max_age: timedelta | None = None) -> tuple[dict[str, list[dict]], bool]:
+    """({term: records}, complete) for a PRICE question: the first PRICE_LIMIT
+    matches per term, no shelf placement (the price does not need the shelf,
+    and placing costs a request per product). Same cache-first rules as
+    products_many; a price must be fresher than an aisle, hence `max_age`."""
+    if chain == "wegmans":
+        return await lookup.wegmans_products_many(terms, store, max_age, PRICE_LIMIT)
+    if chain not in lookup._LOCATE:
+        return {}, False
+    sem = asyncio.Semaphore(3)
+
+    async def one(t: str) -> tuple[str, list[dict] | None]:
+        async with sem:
+            return t, await _chain_search(chain, t, store, PRICE_LIMIT, max_age)
+
+    found: dict[str, list[dict]] = {}
+    complete = True
+    for t, recs in await asyncio.gather(*(one(t) for t in dict.fromkeys(terms))):
+        if recs is None:
+            complete = False
+        else:
+            found[t] = recs
+    return found, complete

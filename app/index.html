@@ -126,6 +126,11 @@
   .stchip { display:inline-block; background:#eef5f0; color:var(--green-dark);
             border-radius:6px; padding:1px 6px; font-size:.72rem; }
   .stchip.hist { background:#f2f0e9; color:#8a7a4e; }
+  /* decided by price, not by the owner: say so (PLAN.md Phase 8.1) */
+  .stchip.price { background:#fff4dc; color:#8a5a00; }
+  #sheet .sheet-warn { color:var(--red); font-size:.8rem; margin:-8px 2px 12px; }
+  #sheet .sheet-warn:empty, #sheet .sheet-price:empty { display:none; }
+  #sheet .sheet-price { font-size:.82rem; color:var(--muted); margin:-6px 2px 14px; }
   #empty { text-align:center; color:var(--muted); margin-top:48px; font-size:.95rem; }
   #toast {
     position:fixed; left:50%; bottom:24px; transform:translateX(-50%);
@@ -174,7 +179,7 @@
     display:flex; flex-direction:column; align-items:center; gap:3px; }
   #sheet .catopt.sel { border-color:var(--green); background:#e9f5ec; color:var(--green-dark); }
   #sheet .catopt .em { font-size:1.15rem; }
-  #sheet #sheet-note-input, #sheet #sheet-budget, #sheet #sheet-brand { flex:1; padding:12px;
+  #sheet #sheet-note-input, #sheet #sheet-budget, #sheet #sheet-brand, #sheet #sheet-buyqty { flex:1; padding:12px;
     border:1.5px solid #d4dcd4; border-radius:10px; font-size:1rem; outline:none;
     min-width:0; }
   /* a NOTE must be fully visible while editing — a single-line input clips it */
@@ -560,10 +565,14 @@
     <input id="sheet-budget" maxlength="20" inputmode="numeric"></label>
   <label class="sheet-field"><span id="sheet-brand-label"></span>
     <input id="sheet-brand" maxlength="60"></label>
+  <label class="sheet-field"><span id="sheet-buyqty-label"></span>
+    <input id="sheet-buyqty" maxlength="30"></label>
+  <p class="sheet-warn" id="sheet-buyqty-warn"></p>
   <button id="sheet-compare" class="linkbtn"></button>
   <div id="sheet-prices"></div>
   <div class="sheet-field-label" id="sheet-store-label"></div>
   <div id="sheet-stores"></div>
+  <p class="sheet-price" id="sheet-price"></p>
   <div class="sheet-field-label" id="sheet-cat-label"></div>
   <div id="sheet-cats"></div>
   <button class="save" id="sheet-save"></button>
@@ -773,18 +782,24 @@ const STR = {
     org_off:'🍃 Organic OFF — prices look for regular products',
     no_organic:'no organic found — regular price',
     org_waiting:'Waiting for the 🌱 setting to reach the server…',
-    byprice:'💲 Compare by price', byprice_off:'🏬 Back to usual stores',
+    byprice:'💲 Check prices', byprice_off:'Hide price details',
     byprice_searching:'Checking prices…',
     byprice_none:'No store can give prices yet — pin a Wegmans, Whole Foods or ShopRite below.',
-    byprice_note:'Cheapest per unit (per oz, fl oz or each), in stock, matching the brand. Not saved — your usual stores stay as they are.',
-    byprice_note_org:'🌱 Organic, cheapest per unit (per oz, fl oz or each), in stock, matching the brand. Not saved — your usual stores stay as they are.',
+    byprice_note:'Cheapest for the amount you want (else per unit), among each store\'s first 10 matches, in stock, matching the brand. It becomes the suggested store — your own pick always wins.',
+    byprice_note_org:'🍃 Organic for food. Cheapest for the amount you want (else per unit), among each store\'s first 10 matches, in stock, matching the brand. It becomes the suggested store — your own pick always wins.',
     byprice_partial:'Some stores could not be reached — their prices are missing.',
     why_unasked:'price not checked — store unreachable', why_no_match:'no matching product found',
     why_conflict:'your chosen product no longer matches (brand / stock)',
     why_pick_missing:'your chosen product was not found',
     why_uncomparable:'different sizes/units — not ranked',
-    best_match:'best match', not_synced:'not synced yet',
+    best_match:'best match', not_synced:'not synced yet', not_compared:'not comparable',
     store_none:'no preference', new_store_inline:'new store…',
+    store_cheapest:s=>`💲 Cheapest (${s})`,
+    buyqty_label:'How much I want', buyqty_ph:'e.g. 2 lb, 6 rolls, 1 gal — empty = any size',
+    buyqty_bad:'Not understood — try "2 lb", "6 rolls", "1 gal" or "12". Prices compare per unit meanwhile.',
+    price_partial:' (not every store could be checked)',
+    partial_check:(st, how)=>`latest check (some stores unreachable): ${st} ${how} — keeping the last full answer`,
+    price_line:(st, how, ago, mine)=>`💲 Cheapest: ${st}${how ? ' · ' + how : ''}${ago ? ' · ' + ago : ''}${mine ? ' · you chose ' + mine : ''}`,
     stores_title:'🏬 Stores & plan', at_h:'I’m at… (tags purchases for 6 h)',
     plan_h:'Where to buy today', manage_h:'Stores', at_none:'— none —',
     store_notes_ph:'Notes — e.g. cheap produce, good fish',
@@ -916,18 +931,24 @@ const STR = {
     org_off:'🍃 オーガニック OFF — 価格は通常品で比較',
     no_organic:'オーガニックなし — 通常品の価格',
     org_waiting:'🌱 の設定をサーバーに送信中…',
-    byprice:'💲 価格で比較', byprice_off:'🏬 いつもの店に戻す',
+    byprice:'💲 価格を確認', byprice_off:'価格の詳細を隠す',
     byprice_searching:'価格を確認中…',
     byprice_none:'価格を取得できる店がまだありません — 下でWegmans・Whole Foods・ShopRiteを登録してください。',
-    byprice_note:'単位あたり（oz・fl oz・個）で最安、在庫あり、ブランドに合う商品のみ。保存はされません — いつもの店はそのままです。',
-    byprice_note_org:'🌱 オーガニックで、単位あたり（oz・fl oz・個）最安、在庫あり、ブランドに合う商品のみ。保存はされません — いつもの店はそのままです。',
+    byprice_note:'買いたい量（未指定なら単価）で最安、各店の上位10件から、在庫あり・ブランド一致のみ。おすすめの店になります — 自分で選んだ店が常に優先です。',
+    byprice_note_org:'🍃 食品はオーガニック。買いたい量（未指定なら単価）で最安、各店の上位10件から、在庫あり・ブランド一致のみ。おすすめの店になります — 自分で選んだ店が常に優先です。',
     byprice_partial:'一部の店に接続できず、その価格はありません。',
     why_unasked:'価格未確認 — 店に接続できません', why_no_match:'合う商品が見つかりません',
     why_conflict:'選んだ商品が条件に合いません（ブランド・在庫）',
     why_pick_missing:'選んだ商品が見つかりません',
     why_uncomparable:'サイズ・単位が違うため順位なし',
-    best_match:'近い商品', not_synced:'未同期',
+    best_match:'近い商品', not_synced:'未同期', not_compared:'比較不可',
     store_none:'指定なし', new_store_inline:'新しい店…',
+    store_cheapest:s=>`💲 最安（${s}）`,
+    buyqty_label:'買いたい量', buyqty_ph:'例: 2 lb、6 rolls、1 gal — 空欄 = サイズ問わず',
+    buyqty_bad:'読み取れません — 「2 lb」「6 rolls」「1 gal」「12」のように入力してください。それまでは単価で比較します。',
+    price_partial:'（一部の店は未確認）',
+    partial_check:(st, how)=>`最新の確認（一部の店に接続できず）: ${st} ${how} — 前回の完全な結果を維持`,
+    price_line:(st, how, ago, mine)=>`💲 最安: ${st}${how ? ' · ' + how : ''}${ago ? ' · ' + ago : ''}${mine ? ' · 指定: ' + mine : ''}`,
     stores_title:'🏬 店舗とプラン', at_h:'いまいる店（6時間有効）',
     plan_h:'今日どこで買う？', manage_h:'店舗リスト', at_none:'— なし —',
     store_notes_ph:'メモ — 例: 野菜が安い、魚が良い',
@@ -1048,6 +1069,8 @@ function applyLang() {
   $('org-btn').setAttribute('aria-label', T().org_btn);
   $('sheet-brand-label').textContent = T().sheet_brand;
   $('sheet-brand').placeholder = T().brand_any;
+  $('sheet-buyqty-label').textContent = T().buyqty_label;
+  $('sheet-buyqty').placeholder = T().buyqty_ph;
   $('sheet-store-label').textContent = T().sheet_store;
   $('stores-h1').textContent = T().stores_title;
   $('at-h').textContent = T().at_h;
@@ -1094,6 +1117,15 @@ function view() {
       if (it) {
         if (op.name !== undefined) { it.name = splitOrganic(op.name)[0]; it.name_en = null; }
         if (op.brand !== undefined) it.brand = op.brand.trim();
+        if (op.buy_qty !== undefined) { it.buy_qty = op.buy_qty.trim(); it.buy_qty_ok = undefined; }
+        // a different question: the stored price answered the old one (Phase 8, delta 8)
+        if (op.name !== undefined || op.brand !== undefined || op.buy_qty !== undefined) {
+          it.price = null;
+          if (it.store_source === 'price') {
+            it.store = it.history_store || null;
+            it.store_source = it.store ? 'history' : null;
+          }
+        }
         if (op.qty_note !== undefined) it.qty_note = op.qty_note;
         if (op.category !== undefined) it.category = op.category;
         if (op.note !== undefined) it.note = op.note;
@@ -1101,10 +1133,24 @@ function view() {
           const v = budgetNum(op.budget);
           if (v !== undefined) it.budget = v;
         }
-        if (op.store !== undefined) {           // '' clears, like the server
-          it.store = op.store || null;
-          it.store_source = op.store ? 'preferred' : null;
+        if (op.store !== undefined) {           // '' clears: the price decides, else history
+          if (op.store) { it.store = op.store; it.store_source = 'preferred'; }
+          else if (it.price) { it.store = it.price.store; it.store_source = 'price'; }
+          else { it.store = it.history_store || null; it.store_source = it.store ? 'history' : null; }
         }
+      }
+    }
+  }
+  // A queued 🍃 change or product pick makes the stored price answer the OLD
+  // question; until the server has it, stand back to the pick or history.
+  const orgQueued = queue.some(op => op.type === 'settings');
+  const pickQueued = new Set(queue.filter(op => op.type === 'product_pick').map(op => op.catalog_id));
+  for (const it of items) {
+    if (it.price && (orgQueued || pickQueued.has(it.catalog_id))) {
+      it.price = null;
+      if (it.store_source === 'price') {
+        it.store = it.history_store || null;
+        it.store_source = it.store ? 'history' : null;
       }
     }
   }
@@ -1563,7 +1609,8 @@ const WHERE_MAX_AGE_MS = 60 * 60 * 1000;
 function unsettledItems() {
   const ids = new Set(), cats = new Set();
   for (const op of queue) {
-    if (op.type === 'edit' && (op.brand !== undefined || op.name !== undefined)) ids.add(op.item_id);
+    if (op.type === 'edit' && (op.brand !== undefined || op.name !== undefined || op.buy_qty !== undefined))
+      ids.add(op.item_id);
     if (op.type === 'product_pick') cats.add(op.catalog_id);
   }
   return it => ids.has(it.id) || cats.has(it.catalog_id);
@@ -1577,8 +1624,11 @@ function whereInput() {
   const picks = base.picks_by_chain || {};
   const key = JSON.stringify([
     organicSetting(),
-    pricedStores().map(s => s.id + ':' + s.chain_store_id),
-    ask.map(i => [i.catalog_id, i.name, i.name_en || '', i.brand || '', picks[String(i.catalog_id)] || {}]),
+    pricedStores().map(s => s.id + ':' + s.chain + ':' + s.chain_store_id),
+    // price_key is the server's own question for the item (it sees things the
+    // phone cannot, e.g. enrichment making an item food under 🍃)
+    ask.map(i => [i.catalog_id, i.price_key || '', i.name, i.name_en || '', i.brand || '', i.buy_qty || '',
+                  picks[String(i.catalog_id)] || {}]),
     items.filter(i => i.pending || unsettled(i)).map(i => i.catalog_id || i.id),
   ]);
   return { key, ids: ask.map(i => i.catalog_id) };
@@ -1626,6 +1676,9 @@ async function loadWhere() {
       merged.partial = merged.partial || d.partial;
     }
     done(merged);
+    // the server saved its recommendation; pull it now rather than wait for
+    // the socket, which may be down while plain requests work (Codex review)
+    resync();
   } catch (e) { done({ key, failed: true, msg: T().cmp_fail }); }
 }
 
@@ -1652,16 +1705,29 @@ function whereLineMain(it, w, unsettled) {
   if (!w) return '';
   if (w.cheapest) {
     const q = w.cheapest;
-    return [`$${q.amount.toFixed(2)}`, q.unit_price, q.product,
+    const how = [q.total_label || q.unit_label || '$' + q.amount.toFixed(2),
+                 w.organic_fallback ? T().no_organic : ''].filter(Boolean).join(' · ');
+    // grouped under the owner's pick: name the store the cheaper price is at
+    if (it.store_source === 'preferred' && it.store !== q.store)
+      return T().price_line(q.store, how, agoLabel(q.fetched_at), it.store);
+    // a partial check that could not reach the stored winner: shown, not obeyed
+    if (it.store_source === 'price' && it.store !== q.store)
+      return T().partial_check(q.store, how);
+    // products that could not be measured in the winner's unit are still shown
+    const unranked = (w.quotes || []).filter(u => !u.unit_label && u.store_id !== q.store_id);
+    return [q.total_label || `$${q.amount.toFixed(2)}`, q.unit_label || q.unit_price, q.product,
             q.exact ? '' : '(' + T().best_match + ')', w.organic_fallback ? T().no_organic : '',
-            agoLabel(q.fetched_at)].filter(Boolean).join(' · ');
+            agoLabel(q.fetched_at),
+            unranked.length ? T().not_compared + ': ' + unranked.map(u =>
+              `${u.store} $${u.amount.toFixed(2)} ${u.product}${u.pack_size ? ' ' + u.pack_size : ''}`).join(', ') : '',
+           ].filter(Boolean).join(' · ');
   }
   // No honest winner — but the prices found are still worth seeing, side by side.
   if (w.quotes && w.quotes.length)
     // Unranked means YOU compare — so each quote carries what that takes:
     // which product, how big, and whether it is only a best match.
     return (w.organic_fallback ? T().no_organic + ' · ' : '') + T().why_uncomparable + ': ' + w.quotes.map(q =>
-      [`${q.store} $${q.amount.toFixed(2)}`, q.product, q.pack_size, q.unit_price,
+      [`${q.store} $${q.amount.toFixed(2)}`, q.product, q.qty_label || q.pack_size, q.unit_label || q.unit_price,
        q.exact ? '' : '(' + T().best_match + ')'].filter(Boolean).join(' ')
     ).join(' · ');
   return ({ unasked:T().why_unasked, conflict:T().why_conflict, pick_missing:T().why_pick_missing })[w.reason]
@@ -1774,7 +1840,11 @@ function renderPlan() {
   const groups = new Map();
   for (const it of items) {
     const w = wOf(it);
-    const k = (w && w.cheapest) ? w.cheapest.store : (it.store || '');
+    // grouped where the LIST says it is bought: the owner's pick, else the
+    // stored price recommendation (which a partial check does not replace —
+    // Phase 8 delta 3); only an item with neither takes the fresh cheapest
+    const k = (it.store_source === 'preferred' || it.store_source === 'price') ? it.store
+      : (w && w.cheapest) ? w.cheapest.store : (it.store || '');
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k).push(it);
   }
@@ -1805,6 +1875,8 @@ function renderPlan() {
       p.querySelector('.pmeta').textContent = priced ? whereLine(i, wOf(i), unsettled) : [
         i.qty_note, i.budget != null ? fmtYen(i.budget) : '',
         i.store_source === 'history' ? T().src_hist : '',
+        i.store_source === 'price' && i.price ? '💲 ' + (i.price.total_label || i.price.unit_label || '$' + i.price.amount)
+          + (i.price.organic_fallback ? ' · ' + T().no_organic : '') : '',
       ].filter(Boolean).join(' ');
       div.appendChild(p);
     }
@@ -2144,8 +2216,8 @@ function render() {
       sub.className = 'sub'; sub.style.display = 'block';
       if (it.store) {
         const sc = document.createElement('span');
-        sc.className = 'stchip' + (it.store_source === 'history' ? ' hist' : '');
-        sc.textContent = '🏬 ' + it.store;
+        sc.className = 'stchip' + (it.store_source === 'history' ? ' hist' : it.store_source === 'price' ? ' price' : '');
+        sc.textContent = (it.store_source === 'price' ? '💲 ' : '🏬 ') + it.store;
         sub.appendChild(sc);
       }
       if (it.brand) {
@@ -2327,7 +2399,9 @@ function renderStoreOpts() {
     b.onclick = () => { editState.store = val; renderStoreOpts(); };
     box.appendChild(b);
   };
-  mk(T().store_none, '');
+  // no pick = the price decides; say which store that is when one is known
+  const pr = editState.it.price;
+  mk(pr ? T().store_cheapest(pr.store) : T().store_none, '');
   names.forEach(n => mk('🏬 ' + n, n));
   const inp = document.createElement('input');
   inp.id = 'sheet-newstore'; inp.placeholder = '＋ ' + T().new_store_inline;
@@ -2592,6 +2666,14 @@ function fillSheet(it) {
   $('sheet-note-input').value = it.note || '';
   $('sheet-budget').value = it.budget == null ? '' : String(it.budget);
   $('sheet-brand').value = it.brand || '';
+  $('sheet-buyqty').value = it.buy_qty || '';
+  $('sheet-buyqty-warn').textContent = it.buy_qty && it.buy_qty_ok === false ? T().buyqty_bad : '';
+  // the price suggestion beside the owner's own pick (PLAN.md Phase 8.1)
+  const pr = it.price;
+  $('sheet-price').textContent = pr ? T().price_line(pr.store,
+    [pr.total_label || pr.unit_label, pr.organic_fallback ? T().no_organic : ''].filter(Boolean).join(' · '),
+    agoLabel(pr.fetched_at || pr.computed_at), it.store_source === 'preferred' && it.store !== pr.store ? it.store : '')
+    + (pr.partial ? T().price_partial : '') : '';
   // Prices are looked up on demand, never on open: opening the editor to change
   // a quantity must not fire a network request describing what you are buying.
   $('sheet-prices').innerHTML = '';
@@ -2627,6 +2709,8 @@ function saveSheet() {
   if (editState.category !== (it.category || 'other')) { fields.category = editState.category; changed = true; }
   if (note !== (it.note || ''))                    { fields.note = note;                 changed = true; }
   if (budget !== (it.budget == null ? '' : String(it.budget))) { fields.budget = budget; changed = true; }
+  const buyQty = $('sheet-buyqty').value.trim();
+  if (buyQty !== (it.buy_qty || ''))                { fields.buy_qty = buyQty;            changed = true; }
   const brand = $('sheet-brand').value.trim();
   if (brand !== (it.brand || ''))                  { fields.brand = brand;               changed = true; }
   const origStore = it.store_source === 'preferred' ? it.store : '';

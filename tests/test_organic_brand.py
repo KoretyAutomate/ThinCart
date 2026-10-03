@@ -177,3 +177,29 @@ def test_state_carries_every_chains_pick():
            pick_name="p", pick_brand="", pick_size="")
     got = client.get("/api/state").json()["picks_by_chain"][str(added["catalog_id"])]
     assert got == {"wegmans": "W1", "wholefoods": "WF1"}
+
+
+def test_an_impossible_amount_never_breaks_the_list():
+    """Codex review 2026-10-03: a saved buy_qty of '1/0 lb' raised
+    ZeroDivisionError inside state(), breaking the list on both phones."""
+    added = op(type="add", name="impossible-8a1", item_id=str(uuid.uuid4()))
+    for amount in ("1/0 lb", "0 lb", "0 rolls", "0"):   # 0 divided too (Codex review)
+        op(type="edit", item_id=added["item_id"], buy_qty=amount)
+        r = client.get("/api/state")
+        assert r.status_code == 200, amount
+        it = next(i for i in r.json()["items"] if i["catalog_id"] == added["catalog_id"])
+        assert it["buy_qty"] == amount and it["buy_qty_ok"] is False, amount
+
+
+def test_state_carries_the_price_question_and_it_moves_with_hidden_inputs():
+    """Codex review: enrichment can make an item food (organic then applies)
+    with no change the phone can see; the server's key must change."""
+    added = op(type="add", name="hiddenkey-8a2", item_id=str(uuid.uuid4()))
+    before = state_item("hiddenkey-8a2")["price_key"]
+    op(type="settings", organic=True)
+    try:
+        appmod.conn.execute("UPDATE item_catalog SET is_edible=1 WHERE id=?", (added["catalog_id"],))
+        appmod.conn.commit()
+        assert state_item("hiddenkey-8a2")["price_key"] != before
+    finally:
+        op(type="settings", organic=False)

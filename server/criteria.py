@@ -58,4 +58,7 @@ def apply(conn: sqlite3.Connection, op: Op, catalog_id: int) -> bool:
     if op.brand is not None:
         conn.execute("UPDATE item_catalog SET brand=? WHERE id=?", (op.brand.strip(), catalog_id))
         changed = True
+    if op.buy_qty is not None:  # kept as typed; an unreadable amount is shown as such, never guessed
+        conn.execute("UPDATE item_catalog SET buy_qty=? WHERE id=?", (op.buy_qty.strip(), catalog_id))
+        changed = True
     return changed
