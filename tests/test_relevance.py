@@ -74,3 +74,9 @@ def test_brands_with_ignored_words_and_counted_nouns():
     assert where.relevant("Fresh Express Spinach, 8 oz", "Fresh Express spinach", "Fresh Express") is True
     assert where.relevant("Organic Valley Whole Milk, 64 fl oz", "Organic Valley whole milk", "Organic Valley") is True
     assert where.relevant("Organic Free Range 12 Eggs", "eggs") is True
+
+
+def test_a_hyphen_spaced_on_one_side_is_still_one_word():
+    """Codex review, cached Wegmans: 'Choose-A- Size' beside 'Choose-A-Size'."""
+    assert where._words("Choose-A- Size") == where._words("Choose-A-Size")
+    assert where._words("milk - organic") == ["milk", "organic"]

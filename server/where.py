@@ -166,8 +166,10 @@ def _percents(text: str) -> set[str]:
 
 
 def _words(text: str) -> list[str]:
-    # a hyphenated word stays ONE word: "grass-fed" is "grassfed"
-    return [_sing(w.replace("-", "")) for w in re.findall(r"[a-z]+(?:-[a-z]+)*", canonical(text))]
+    # a hyphenated word stays ONE word: "grass-fed" is "grassfed" — also when
+    # the store spaced one side of it ("Choose-A- Size"); " - " stays a break
+    t = re.sub(r"(?<=[a-z])-\s+(?=[a-z])|(?<=[a-z])\s+-(?=[a-z])", "-", canonical(text))
+    return [_sing(w.replace("-", "")) for w in re.findall(r"[a-z]+(?:-[a-z]+)*", t)]
 
 
 def _covers(want: list[str], got: list[str]) -> bool:
@@ -253,7 +255,10 @@ def fitting(recs: list[dict], pick_sku: str | None, organic: bool, brand: str,
     if first is None:
         return [], "no_match"
     same = _identity(first)
-    return [(r, False) for r in fit if r is first or _identity(r) == same], "ok"
+    # another size must ALSO name the item: "Large Shrimp" shares an identity
+    # with "Jumbo Shrimp" once size words go, but it is not jumbo shrimp
+    return [(r, False) for r in fit if r is first or (
+        _identity(r) == same and relevant(r.get("name") or "", term, r.get("brand") or ""))], "ok"
 
 
 def compare(cands: list[tuple[dict, dict, bool]], wanted: tuple[str, float] | None,
