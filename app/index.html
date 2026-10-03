@@ -310,19 +310,32 @@
     border:none; background:#d3e8d9; color:var(--green-dark); border-radius:999px;
     width:22px; height:22px; font-size:.8rem; line-height:1; cursor:pointer; padding:0;
   }
-  #plants, #lang, #hist, #stores-btn, #org-btn, #set-btn {
+  #here-btn, #lang, #hist, #stores-btn, #org-btn, #set-btn {
     background:#ffffff2b; border:none; color:#fff; font-size:.8rem; font-weight:700;
     padding:5px 8px; border-radius:999px; cursor:pointer; white-space:nowrap;
     flex-shrink:0;
   }
   /* the household buys organic: lit, so it is never on without anyone seeing */
   #org-btn.on { background:#fff; color:var(--green-dark); }
+  /* 📍 only exists while "I'm at" a store; lit when the list is narrowed to it */
+  #here-btn { display:none; }
+  #here-btn.at { display:inline-block; }
+  #here-btn.on { background:#fff; color:var(--green-dark); }
   /* unreviewed trips are the only reason to open Travel, which lives in ⚙️ —
      so ⚙️ turns amber, and the Travel button inside says how many */
   #set-btn.pending { background:var(--amber); color:#fff; }
   #set-panel #trips { background:var(--green); color:#fff; border:none; border-radius:10px;
     padding:10px 16px; font-size:1rem; font-weight:700; cursor:pointer; }
   #set-panel #trips.pending { background:var(--amber); }
+  #set-panel #plants { background:var(--green); color:#fff; border:none; border-radius:10px;
+    padding:10px 16px; font-size:1rem; font-weight:700; cursor:pointer; }
+  /* a group folded at the top of the list: its heading is the button */
+  .cat.fold { display:flex; align-items:center; gap:6px; cursor:pointer; user-select:none;
+    -webkit-user-select:none; background:var(--card); border:1.5px solid #d4dcd4; border-radius:10px;
+    padding:8px 10px; margin:8px 0 6px; }
+  .cat.fold .n { margin-left:auto; font-weight:700; }
+  #herenote { display:none; font-size:.78rem; color:var(--muted); margin:0 4px 10px; }
+  #herenote.on { display:block; }
   .cand .alt { color:var(--muted); font-size:.8rem; }
   #ideas {
     position:fixed; inset:0; background:var(--bg); z-index:35; display:none;
@@ -442,7 +455,7 @@
   <button id="hist" aria-label="History">🕘</button>
   <button id="org-btn" aria-label="Organic" aria-pressed="false">🍃</button>
   <button id="lang">🌐 EN</button>
-  <button id="plants">🌱 –/30</button>
+  <button id="here-btn" aria-pressed="false">📍</button>
   <button id="set-btn" aria-label="Settings">⚙️</button>
   <span id="pill" class="syncing">…</span>
 </header>
@@ -497,6 +510,9 @@
     <h3 id="trip-h"></h3>
     <button id="trips">✈️</button>
 
+    <h3 id="plants-h"></h3>
+    <button id="plants">🌱</button>
+
     <h3 id="ver-h"></h3>
     <p class="stores-note" id="buildline"></p>
     <button id="reload-btn"></button>
@@ -545,6 +561,7 @@
     <button id="view-cat"></button><button id="view-aisle"></button>
   </div>
   <p id="aislenote"></p>
+  <p id="herenote"></p>
   <ul id="list"></ul>
   <div id="empty" hidden></div>
 </main>
@@ -778,6 +795,8 @@ const STR = {
     note_label:'Note', sheet_budget:'Budget 💰', sheet_store:'Where to buy',
     sheet_brand:'Preferred brand', brand_any:'any brand is fine',
     trip_h:'Travel', trip_btn:n=>n ? `✈️ Travel — ${n} to review` : '✈️ Travel',
+    plants_h:'Plants', here_btn:'Only items for the store you are in',
+    here_note:(s,n)=>`Only what to buy at ${s}` + (n ? ` — ${n} for other stores hidden` : ''),
     org_btn:'Organic', org_on:'🍃 Organic ON for the household — prices look for organic products',
     org_off:'🍃 Organic OFF — prices look for regular products',
     no_organic:'no organic found — regular price',
@@ -927,6 +946,8 @@ const STR = {
     note_label:'メモ', sheet_budget:'予算 💰', sheet_store:'購入する店',
     sheet_brand:'好みのブランド', brand_any:'こだわりなし',
     trip_h:'旅行', trip_btn:n=>n ? `✈️ 旅行 — 確認待ち ${n}件` : '✈️ 旅行',
+    plants_h:'植物', here_btn:'今いる店で買うものだけ表示',
+    here_note:(s,n)=>`${s}で買うものだけ` + (n ? ` — 他の店の${n}件は非表示` : ''),
     org_btn:'オーガニック', org_on:'🍃 オーガニック ON（家族共通）— 価格はオーガニック商品で比較',
     org_off:'🍃 オーガニック OFF — 価格は通常品で比較',
     no_organic:'オーガニックなし — 通常品の価格',
@@ -1066,6 +1087,9 @@ function applyLang() {
   $('sheet-note-label').textContent = T().note_label;
   $('sheet-budget-label').textContent = T().sheet_budget;
   $('trip-h').textContent = T().trip_h;
+  $('plants-h').textContent = T().plants_h;
+  $('plants').textContent = T().ideas;
+  $('here-btn').setAttribute('aria-label', T().here_btn);
   $('org-btn').setAttribute('aria-label', T().org_btn);
   $('sheet-brand-label').textContent = T().sheet_brand;
   $('sheet-brand').placeholder = T().brand_any;
@@ -2141,8 +2165,10 @@ function render() {
   $('org-btn').textContent = org ? '🍃 ON' : '🍃';
   renderTray();
   refreshStores();
-  if (base.plants)
-    $('plants').textContent = `🌱 ${base.plants.count}/${base.plants.target}`;
+  const here = hereStore();
+  $('here-btn').classList.toggle('at', !!currentStore());
+  $('here-btn').classList.toggle('on', !!here);
+  $('here-btn').setAttribute('aria-pressed', String(!!here));
   // detected days nobody has ruled on yet — they are already bending the
   // cycles, so the button says how many rather than waiting to be found
   const pend = base.away_pending || 0;
@@ -2152,13 +2178,22 @@ function render() {
   const byAisle = viewMode() === 'aisle' && storeCanAisle() && !!aisleMap;
   let items = view();
   const list = $('list');
+  // 📍: what to buy HERE. Items for another store go; items with no store yet
+  // stay, folded at the top — any of them may be bought here.
+  const all = items.length;
+  if (here) items = items.filter(i => !i.store || i.store === here);
+  $('herenote').textContent = here ? T().here_note(here, all - items.length) : '';
+  $('herenote').classList.toggle('on', !!here);
+  const grp = it => (here && !it.store) ? NOSTORE_GROUP() : groupOf(it);
   if (byAisle) {
-    // Walking order, with everything unknown deliberately last rather than
-    // scattered through the aisles it is not in.
+    // Walking order. Everything unknown is folded at the TOP rather than
+    // scattered through the aisles it is not in (the owner's call, 2026-10-04).
     items = items.slice().sort((a, b) => {
-      const ga = groupOf(a), gb = groupOf(b);
+      const ga = grp(a), gb = grp(b);
       return rankCmp(ga.rank, gb.rank) || ga.key.localeCompare(gb.key);
     });
+  } else if (here) {
+    items = items.slice().sort((a, b) => (grp(a).fold ? 0 : 1) - (grp(b).fold ? 0 : 1));   // stable
   }
   list.innerHTML = '';
   $('empty').hidden = items.length > 0;
@@ -2172,14 +2207,25 @@ function render() {
     n.classList.add('on');
   }
   let lastKey = undefined;
+  const folded = foldedGroups();
   for (const it of items) {
-    const g = groupOf(it);
-    const heads = byAisle || items.some(i => i.category);
-    if (g.key !== lastKey && heads) {
+    const g = grp(it);
+    const heads = byAisle || here || items.some(i => i.category);
+    if (g.key !== lastKey && (heads || g.fold)) {
       const h = document.createElement('div');
-      h.className = 'cat'; h.textContent = g.label;
+      h.className = 'cat' + (g.fold ? ' fold' : '');
+      h.dataset.group = g.key;
+      if (g.fold) {
+        // a button heading: ▸ folded / ▾ open, and how many are inside
+        const n = items.filter(i => grp(i).key === g.key).length;
+        h.textContent = (folded.has(g.key) ? '▸ ' : '▾ ') + g.label;
+        const c = document.createElement('span'); c.className = 'n'; c.textContent = String(n);
+        h.appendChild(c);
+        h.onclick = () => { toggleFold(g.key); render(); };
+      } else h.textContent = g.label;
       list.appendChild(h); lastKey = g.key;
     }
+    if (g.fold && folded.has(g.key)) continue;
     const li = document.createElement('li');
     li.className = 'item' + (it.pending ? ' pending' : '');
     li.dataset.id = it.id;
@@ -2879,13 +2925,42 @@ function groupOf(it) {
                     rank: [0, ...aisleRank(a.aisle)] };
     // Never asked is not the same as has no aisle, and gets its own group so it
     // cannot be read as one.
+    // Unknown goes FIRST, folded: a short line to open, not a tail to scroll to.
     if (aisleUnasked.has(String(it.catalog_id)))
-      return { key: 'zzy-unasked', label: T().aisle_unasked, approx: false, rank: [8] };
-    return { key: 'zzz-unknown', label: T().aisle_unknown, approx: false, rank: [9] };
+      return { key: 'zzy-unasked', label: T().aisle_unasked, approx: false, rank: [-1, 1], fold: true };
+    return { key: 'zzz-unknown', label: T().aisle_unknown, approx: false, rank: [-1, 0], fold: true };
   }
   return { key: 'c:' + (it.category || 'other'), label: catLabel(it.category),
            approx: false, rank: [0] };
 }
+
+/* 📍 "this store only" and the folded groups (the owner's ask, 2026-10-04).
+ * Both are this phone's view only — nothing is sent. 📍 is meaningful only
+ * while "I'm at" a store, so it switches off with it. */
+const HERE_KEY = 'pc_here', FOLD_KEY = 'pc_folded';
+const NOSTORE_GROUP = () => ({ key: 'zzx-nostore', label: T().unassigned, approx: false, rank: [-2], fold: true });
+function hereStore() {
+  let on = false;
+  try { on = localStorage.getItem(HERE_KEY) === '1'; } catch (e) { /* private window */ }
+  return on ? currentStore() : null;
+}
+function foldedGroups() {
+  try {
+    const v = JSON.parse(localStorage.getItem(FOLD_KEY) || 'null');
+    if (Array.isArray(v)) return new Set(v);
+  } catch (e) { /* none saved */ }
+  // folded until opened: the point of putting them on top is a short line
+  return new Set(['zzx-nostore', 'zzy-unasked', 'zzz-unknown']);
+}
+function toggleFold(key) {
+  const f = foldedGroups();
+  if (f.has(key)) f.delete(key); else f.add(key);
+  try { localStorage.setItem(FOLD_KEY, JSON.stringify([...f])); } catch (e) { /* this view only */ }
+}
+$('here-btn').onclick = () => {
+  try { localStorage.setItem(HERE_KEY, hereStore() ? '0' : '1'); } catch (e) { /* this view only */ }
+  render();
+};
 
 function renderViewToggle() {
   const on = storeCanAisle();
@@ -3169,7 +3244,10 @@ function setPill() {
 }
 
 /* ============ plants & ideas panel (LLM — never blocks the list) ============ */
-$('plants').onclick = () => { $('ideas').style.display = 'flex'; loadIdeas(false); };
+$('plants').onclick = () => {
+  $('set-panel').style.display = 'none';
+  $('ideas').style.display = 'flex'; loadIdeas(false);
+};
 $('ideas-close').onclick = () => $('ideas').style.display = 'none';
 $('ideas-refresh').onclick = () => loadIdeas(true);
 

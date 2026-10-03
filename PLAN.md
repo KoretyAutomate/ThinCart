@@ -2774,3 +2774,14 @@ Decision:
 - A product the store ranks first that is genuinely the wrong thing is the
   store's search problem, as it was before Phase 8; the fix for one item is
   the existing exact-product pick, which bypasses all of this.
+
+## 2026-10-04 — 📍 this store only; unknown and no-store folded on top (owner's ask)
+
+- The 🌱 plant count leaves the header; Plants & ideas opens from ⚙️ (like Travel).
+- 📍 in the header, shown only while "I'm at" a store: narrows the list to items
+  whose store is that one, says how many for other stores are hidden, and keeps
+  items with no store in one group at the top (any may be bought here).
+- In aisle order, "Aisle unknown" and "Not looked up" move from the end to the top.
+- Those top groups are folded by default (a short line with a count); tapping
+  the heading opens/folds it, remembered per phone. Nothing here is sent to the
+  server — it is this phone's view only.
