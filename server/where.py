@@ -225,10 +225,13 @@ def relevant(name: str, term: str, brand: str = "") -> bool:
     return _covers(want, _own_words(name, brand))
 
 
-def _identity(rec: dict) -> tuple[str, tuple[str, ...]]:
-    """One product across its sizes: brand + name without sizes and pack words."""
-    words = _words(quantity.strip_sizes(rec.get("name") or ""))
-    return canonical(rec.get("brand") or ""), tuple(w for w in words if w not in _PACK_WORDS)
+def _identity(rec: dict) -> tuple[str, tuple[str, ...], tuple[str, ...]]:
+    """One product across its sizes: brand + name without sizes and pack
+    words — keeping the numbers that are not sizes ("2%" milk is not "1%")."""
+    rest = quantity.strip_sizes(rec.get("name") or "")
+    words = tuple(w for w in _words(rest) if w not in _PACK_WORDS)
+    numbers = tuple(sorted(re.findall(r"\d+(?:\.\d+)?%?", rest)))
+    return canonical(rec.get("brand") or ""), words, numbers
 
 
 def fitting(recs: list[dict], pick_sku: str | None, organic: bool, brand: str,

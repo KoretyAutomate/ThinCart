@@ -197,3 +197,10 @@ def test_a_stated_size_is_checked_even_when_no_size_can_be_inferred():
     was kept because the unit price could not pin an exact size itself."""
     rec = {"pack_size": "627.3 sq ft", "amount": 15.99, "unit_price": "$0.10/sq ft", "name": "Paper Towels"}
     assert "area" not in q.quantities(rec)
+
+
+def test_a_liquid_stated_in_oz_is_checked_against_a_fl_oz_unit_price():
+    """Codex review: 'Milk, 128 oz' at $4 and '$0.13/fl oz' (≈31 fl oz) ranked as a gallon."""
+    rec = {"pack_size": "", "amount": 4.0, "unit_price": "$0.13/fl oz", "name": "Milk, 128 oz"}
+    assert "weight" not in q.quantities(rec)
+    assert q.strip_sizes("Whole Milk, Half Gallon") == "whole milk,"

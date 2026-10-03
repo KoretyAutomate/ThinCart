@@ -471,3 +471,18 @@ def test_a_disproved_organic_winner_goes_even_if_its_store_misses_the_regular_se
     client.post("/api/where", json={"catalog_ids": [cid]})
     item = next(i for i in client.get("/api/state").json()["items"] if i["catalog_id"] == cid)
     assert item["price"]["store"] == "Where B" and item["price"]["organic_fallback"] is True
+
+
+def test_size_groups_keep_product_numbers_and_word_sizes(monkeypatch, stores):
+    """Codex review: '2%' and '1%' milk grouped as sizes of one product; a
+    half gallon and a gallon of the same milk were not."""
+    cid = add("quillmilk2", buy_qty="1 gal")
+    stub(monkeypatch, {"901": {"quillmilk2": [rec("Quillmilk2, Half Gallon", 4.0, ""),
+                                              rec("Quillmilk2, 1 Gallon", 6.0, "")]},
+                       "902": {"quillmilk2": [rec("Quillmilk2, 1 Gallon", 7.0, "")]}})
+    it = ask(cid)
+    assert it["cheapest"]["store"] == "Where A" and it["cheapest"]["total_label"].endswith("$6.00")
+    pct = add("quill 2% milk")
+    stub(monkeypatch, {"901": {"quill 2% milk": [rec("Quill Milk, 2%, 64 fl oz", 4.0, ""),
+                                                 rec("Quill Milk, 1%, 128 fl oz", 4.0, "")]}})
+    assert [q["product"] for q in ask(pct)["quotes"]] == ["Quill Milk, 2%, 64 fl oz"]

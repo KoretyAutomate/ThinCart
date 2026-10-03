@@ -186,6 +186,7 @@ def strip_sizes(text: str) -> str:
     t = _norm(text)
     t = _MULTI.sub(" ", t)
     t = _AMOUNT.sub(" ", t)
+    t = _WORD_SIZE.sub(" ", t)            # "Half Gallon", "Quart" are sizes too
     return re.sub(r"\s+", " ", t).strip()
 
 
@@ -313,6 +314,11 @@ def quantities(rec: dict) -> dict[str, float]:
         # it — for a liquid, comparable() reads the 59 as fl oz.
         sibling = {"weight": "volume", "volume": "weight"}.get(dim)
         if sibling in out:
+            # …but that stated size is still checked against this unit price,
+            # since for a liquid it will be read in this unit ("Milk, 128 oz"
+            # at "$0.13/fl oz" is not a gallon)
+            if not lo <= out[sibling] <= hi:
+                del out[sibling]
             continue
         if dim in implied:
             out[dim] = implied[dim]
