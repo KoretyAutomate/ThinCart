@@ -187,6 +187,7 @@ def strip_sizes(text: str) -> str:
     t = _MULTI.sub(" ", t)
     t = _AMOUNT.sub(" ", t)
     t = _WORD_SIZE.sub(" ", t)            # "Half Gallon", "Quart" are sizes too
+    t = _PACK_OF.sub(" ", t)              # "(Pack of 6)", "12-pack" are package counts
     return re.sub(r"\s+", " ", t).strip()
 
 

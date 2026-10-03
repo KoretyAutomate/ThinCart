@@ -486,3 +486,14 @@ def test_size_groups_keep_product_numbers_and_word_sizes(monkeypatch, stores):
     stub(monkeypatch, {"901": {"quill 2% milk": [rec("Quill Milk, 2%, 64 fl oz", 4.0, ""),
                                                  rec("Quill Milk, 1%, 128 fl oz", 4.0, "")]}})
     assert [q["product"] for q in ask(pct)["quotes"]] == ["Quill Milk, 2%, 64 fl oz"]
+
+
+def test_pack_counts_are_sizes_of_one_product(monkeypatch, stores):
+    """Codex review: a six-pack and a twelve-pack of the same seltzer were
+    treated as different products, hiding the cheaper way to buy 144 fl oz."""
+    cid = add("quillfizz", buy_qty="144 fl oz")
+    stub(monkeypatch, {"901": {"quillfizz": [rec("Quillfizz, 12 fl oz (Pack of 6)", 6.0, ""),
+                                             rec("Quillfizz, 12 fl oz (Pack of 12)", 9.0, "")]}})
+    it = ask(cid)
+    assert it["cheapest"]["product"] == "Quillfizz, 12 fl oz (Pack of 12)"
+    assert it["cheapest"]["total_label"].endswith("$9.00")
