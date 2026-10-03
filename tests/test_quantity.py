@@ -46,6 +46,8 @@ import quantity as q
     ("Millie Moon Unisex Size 2 Luxury Diapers (9-18 lbs), 96 Count", {"each": 96.0}),
     ("Huggies Little Movers, Size 4 (22-37 lb), 29 Ct", {"each": 29.0}),
     ("Eggs, 12-pack", {"each": 12.0}),                # Codex review: a pack count is a count
+    ("Large Eggs, 12-count", {"each": 12.0}),         # Codex review: hyphenated sizes
+    ("Sour Cream, 16-ounce tub", {"weight": 16.0}),
     ("Sparkling Water, 6 pack, 72 fl oz total", {"volume": 72.0, "each": 6.0}),
     ("Large Eggs, Pack of 12", {"each": 12.0}),
     ("Half-and-Half, Quart", {"volume": 32.0}),

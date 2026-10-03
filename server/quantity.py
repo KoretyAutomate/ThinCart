@@ -49,7 +49,8 @@ _UNIT_RE = "|".join(re.escape(u) for u in sorted(UNITS, key=len, reverse=True))
 _NUM = r"(?<![\d.,/])(\d+(?:\.\d+)?)"
 # "6 Double Plus Rolls": size adjectives may sit between the number and the unit
 _ADJ = r"(?:(?:double|triple|mega|plus|family|huge|big|giant|regular|jumbo|select-a-size)\s+){0,3}"
-_AMOUNT = re.compile(rf"{_NUM}\s*{_ADJ}({_UNIT_RE})(?![a-z])")
+# "12 count", "12-count", "16-ounce" (Codex review: hyphenated sizes were lost)
+_AMOUNT = re.compile(rf"{_NUM}\s*-?\s*{_ADJ}({_UNIT_RE})(?![a-z])")
 _MULTI = re.compile(rf"(\d+)\s*(?:x|×)\s*{_NUM}\s*({_UNIT_RE})(?![a-z])")
 _PER_ROLL = re.compile(r"(\d+)\s*sheets?\s*per\s*roll")
 # nutrition facts in names are not package sizes: "48g protein", "5 g sugar"

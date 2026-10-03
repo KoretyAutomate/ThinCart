@@ -401,6 +401,8 @@ def _price_brief(answer: dict | None, store_names: dict) -> dict | None:
             # when the store's price was FETCHED — a comparison over a cached
             # quote is not a fresh price, and must not read as one
             "fetched_at": c.get("fetched_at", ""),
+            # a regular product standing in because no store had it organic
+            "organic_fallback": bool(answer.get("organic_fallback")),
             # some store could not be checked when this was decided
             "partial": "unasked" in (answer.get("stores") or {}).values()}
 

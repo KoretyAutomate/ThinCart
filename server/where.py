@@ -225,10 +225,13 @@ def _core_words(name: str, brand: str) -> list[str]:
     first ingredient clause ("… with Chicken & Pumpkin"). The item's words
     must be found here — not in the brand, not among the ingredients."""
     brand_words = set(_words(brand)) | {"by"}
-    segs = _DELIM.split(canonical(name))
-    while segs and _words(segs[0]) and set(_words(segs[0])) <= brand_words:
+    segs = [s for s in _DELIM.split(canonical(name)) if _words(s)]
+    while segs and set(_words(segs[0])) <= brand_words:
         segs = segs[1:]
-    words = _words(" ".join(segs))
+    # The product's phrase and the one segment after it ("Squash, Butternut");
+    # further segments are ingredient or flavour lists ("…Puree, Organic,
+    # White Bean, Pumpkin, Apple") and cannot name the item (Codex review).
+    words = _words(" ".join(segs[:2]))
     lead_brand = _words(brand)
     if lead_brand and words[:len(lead_brand)] == lead_brand:
         words = words[len(lead_brand):]

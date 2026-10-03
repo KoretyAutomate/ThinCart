@@ -1870,7 +1870,8 @@ function renderPlan() {
       p.querySelector('.pmeta').textContent = priced ? whereLine(i, wOf(i), unsettled) : [
         i.qty_note, i.budget != null ? fmtYen(i.budget) : '',
         i.store_source === 'history' ? T().src_hist : '',
-        i.store_source === 'price' && i.price ? '💲 ' + (i.price.total_label || i.price.unit_label || '$' + i.price.amount) : '',
+        i.store_source === 'price' && i.price ? '💲 ' + (i.price.total_label || i.price.unit_label || '$' + i.price.amount)
+          + (i.price.organic_fallback ? ' · ' + T().no_organic : '') : '',
       ].filter(Boolean).join(' ');
       div.appendChild(p);
     }
@@ -2664,7 +2665,8 @@ function fillSheet(it) {
   $('sheet-buyqty-warn').textContent = it.buy_qty && it.buy_qty_ok === false ? T().buyqty_bad : '';
   // the price suggestion beside the owner's own pick (PLAN.md Phase 8.1)
   const pr = it.price;
-  $('sheet-price').textContent = pr ? T().price_line(pr.store, pr.total_label || pr.unit_label,
+  $('sheet-price').textContent = pr ? T().price_line(pr.store,
+    [pr.total_label || pr.unit_label, pr.organic_fallback ? T().no_organic : ''].filter(Boolean).join(' · '),
     agoLabel(pr.fetched_at || pr.computed_at), it.store_source === 'preferred' && it.store !== pr.store ? it.store : '')
     + (pr.partial ? T().price_partial : '') : '';
   // Prices are looked up on demand, never on open: opening the editor to change

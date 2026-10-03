@@ -545,3 +545,19 @@ def test_whole_size_phrases_leave_the_item_name():
     """Codex review: 'milk 64 fl oz' kept 'fl' and 'oz' as required words."""
     assert where.relevant("Milk, 64 Fluid Ounces", "milk 64 fl oz") is True
     assert where.relevant("Paper Towels, 6 Rolls", "paper towels 600 sq ft") is True
+
+
+def test_an_ingredient_list_further_on_does_not_name_the_item():
+    """Codex review, cached: a baby puree listing pumpkin among its flavours."""
+    assert where.relevant("Cerebelly Baby Puree, Organic, White Bean, Pumpkin, Apple with Cinnamon",
+                          "pumpkin puree", "Cerebelly") is False
+    assert where.relevant("Wegmans Organic Squash, Butternut", "butternut squash", "Wegmans") is True
+
+
+def test_the_organic_stand_in_warning_survives_into_state(monkeypatch, stores, organic_on):
+    cid = add("quillsorrel", food=True)
+    stub(monkeypatch, {"901": {"organic quillsorrel": [], "quillsorrel": [rec("Quillsorrel 4 oz", 2.0, "")]},
+                       "902": {"organic quillsorrel": [], "quillsorrel": [rec("Quillsorrel 4 oz", 3.0, "")]}})
+    ask(cid)
+    item = next(i for i in client.get("/api/state").json()["items"] if i["catalog_id"] == cid)
+    assert item["price"]["organic_fallback"] is True

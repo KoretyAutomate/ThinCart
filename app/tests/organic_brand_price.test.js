@@ -519,6 +519,14 @@ function openEditor(b, i) {
     check("and the row moves to the cheapest store at once (offline too)",
       /💲 Whole Foods/.test(c.rows()[0].textContent), c.rows()[0].textContent);
 
+    const e = boot({ items: [item(5, "kale", { store: "Wegmans", store_source: "price",
+      price: { ...price, store: "Wegmans", organic_fallback: true } })] });
+    await settle();
+    openEditor(e, 0); await settle();
+    check("a regular-product stand-in says so in the editor (Codex review)",
+      /no organic found/.test(e.doc.getElementById("sheet-price").textContent),
+      e.doc.getElementById("sheet-price").textContent);
+
     const d = boot({ items: [item(3, "beans", { buy_qty: "a few", buy_qty_ok: false })] });
     await settle();
     openEditor(d, 0); await settle();
