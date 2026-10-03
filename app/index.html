@@ -798,6 +798,7 @@ const STR = {
     buyqty_label:'How much I want', buyqty_ph:'e.g. 2 lb, 6 rolls, 1 gal — empty = any size',
     buyqty_bad:'Not understood — try "2 lb", "6 rolls", "1 gal" or "12". Prices compare per unit meanwhile.',
     price_partial:' (not every store could be checked)',
+    partial_check:(st, how)=>`latest check (some stores unreachable): ${st} ${how} — keeping the last full answer`,
     price_line:(st, how, ago, mine)=>`💲 Cheapest: ${st}${how ? ' · ' + how : ''}${ago ? ' · ' + ago : ''}${mine ? ' · you chose ' + mine : ''}`,
     stores_title:'🏬 Stores & plan', at_h:'I’m at… (tags purchases for 6 h)',
     plan_h:'Where to buy today', manage_h:'Stores', at_none:'— none —',
@@ -946,6 +947,7 @@ const STR = {
     buyqty_label:'買いたい量', buyqty_ph:'例: 2 lb、6 rolls、1 gal — 空欄 = サイズ問わず',
     buyqty_bad:'読み取れません — 「2 lb」「6 rolls」「1 gal」「12」のように入力してください。それまでは単価で比較します。',
     price_partial:'（一部の店は未確認）',
+    partial_check:(st, how)=>`最新の確認（一部の店に接続できず）: ${st} ${how} — 前回の完全な結果を維持`,
     price_line:(st, how, ago, mine)=>`💲 最安: ${st}${how ? ' · ' + how : ''}${ago ? ' · ' + ago : ''}${mine ? ' · 指定: ' + mine : ''}`,
     stores_title:'🏬 店舗とプラン', at_h:'いまいる店（6時間有効）',
     plan_h:'今日どこで買う？', manage_h:'店舗リスト', at_none:'— なし —',
@@ -1703,6 +1705,9 @@ function whereLineMain(it, w, unsettled) {
     // grouped under the owner's pick: name the store the cheaper price is at
     if (it.store_source === 'preferred' && it.store !== q.store)
       return T().price_line(q.store, q.total_label || q.unit_label, agoLabel(q.fetched_at), it.store);
+    // a partial check that could not reach the stored winner: shown, not obeyed
+    if (it.store_source === 'price' && it.store !== q.store)
+      return T().partial_check(q.store, q.total_label || q.unit_label || '$' + q.amount.toFixed(2));
     // products that could not be measured in the winner's unit are still shown
     const unranked = (w.quotes || []).filter(u => !u.unit_label && u.store_id !== q.store_id);
     return [q.total_label || `$${q.amount.toFixed(2)}`, q.unit_label || q.unit_price, q.product,
@@ -1830,9 +1835,10 @@ function renderPlan() {
   const groups = new Map();
   for (const it of items) {
     const w = wOf(it);
-    // the owner's own pick holds even with price details showing (Phase 8.1):
-    // only an item without one is grouped under the cheapest store
-    const k = it.store_source === 'preferred' ? it.store
+    // grouped where the LIST says it is bought: the owner's pick, else the
+    // stored price recommendation (which a partial check does not replace —
+    // Phase 8 delta 3); only an item with neither takes the fresh cheapest
+    const k = (it.store_source === 'preferred' || it.store_source === 'price') ? it.store
       : (w && w.cheapest) ? w.cheapest.store : (it.store || '');
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k).push(it);

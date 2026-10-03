@@ -542,6 +542,25 @@ function openEditor(b, i) {
     check("and the cheaper store is named beside it", /Cheapest: Whole Foods[^]*you chose Wegmans/.test(weg), weg);
   }
 
+  console.log("\n--- 8d. the plan and the chip agree on a partial check (Codex review)");
+  {
+    const price = { store: "Wegmans", amount: 2, product: "Peas", unit_label: "$0.13/oz", total_label: "",
+                    exact: false, computed_at: new Date().toISOString() };
+    const where = { partial: true, items: {
+      "1": { cheapest: { store_id: 8, store: "Whole Foods", amount: 5, unit_label: "$0.31/oz", product: "Peas",
+                         exact: false, fetched_at: "" }, quotes: [{}], comparable: true,
+             stores: { "7": "unasked", "8": "ok" } } } };
+    const b = boot({ items: [item(1, "peas", { store: "Wegmans", store_source: "price", price })], where });
+    await settle();
+    b.doc.getElementById("stores-btn").click();
+    b.doc.getElementById("plan-byprice").click();
+    await settle(); await settle();
+    const groups = [...b.doc.querySelectorAll("#plan-groups .plangroup")].map(g => g.textContent);
+    const weg = groups.find(g => g.startsWith("🏬 Wegmans")) || "";
+    check("grouped where the chip says (the kept answer)", /peas/.test(weg), groups);
+    check("the partial check is shown, labelled, not obeyed", /latest check[^]*Whole Foods/.test(weg), weg);
+  }
+
   console.log("\n--- 8b. pending 🍃 / pick / amount changes hide the stored price ----");
   {
     const price = { store: "Whole Foods", amount: 2.5, product: "Rice 1 lb", unit_label: "$0.16/oz",

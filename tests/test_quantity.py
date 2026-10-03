@@ -153,3 +153,13 @@ def test_a_count_only_in_the_name_is_reconciled_or_left_unknown():
     assert q.quantities(rec)["volume"] == 96.0
     rec["unit_price"] = "$0.33/fl oz"                                # $4 / 12 fl oz
     assert q.quantities(rec)["volume"] == 12.0
+
+
+def test_a_stated_oz_size_is_not_overridden_by_a_rounded_unit_price():
+    """Codex review, cached Whole Foods record: '…2% Milk, 59 oz' at $7.59 and
+    '$0.12/fluid ounce' became 64 fl oz, so '1 gal' needed two cartons, not three."""
+    rec = {"pack_size": "", "amount": 7.59, "unit_price": "$0.12/fluid ounce",
+           "name": "Organic Valley Grassmilk Reduced Fat Organic 2% Milk, 59 oz"}
+    got = q.comparable(q.quantities(rec), liquid=True)
+    assert got["volume"] == 59.0
+    assert q.cost_to_cover(7.59, got["volume"], 128) == (22.77, 3)

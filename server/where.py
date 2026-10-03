@@ -189,6 +189,26 @@ def _leading_phrase(name: str, brand: str) -> str:
     return ""
 
 
+def _covers(want: list[str], got: list[str]) -> bool:
+    """Every wanted word is in the product — written apart or joined:
+    "oat milk" matches "Oatmilk", "oatmilk" matches "Oat Milk", "grass fed"
+    matches "Grassfed" (Codex review: real Wegmans oat milks were rejected)."""
+    have = set(got) | {a + b for a, b in zip(got, got[1:], strict=False)}
+    for i, w in enumerate(want):
+        joined_next = i + 1 < len(want) and w + want[i + 1] in have
+        joined_prev = i > 0 and want[i - 1] + w in have
+        if w not in have and not joined_next and not joined_prev:
+            return False
+    return True
+
+
+def _positions(lead: list[str], want: list[str]) -> list[int]:
+    """Where in the product's phrase the item is named, either spelling."""
+    pairs = {a + b for a, b in zip(want, want[1:], strict=False)}
+    return [i for i, t in enumerate(lead)
+            if t in want or t in pairs or (i + 1 < len(lead) and t + lead[i + 1] in want)]
+
+
 def relevant(name: str, term: str, brand: str = "") -> bool:
     """Is this product the item, rather than something made from it?
     Every content word of the item appears (any order — Whole Foods writes
@@ -203,8 +223,7 @@ def relevant(name: str, term: str, brand: str = "") -> bool:
     if any(p not in _percents(name) for p in _percents(term)):
         return False
     head = _leading_phrase(name, brand)
-    got = _words(name)
-    if any(w not in got for w in want):
+    if not _covers(want, _words(name)):
         return False
     # a product-type word AFTER any of the item's words in the leading phrase
     # makes it another product: "Rice Cakes, Brown Rice" is cakes. One BEFORE
@@ -216,7 +235,7 @@ def relevant(name: str, term: str, brand: str = "") -> bool:
         if w in _INGREDIENT_INTRO:
             lead = lead[:i]
             break
-    at = [i for i, w in enumerate(lead) if w in want]
+    at = _positions(lead, want)
     if not at:
         # the item is only mentioned outside the product's own phrase — an
         # ingredient ("Lemonade, made with real lemon"), not the item

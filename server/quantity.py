@@ -267,6 +267,12 @@ def quantities(rec: dict) -> dict[str, float]:
     for dim, by_unit in from_unit_price(rec.get("amount"), rec.get("unit_price") or "").items():
         if dim in settled:      # the unit price already had its say there
             continue
+        # "…2% Milk, 59 oz" at "$0.12/fluid ounce": the product STATES 59 (in
+        # oz). A rounded unit price must not invent a different fl oz size
+        # beside it — for a liquid, comparable() reads the 59 as fl oz.
+        sibling = {"weight": "volume", "volume": "weight"}.get(dim)
+        if dim not in out and sibling in out and abs(by_unit - out[sibling]) > SAME * out[sibling]:
+            continue
         if dim not in out:
             out[dim] = by_unit
         elif abs(by_unit - out[dim]) / out[dim] > DISAGREE and not _rounding_explains(rec, dim, out[dim]):

@@ -489,3 +489,12 @@ def test_cached_dill_relish_is_not_dill():
     """Codex review: the cached Whole Foods 'organic dill' results put relish first."""
     assert where.relevant("Organic Dill Relish, 10 oz", "organic dill") is False
     assert where.relevant("McCormick Gourmet Collection Organic Dill Weed, 0.5 oz", "organic dill") is True
+
+
+def test_joined_and_separated_spellings_match():
+    """Codex review: every cached Wegmans oat milk was rejected for 'oat milk'."""
+    assert where.relevant("Wegmans Original Oatmilk, 64 fl oz", "oat milk") is True
+    assert where.relevant("Oat Milk Barista, 32 fl oz", "oatmilk") is True
+    assert where.relevant("Grassfed 2% Milk, 64 fl oz", "grass fed 2% milk") is True
+    assert where.relevant("Oatmilk Creamer, 32 fl oz", "oat milk") is True       # creamer is not excluded
+    assert where.relevant("Oat Cereal, 12 oz", "oat milk") is False
