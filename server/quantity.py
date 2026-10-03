@@ -296,7 +296,9 @@ def quantities(rec: dict) -> dict[str, float]:
     # per-container-or-total question as a pack count: the unit price decides
     # when it holds exactly one reading, else the size is unknown (Codex review)
     count = name_q.get("each") or pack_q.get("each") or 0
-    if n <= 1 and count > 1:
+    # an explicit "6 x 12 fl oz" (in either field) already states the total
+    explicit = any(_MULTI.search(_norm(rec.get(f) or "")) for f in ("pack_size", "name"))
+    if n <= 1 and count > 1 and not explicit:
         for dim in ("weight", "volume"):
             if dim in out and dim not in settled:
                 rng = _unit_price_range(rec, dim)

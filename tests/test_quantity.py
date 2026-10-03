@@ -215,3 +215,9 @@ def test_a_count_beside_a_size_is_reconciled_or_left_unknown():
     rec = {"pack_size": "", "amount": 4.0, "unit_price": "$0.53/oz",
            "name": "Sargento Sliced Provolone, 20 count, 7.6 oz"}      # 20 slices, 7.6 oz in all
     assert q.quantities(rec)["weight"] == 7.6
+
+
+def test_an_explicit_multiplier_is_already_the_total():
+    """Codex review: pack size '6 x 12 fl oz' lost its 72 fl oz to the count check."""
+    rec = {"pack_size": "6 x 12 fl oz", "amount": 6.0, "unit_price": "", "name": "Seltzer"}
+    assert q.quantities(rec) == {"volume": 72.0, "each": 6.0}
