@@ -243,3 +243,9 @@ def test_a_metric_label_beside_a_multipack_is_one_container():
 
 def test_zero_amount_infers_nothing():
     assert q.from_unit_price(0.0, "$1.00/oz") == {}
+
+
+@pytest.mark.parametrize("text", ["two gallons", "1 gallon and a half", "about 2 lb", "2 lb or so"])
+def test_a_wanted_amount_with_words_left_over_is_not_read(text):
+    """Codex review: 'two gallons' read as one gallon, without the warning."""
+    assert q.parse_wanted(text) is None

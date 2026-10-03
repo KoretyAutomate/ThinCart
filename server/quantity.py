@@ -206,6 +206,10 @@ def parse_wanted(text: str) -> tuple[str, float] | None:
     t = _norm(text).strip()
     if re.fullmatch(_NUM, t):
         return ("each", float(t)) if float(t) > 0 else None
+    # the WHOLE text must be a size: "two gallons" or "1 gallon and a half"
+    # would otherwise read as one gallon — less than asked, silently
+    if re.search(r"[a-z0-9]", strip_sizes(t)):
+        return None
     got = parse(t)
     if len(got) != 1:
         return None
