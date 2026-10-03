@@ -66,14 +66,19 @@ def test_quantities_from_real_records():
     assert "weight" not in q.quantities(rec)
 
 
-def test_oz_and_fl_oz_compare_when_only_one_is_stated():
-    assert q.comparable({"weight": 59.0}) == {"weight": 59.0, "volume": 59.0}
-    assert q.comparable({"volume": 64.0, "weight": 70.0}) == {"volume": 64.0, "weight": 70.0}
+def test_oz_and_fl_oz_compare_only_for_liquids():
+    assert q.comparable({"weight": 59.0}, liquid=True) == {"weight": 59.0, "volume": 59.0}
+    assert q.comparable({"volume": 64.0, "weight": 70.0}, liquid=True) == {"volume": 64.0, "weight": 70.0}
+    # 12 oz of honey is not 12 fl oz (Codex review)
+    assert q.comparable({"weight": 12.0}) == {"weight": 12.0}
+    assert q.is_liquid("oat milk") and q.is_liquid("Tart Cherry Juice") and not q.is_liquid("honey")
 
 
 @pytest.mark.parametrize("text, want", [
     ("2 lb", ("weight", 32.0)), ("6 rolls", ("roll", 6.0)), ("1 gal", ("volume", 128.0)),
     ("12", ("each", 12.0)), ("two pounds", None), ("", None), ("2 lb 6 rolls", None),
+    # Codex review: never the tail of a number
+    (".5 lb", ("weight", 8.0)), ("1/2 lb", ("weight", 8.0)), ("1 1/2 lb", ("weight", 24.0)),
 ])
 def test_parse_wanted(text, want):
     assert q.parse_wanted(text) == want

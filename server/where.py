@@ -199,14 +199,15 @@ def fitting(recs: list[dict], pick_sku: str | None, organic: bool, brand: str,
     return out, ("ok" if out else "no_match")
 
 
-def compare(cands: list[tuple[dict, dict, bool]], wanted: tuple[str, float] | None) -> dict:
+def compare(cands: list[tuple[dict, dict, bool]], wanted: tuple[str, float] | None,
+            liquid: bool = False) -> dict:
     """Rank (store, record, exact) candidates across stores, in ONE dimension:
     the wanted amount's, else the one most candidates can be measured in.
     With a wanted amount the measure is what it costs to buy at least that
     much ("2 × 1 lb = $5.98"), so a huge bag cheaper per pound does not win by
     costing more than the owner meant to spend; without one, the unit price.
     Candidates that cannot be measured in that dimension are listed, unranked."""
-    measured = [(s, r, x, quantity.comparable(quantity.quantities(r))) for s, r, x in cands]
+    measured = [(s, r, x, quantity.comparable(quantity.quantities(r), liquid)) for s, r, x in cands]
     dim = quantity.choose_dim([m for *_, m in measured], wanted[0] if wanted else None)
     rows = []
     for store, r, exact, qtys in measured:

@@ -324,3 +324,29 @@ def test_the_brand_goes_into_the_search(monkeypatch, stores):
     calls = stub(monkeypatch, {})
     client.post("/api/where", json={"catalog_ids": [cid]})
     assert any("Horizon quillcream" in c["terms"] for c in calls)
+
+
+def test_a_definitive_answer_without_a_winner_clears_the_old_one(monkeypatch, stores):
+    """Codex review: the picked product went out of stock (conflict) and the
+    stale recommendation stayed in /api/state."""
+    cid = add("quillhoney")
+    stub(monkeypatch, {"901": {"quillhoney": [rec("Quillhoney 12 oz", 4.0, "")]}})
+    ask(cid)
+    stub(monkeypatch, {"901": {"quillhoney": [rec("Quillhoney 12 oz", 4.0, "", available=False)]},
+                       "902": {"quillhoney": []}})
+    ask(cid)
+    item = next(i for i in client.get("/api/state").json()["items"] if i["catalog_id"] == cid)
+    assert item["price"] is None
+
+
+def test_weight_and_volume_stay_apart_except_for_liquids(monkeypatch, stores):
+    cid = add("quillsyrup")                                                  # not a liquid word
+    stub(monkeypatch, {"901": {"quillsyrup": [rec("Quillsyrup 12 oz", 4.0, "")]},
+                       "902": {"quillsyrup": [rec("Quillsyrup 12 fl oz", 3.0, "")]}})
+    it = ask(cid)
+    assert it["dim"] == "weight" and it["cheapest"]["store"] == "Where A"   # the fl oz one is not compared
+    milk = add("quill milk")
+    stub(monkeypatch, {"901": {"quill milk": [rec("Quill Milk 59 oz", 5.0, "")]},
+                       "902": {"quill milk": [rec("Quill Milk 64 fl oz", 6.0, "")]}})
+    it = ask(milk)
+    assert it["comparable"] and {q["store"] for q in it["quotes"]} == {"Where A", "Where B"}

@@ -118,8 +118,10 @@ def _reason(statuses: set[str]) -> str:
 
 
 async def _persist(items: dict[int, dict], result: dict[str, dict]) -> None:
-    """Keep each cheapest answer; drop a stored one only on a definitive no-match
-    — a failure to ask keeps the last answer (it carries its age)."""
+    """Keep each cheapest answer. Without one, drop the stored answer when every
+    store DID answer — nothing fits, the picked product is gone or out of
+    stock, or what was found cannot be compared: the old recommendation is now
+    wrong. Only a failure to ask keeps the last answer (it carries its age)."""
     if _ctx is None:  # pragma: no cover — wiring error
         return
     conn = _db()
@@ -130,7 +132,7 @@ async def _persist(items: dict[int, dict], result: dict[str, dict]) -> None:
             r = result[str(cid)]
             if r["cheapest"]:
                 changed |= price_reco.save(conn, cid, it["key"], r, ts)
-            elif r["reason"] == "no_match":
+            elif "unasked" not in r["stores"].values():
                 price_reco.forget(conn, cid, it["key"])
                 changed = True
         if changed:
@@ -171,7 +173,7 @@ async def where_to_buy(req: WhereRequest) -> dict:
     result = {}
     for cid, o in out.items():
         it = items[cid]
-        cmp = where.compare(o["cands"], it["wanted"])
+        cmp = where.compare(o["cands"], it["wanted"], quantity.is_liquid(it["name"]))
         result[str(cid)] = {
             **cmp, "stores": o["stores"], "brand": it["brand"], "organic_fallback": cid in fallback,
             "buy_qty": it["buy_qty"], "buy_qty_ok": not it["buy_qty"] or it["wanted"] is not None,

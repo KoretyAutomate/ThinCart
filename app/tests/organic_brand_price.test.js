@@ -509,6 +509,36 @@ function openEditor(b, i) {
       /Not understood/.test(d.doc.getElementById("sheet-buyqty-warn").textContent));
   }
 
+  console.log("\n--- 8b. pending 🍃 / pick / amount changes hide the stored price ----");
+  {
+    const price = { store: "Whole Foods", amount: 2.5, product: "Rice 1 lb", unit_label: "$0.16/oz",
+                    total_label: "", exact: false, computed_at: new Date().toISOString() };
+    const mk = () => item(1, "rice", { store: "Whole Foods", store_source: "price", price, history_store: "Wegmans" });
+    for (const [label, op] of [
+      ["a queued 🍃 change", { op_id: "s9", type: "settings", organic: true, actor: "t" }],
+      ["a queued product pick", { op_id: "p9", type: "product_pick", catalog_id: 1, pick_chain: "wegmans",
+                                  pick_sku: "X", pick_name: "x", actor: "t" }],
+      ["a queued amount", { op_id: "q9", type: "edit", item_id: "i1", catalog_id: 1, buy_qty: "2 lb", actor: "t" }],
+    ]) {
+      const b = boot({ items: [mk()], queue: [op] });
+      await settle();
+      const row = b.rows()[0].textContent;
+      check(`${label}: history stands in for the price until it syncs`,
+        /🏬 Wegmans/.test(row) && !/Whole Foods/.test(row), row);
+    }
+    // and the price details view treats an unsynced amount as unsettled
+    const where = { partial: false, items: {} };
+    const b = boot({ items: [mk(), item(2, "tea")], where,
+                     queue: [{ op_id: "q8", type: "edit", item_id: "i1", catalog_id: 1, buy_qty: "3 lb", actor: "t" }] });
+    await settle();
+    b.doc.getElementById("stores-btn").click();
+    b.doc.getElementById("plan-byprice").click();
+    await settle(); await settle();
+    const req = b.calls.find(c => c.url === "/api/where");
+    check("an unsynced amount is not priced on the old one", req && JSON.stringify(req.body.catalog_ids) === "[2]",
+      req && req.body);
+  }
+
   console.log("\n--- 5. no priced store: say what to do ------------------------------");
   {
     const b = boot({ items: [item(1, "milk")], stores: [] });

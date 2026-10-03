@@ -1137,6 +1137,19 @@ function view() {
       }
     }
   }
+  // A queued 🍃 change or product pick makes the stored price answer the OLD
+  // question; until the server has it, stand back to the pick or history.
+  const orgQueued = queue.some(op => op.type === 'settings');
+  const pickQueued = new Set(queue.filter(op => op.type === 'product_pick').map(op => op.catalog_id));
+  for (const it of items) {
+    if (it.price && (orgQueued || pickQueued.has(it.catalog_id))) {
+      it.price = null;
+      if (it.store_source === 'price') {
+        it.store = it.history_store || null;
+        it.store_source = it.store ? 'history' : null;
+      }
+    }
+  }
   return items;
 }
 
@@ -1592,7 +1605,8 @@ const WHERE_MAX_AGE_MS = 60 * 60 * 1000;
 function unsettledItems() {
   const ids = new Set(), cats = new Set();
   for (const op of queue) {
-    if (op.type === 'edit' && (op.brand !== undefined || op.name !== undefined)) ids.add(op.item_id);
+    if (op.type === 'edit' && (op.brand !== undefined || op.name !== undefined || op.buy_qty !== undefined))
+      ids.add(op.item_id);
     if (op.type === 'product_pick') cats.add(op.catalog_id);
   }
   return it => ids.has(it.id) || cats.has(it.catalog_id);
@@ -1607,7 +1621,8 @@ function whereInput() {
   const key = JSON.stringify([
     organicSetting(),
     pricedStores().map(s => s.id + ':' + s.chain_store_id),
-    ask.map(i => [i.catalog_id, i.name, i.name_en || '', i.brand || '', picks[String(i.catalog_id)] || {}]),
+    ask.map(i => [i.catalog_id, i.name, i.name_en || '', i.brand || '', i.buy_qty || '',
+                  picks[String(i.catalog_id)] || {}]),
     items.filter(i => i.pending || unsettled(i)).map(i => i.catalog_id || i.id),
   ]);
   return { key, ids: ask.map(i => i.catalog_id) };

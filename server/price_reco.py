@@ -74,8 +74,8 @@ def save(conn: sqlite3.Connection, catalog_id: int, key: str, answer: dict, ts: 
 
 
 def forget(conn: sqlite3.Connection, catalog_id: int, key: str) -> None:
-    """A definitive "nothing fits anywhere" for the current question. A
-    failure to ask is NOT this — the last answer is kept, with its age."""
+    """Every store answered the current question and none gives a cheapest
+    store. A failure to ask is NOT this — the last answer is kept, with its age."""
     if input_key(conn, catalog_id) == key:
         conn.execute("DELETE FROM price_reco WHERE catalog_id=?", (catalog_id,))
 

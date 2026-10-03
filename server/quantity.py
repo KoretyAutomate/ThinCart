@@ -44,7 +44,9 @@ for _words, _dim, _size in (
 
 # Longest first, so "fl oz" wins over "oz" and "sq ft" is not read as nothing.
 _UNIT_RE = "|".join(re.escape(u) for u in sorted(UNITS, key=len, reverse=True))
-_NUM = r"(\d+(?:\.\d+)?)"
+# A whole number only: never the tail of ".5" or "1/2" (Codex review) — those
+# are rewritten to decimals by _norm before matching.
+_NUM = r"(?<![\d./])(\d+(?:\.\d+)?)"
 # "6 Double Plus Rolls": size adjectives may sit between the number and the unit
 _ADJ = r"(?:(?:double|triple|mega|plus|family|huge|big|giant|regular|jumbo|select-a-size)\s+){0,3}"
 _AMOUNT = re.compile(rf"{_NUM}\s*{_ADJ}({_UNIT_RE})(?![a-z])")
@@ -58,8 +60,15 @@ _NUTRIENT = re.compile(r"\s*(?:of\s+)?(?:protein|fat|sugar|sugars|carb|carbs|fib
 DIM_ORDER = ("weight", "volume", "area", "sheet", "each", "roll")
 
 
+def _fraction(m: re.Match) -> str:
+    whole = int(m.group(1) or 0)
+    return f"{whole + int(m.group(2)) / int(m.group(3)):g}"
+
+
 def _norm(text: str) -> str:
     t = unicodedata.normalize("NFKC", text or "").lower()
+    t = re.sub(r"(?:(\d+)\s+)?(\d+)\s*/\s*(\d+)", _fraction, t)   # "1 1/2 lb" -> "1.5 lb"
+    t = re.sub(r"(?<![\d])\.(\d)", r"0.\1", t)                    # ".5 lb" -> "0.5 lb"
     t = re.sub(r"(?<=[a-z])\.", "", t)          # "fl. oz." -> "fl oz", keep "0.5"
     t = t.replace("fluid oz", "fl oz").replace("fl.oz", "fl oz")
     return re.sub(r"\s+", " ", t)
@@ -155,13 +164,27 @@ def _rounding_explains(rec: dict, dim: str, qty: float) -> bool:
     return round(float(rec["amount"]) / (qty / size), 2) == round(shown, 2)
 
 
-def comparable(qtys: dict[str, float]) -> dict[str, float]:
-    """Stores write "oz" for liquids ("Organic Valley 2% Milk, 59 oz") as often as
-    "fl oz", so a product that states only one of weight/volume is also
-    measured in the other (1 oz ≈ 1 fl oz, true for water-like groceries).
-    Without this, milk quoted in fl oz at one store and oz at another would
-    never be compared at all."""
+# Items sold as a liquid. Only for these is "59 oz" read as fluid ounces too —
+# 12 oz of honey is not 12 fl oz (Codex review).
+LIQUIDS = frozenset((
+    "milk", "juice", "water", "oil", "vinegar", "broth", "stock", "cream", "kefir", "drink", "soda",
+    "tea", "coffee", "kombucha", "wine", "beer", "lemonade", "creamer", "oatmilk", "seltzer", "sauce",
+))
+
+
+def is_liquid(term: str) -> bool:
+    return any(w in LIQUIDS for w in re.findall(r"[a-z]+", (term or "").lower()))
+
+
+def comparable(qtys: dict[str, float], liquid: bool = False) -> dict[str, float]:
+    """For a LIQUID item, stores write "oz" ("Organic Valley 2% Milk, 59 oz") as
+    often as "fl oz", so a product stating only one of weight/volume is also
+    measured in the other (1 oz ≈ 1 fl oz for water-like liquids). Without it,
+    milk in fl oz at one store and oz at another would never compare. For
+    anything else weight and volume stay apart."""
     out = dict(qtys)
+    if not liquid:
+        return out
     if "weight" in out and "volume" not in out:
         out["volume"] = out["weight"]
     elif "volume" in out and "weight" not in out:
