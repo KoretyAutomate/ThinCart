@@ -92,12 +92,12 @@ def choose(recs: list[dict], pick_sku: str | None, organic: bool, brand: str) ->
         # one is not its price: the pick is the only candidate at this chain.
         for r in recs:
             if r.get("sku") == pick_sku:
-                if r.get("available") and r.get("amount") is not None and fits(r, organic, brand):
+                if r.get("available") and (r.get("amount") or 0) > 0 and fits(r, organic, brand):
                     return r, "ok", True
                 return None, "conflict", True
         return None, "pick_missing", True
     for r in recs:
-        if r.get("available") and r.get("amount") is not None and fits(r, organic, brand):
+        if r.get("available") and (r.get("amount") or 0) > 0 and fits(r, organic, brand):
             return r, "ok", False
     return None, "no_match", False
 
@@ -148,7 +148,13 @@ _PACK_WORDS = frozenset((
 ))
 
 
+# -f / -fe nouns whose plural is -ves: "bay leaves" is bay leaf
+_VES = {"leaves": "leaf", "loaves": "loaf", "halves": "half", "shelves": "shelf", "knives": "knife"}
+
+
 def _sing(word: str) -> str:
+    if word in _VES:
+        return _VES[word]
     # "cookies" and "cookie" must fold alike: both to "cooky"
     if word.endswith("ies") and len(word) > 4:
         return word[:-3] + "y"
@@ -250,7 +256,8 @@ def fitting(recs: list[dict], pick_sku: str | None, organic: bool, brand: str,
     rec, status, exact = choose(recs, pick_sku, organic, brand)
     if pick_sku:
         return ([(rec, True)] if rec else []), status
-    fit = [r for r in recs if r.get("available") and r.get("amount") is not None and fits(r, organic, brand)]
+    # a $0 shelf price is a feed glitch, not a free product
+    fit = [r for r in recs if r.get("available") and (r.get("amount") or 0) > 0 and fits(r, organic, brand)]
     first = next((r for r in fit if relevant(r.get("name") or "", term, r.get("brand") or "")), None)
     if first is None:
         return [], "no_match"

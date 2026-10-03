@@ -239,8 +239,8 @@ def from_unit_price(amount, unit_price: str) -> dict[str, float]:
         return {}
     per = float(m.group(1).replace(",", ""))
     dim, size = UNITS[m.group(2)]
-    if per <= 0 or dim not in _TRUSTED_UNIT_DIMS:
-        return {}
+    if per <= 0 or dim not in _TRUSTED_UNIT_DIMS or float(amount) <= 0:
+        return {}                       # a $0 shelf price is no price (Codex review)
     amount = float(amount)
     estimate = amount / per * size
     lo, hi = amount / (per + 0.005) * size, amount / max(per - 0.005, 1e-9) * size
