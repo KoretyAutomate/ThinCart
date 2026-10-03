@@ -529,3 +529,19 @@ def test_a_unit_word_is_a_size_only_after_a_number():
     assert where.relevant("Egg Noodles, 12 oz", "eggs") is False
     assert where.relevant("Large Brown Eggs, 12 ct", "eggs") is True
     assert where.relevant("Sockeye Salmon Fillet, 32 oz", "salmon 2 lb") is True
+
+
+def test_brands_inline_and_brands_named_by_the_item():
+    """Codex review, cached ShopRite: 'Pumpkin Tree' fruit puree is not
+    pumpkin puree; 'Daisy, Sour Cream' is a Daisy sour cream."""
+    assert where.relevant("Pumpkin Tree Strawberry & Banana Fruit Puree, 4 oz", "pumpkin puree",
+                          "Pumpkin Tree") is False
+    assert where.relevant("Farmer's Market Organic Pumpkin Puree, 15 oz", "pumpkin puree", "Farmer's Market") is True
+    assert where.relevant("Daisy, Sour Cream, 16 Ounce", "Daisy sour cream", "Daisy") is True
+    assert where.relevant("Breakstone's Sour Cream, 16 oz", "Daisy sour cream", "Breakstone's") is False
+
+
+def test_whole_size_phrases_leave_the_item_name():
+    """Codex review: 'milk 64 fl oz' kept 'fl' and 'oz' as required words."""
+    assert where.relevant("Milk, 64 Fluid Ounces", "milk 64 fl oz") is True
+    assert where.relevant("Paper Towels, 6 Rolls", "paper towels 600 sq ft") is True

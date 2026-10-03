@@ -175,6 +175,15 @@ def parse(text: str) -> dict[str, float]:
     return {d: q for d, q in out.items() if q > 0}
 
 
+def strip_sizes(text: str) -> str:
+    """The text with every size phrase removed: "milk 64 fl oz" -> "milk".
+    Whole phrases, so a two-word unit ("fl oz", "sq ft") goes with its number."""
+    t = _norm(text)
+    t = _MULTI.sub(" ", t)
+    t = _AMOUNT.sub(" ", t)
+    return re.sub(r"\s+", " ", t).strip()
+
+
 def parse_wanted(text: str) -> tuple[str, float] | None:
     """The owner's "how much I want": "2 lb" -> ("weight", 32.0). A bare number
     is a count ("12" -> 12 each). None when it cannot be read — never guessed."""

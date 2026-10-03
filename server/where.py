@@ -212,30 +212,26 @@ def _positions(lead: list[str], want: list[str]) -> list[int]:
 
 
 def _term_words(term: str) -> list[str]:
-    """The item's words, minus a size typed into its name: "salmon 2 lb" is
-    salmon. A unit word counts as a size only right after a number — "eggs"
+    """The item's words, minus a size typed into its name: "salmon 2 lb" and
+    "milk 64 fl oz" are salmon and milk. Only whole size PHRASES go — "eggs"
     alone is the product, not a count (Codex review)."""
-    tokens = re.findall(r"\d+(?:\.\d+)?|[a-z]+(?:-[a-z]+)*", canonical(term))
-    out = []
-    for i, tok in enumerate(tokens):
-        if tok[0].isdigit():
-            continue
-        if i > 0 and tokens[i - 1][0].isdigit() and tok in quantity.UNITS:
-            continue
-        out.append(_sing(tok.replace("-", "")))
-    return out
+    return _words(quantity.strip_sizes(term))
 
 
 def _core_words(name: str, brand: str) -> list[str]:
-    """The words that describe THIS product: the name without leading
-    brand-only segments ("365 by Whole Foods Market, …"), cut at the first
-    ingredient clause ("… with Chicken & Pumpkin"). The item's words must be
-    found here — not in the brand, not among the ingredients."""
+    """The words that describe THIS product: the name without its brand —
+    a brand-only segment ("365 by Whole Foods Market, …") or a brand written
+    inline at the front ("Pumpkin Tree Strawberry … Puree") — cut at the
+    first ingredient clause ("… with Chicken & Pumpkin"). The item's words
+    must be found here — not in the brand, not among the ingredients."""
     brand_words = set(_words(brand)) | {"by"}
     segs = _DELIM.split(canonical(name))
     while segs and _words(segs[0]) and set(_words(segs[0])) <= brand_words:
         segs = segs[1:]
     words = _words(" ".join(segs))
+    lead_brand = _words(brand)
+    if lead_brand and words[:len(lead_brand)] == lead_brand:
+        words = words[len(lead_brand):]
     for i, w in enumerate(words):
         if w in _INGREDIENT_INTRO:
             return words[:i]
@@ -256,6 +252,12 @@ def relevant(name: str, term: str, brand: str = "") -> bool:
     if any(p not in _percents(name) for p in _percents(term)):
         return False
     head = _leading_phrase(name, brand)
+    # "Daisy sour cream": the item names the product's WHOLE brand, so those
+    # words are satisfied by the brand. A brand only partly in the item
+    # ("Pumpkin Tree" for pumpkin puree) satisfies nothing (Codex review).
+    brand_w = _words(brand)
+    if brand_w and all(w in want for w in brand_w):
+        want = [w for w in want if w not in brand_w] or want
     if not _covers(want, _core_words(name, brand)):
         return False
     # a product-type word AFTER any of the item's words in the leading phrase
