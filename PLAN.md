@@ -2622,3 +2622,155 @@ Pixel-7-emulated Chromium tapping tray chips, typing candidates and cycle rows
 against a throwaway copy of the live DB all behaved. Per the long-press lesson
 (fix on evidence, not theory), every opening of Purchase cycles and every chip
 tap now lands in the ⚙️ trace; the owner reproduces once and reads it.
+
+## Phase 8 — price-based where-to-buy, override, unit prices, "how much I want" (2026-10-03)
+
+Context: ThinCart stays household-only (owner, 2026-10-03: no public launch — the
+chains' terms forbid automated price collection). The owner's five asks:
+1. where-to-buy suggestions based on price;
+2. the owner can override that per item when they prefer a store;
+3. find out why Paper Towels finds nothing at any store;
+4. compute the unit price ourselves and pick the cheapest by it;
+5. a per-item "how much I want to buy" (generic, e.g. 2 lb of rice), so the
+   pick is the cheapest way to get THAT amount, not the cheapest per unit in a
+   huge pack.
+
+### 8.0 — Paper Towels, diagnosed (evidence, not theory)
+Live DB + journal 2026-10-02 19:18: キッチンペーパー (alias "paper towels",
+is_edible=0) was searched as **"organic paper towels"** because the household
+🍃 setting is on and applies to every item. ShopRite: 0 results; Wegmans and
+Whole Foods: only non-organic towels → no_match; Whole Foods Montgomery: a
+genuinely empty page, which `_wf_search` cannot tell from Amazon's flaky empty
+page, so after three tries it returns None → `unasked`. The organic→regular
+fallback deliberately does not run while any store is `unasked`, so the item
+got no price. Had it run, the stores quote towels per sq ft (Wegmans), per
+sheet/count (Whole Foods) and each (ShopRite) — none of which `where.unit_value`
+knows — so nothing could be ranked anyway.
+Fixes: (a) **organic applies to food only** (`is_edible = 1`); household
+goods are searched plain. (b) units come from our own parse (8.2), which
+covers sq ft, sheets, rolls and counts. (c) the fallback still waits for every
+store (an unreachable store might have it organic) — unchanged; (a) removes the
+case that hit it here.
+
+### 8.1 — where-to-buy is price-first, with the owner's override on top
+Recommendation order per item: **preferred store (owner's explicit pick) >
+cheapest by price > purchase history**. The price recommendation is computed on
+the server and persisted, so both phones see the same one and it works offline:
+- table `price_reco(catalog_id PK, store_id, product, amount, pack, qty_label,
+  unit_label, total_label, exact, fetched_at, computed_at, input_key)`.
+- `where_core(catalog_ids)` (the /api/where body, refactored) also upserts
+  `price_reco` for items with a cheapest answer and deletes rows whose item now
+  has none.
+- Refreshed by a background sweeper for items ON THE LIST (on startup, every
+  6 h, and debounced ~30 s after an add/edit that changes name, brand, buy
+  amount, or the organic setting). Gated by the lookup mode; cached searches
+  (2-day price TTL) keep traffic to a list's worth per refresh.
+- `state()` items gain `price` {store, amount, unit_label, total_label,
+  product} and `store_source` gains `'price'`; `recommended_stores` order as
+  above. The 🏬 chip reads "💲 Whole Foods $3.49" when the price decided it,
+  plain "🏬 Wegmans" when the owner pinned it; the plan groups by the same
+  store, so "where to buy today" is price-based by default.
+- Override: the existing editor store chips and the "tap a price row"
+  action set `preferred_store_id`. The editor shows the price suggestion beside
+  the owner's pick ("cheapest: Whole Foods $3.49 · you chose Wegmans") and an
+  explicit "use cheapest" chip that clears the pick.
+
+### 8.2 — unit price computed by us (`server/quantity.py`, pure)
+`parse(text) -> {dim: qty_in_base}` over pack size, then product name:
+weight → oz (oz, lb, g, kg), volume → fl oz (fl oz, gal, qt, pt, l, ml), count
+→ each (ct, count, pack, pk, pcs, each, ea, eggs), roll, sheet, area → sq ft.
+Multipacks "6 x 16 oz", "6 ct, 110 sheets" combine; "N sheets per roll" ×
+rolls → sheets. Dimension for a comparison: the wanted amount's dimension if
+set (8.3), else the one most candidates share (tie order weight, volume, area,
+sheet, each, roll). Candidates without that dimension are listed, never
+ranked; a store's own `unit_price` is only a fallback when we cannot parse.
+Displayed: "$0.21/oz", "$1.05/100 sheets", "$0.03/sq ft".
+
+### 8.3 — "how much I want" (generic)
+`item_catalog.buy_qty TEXT` (e.g. "2 lb", "6 rolls", "1 gal", "12"), edited in
+the sheet, op field `buy_qty` ("" clears). Parsed with `quantity.parse`; an
+unparseable value is kept as text and shown with a warning, never guessed.
+With a wanted amount W in dimension D, each candidate with qty q in D costs
+`ceil(W / q − 0.05) × amount` (5% slack so a 15.9 oz jar covers "1 lb");
+cheapest total wins, ties → less leftover. Shown as "2 × 1 lb = $5.98". Without
+W, cheapest unit price wins.
+
+### 8.4 — per-store candidate choice
+Within a store, every fitting result (in stock, priced, organic if food+on,
+brand) that is RELEVANT — every word of the item's English name appears in
+the product name, singular/plural folded — is a candidate; the best by 8.2/8.3
+represents the store (not merely the first hit). A pick at that chain stays
+the only candidate there (checked, not trusted — unchanged).
+
+### Tests
+quantity parse table (each unit, multipacks, sheets×rolls, junk → None);
+cost-to-cover incl. slack and huge-pack rejection; relevance (rice ≠ rice
+cakes); organic only for edible; price_reco persistence + recommendation order
+preferred > price > history; sweeper debounce and lookup-mode gate; state
+fields; UI: chip label by source, editor shows cheapest beside the pick, "use
+cheapest" clears it, buy amount field round-trips; live: paper towels gets a
+price after the fix (journal/DB evidence).
+
+### Plan review deltas (Codex, 2026-10-03 — applied; override 8.1–8.4 where they differ)
+
+1. **No background sweeper.** Prices are asked only when the owner opens the
+   plan or refreshes — the traffic model stays exactly today's. The answer is
+   persisted in `price_reco` (FK to item_catalog and stores, ON DELETE
+   CASCADE) so both phones and the list's 🏬 chips can show it offline.
+2. **Freshness by input key, not triggers.** `price_reco.input_key` = hash of
+   (English term, brand, buy_qty, organic-applies — setting AND is_edible,
+   every chain's pick, priced stores). `state()` recomputes the key per item
+   and shows a stored answer only when it matches — any edit, pick, merge,
+   enrichment, store link or setting change hides it until re-asked; nothing
+   has to remember to invalidate it. Writes happen under `write_lock` after
+   re-checking the key, so a slow answer cannot overwrite a newer question.
+3. **Last-known on failure.** A refresh that cannot ask a store keeps the old
+   row (shown with its age); a definitive no-match deletes it.
+4. **Top matches, stated.** Price questions ask each store for its first 10
+   matches (price-only, no shelf placement); the UI says "among each store's
+   first 10 matches". Not exhaustive, and not claimed to be.
+5. **Parser: ambiguity is dropped, provider units only validate.** Two
+   different amounts in one dimension ("6ct, 110 CT") → that dimension is
+   dropped. A size implied by the store's unit price is used only for weight,
+   volume and area (never sheet/each/roll — "$2.78/Sheets" is not per sheet),
+   and if it disagrees with the parsed size by >15% the dimension is dropped.
+   Golden cases copied from cached records.
+6. **Relevance by head noun.** The item's last word (plural-folded) must
+   appear in the product name and be followed only by end/punctuation/number
+   or a packaging/size word (bag, box, jar, can, bottle, pack, value, family,
+   case, tub, carton, bunch, lb, oz …). "rice" ≠ "rice cakes"/"rice
+   vinegar"; "white rice, 2 lb bag" ✓. Tested on cached false positives.
+7. **buy_qty** carried by both merge paths (catalog.enrich alias merge, target
+   wins; merge_organic).
+8. **Offline projection.** `state()` also sends each item's history store, so
+   the phone can fall back preferred → price → history itself; a queued
+   edit touching name/brand/buy_qty hides the item's price chip until synced.
+
+### 2026-10-04 — Codex round 23: relevance is anchored to the store's own ranking
+
+23 pre-push rounds converged on everything except one class: "is this
+product the item?". Every heuristic added (product-type word list, segment
+counts, ingredient clauses, head-noun position) produced the next edge case
+on real names — chicken breast rejected for chicken, "Riced Cauliflower"
+rejected for cauliflower rice, a size segment flipping the answer, a broth
+accepted for chicken. The cause was a Phase 8 design choice, not a missing
+rule: each store was represented by the cheapest of ALL its fitting results,
+so the relevance heuristic decided which product won. Before Phase 8 the
+store's own search ranking chose the product (its first fitting result), and
+Codex twice pointed at that ("previously, that store's first candidate was
+dill weed").
+
+Decision:
+- **A store's product is its FIRST fitting result** (in stock, priced,
+  organic if asked, brand) that names every word of the item — the store's
+  own ranking picks WHICH product.
+- **Sizes of that same product** at that store (same brand, same name once
+  sizes and pack words are removed) join it as candidates, so "how much I
+  want" still chooses 2 × 1 lb over a 20 lb bag of the same rice.
+- **Relevance is a plain word check**: every content word of the item (sizes
+  removed, "Oatmilk" = "oat milk", plural-folded) appears in the product's
+  own words (brand removed). The product-type list, segment counting and
+  ingredient-clause rules are removed — they were the source of the churn.
+- A product the store ranks first that is genuinely the wrong thing is the
+  store's search problem, as it was before Phase 8; the fix for one item is
+  the existing exact-product pick, which bypasses all of this.

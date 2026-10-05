@@ -80,7 +80,7 @@ def merge_into(conn: sqlite3.Connection, src: int, dst: int) -> None:
     )
     conn.execute("UPDATE product_picks SET catalog_id=? WHERE catalog_id=?", (dst, src))
     s = conn.execute(
-        "SELECT display_name, aliases_json, note, budget, preferred_store_id, brand, snoozed_until "
+        "SELECT display_name, aliases_json, note, budget, preferred_store_id, brand, buy_qty, snoozed_until "
         "FROM item_catalog WHERE id=?", (src,)
     ).fetchone()
     # The source's names, qualifier stripped, become the target's aliases: folding
@@ -100,10 +100,11 @@ def merge_into(conn: sqlite3.Connection, src: int, dst: int) -> None:
         "budget = COALESCE(budget, ?), "
         "preferred_store_id = COALESCE(preferred_store_id, ?), "
         "brand = CASE WHEN brand='' THEN ? ELSE brand END, "
+        "buy_qty = CASE WHEN buy_qty='' THEN ? ELSE buy_qty END, "
         # a snooze set on either row still holds: keep the later one
         "snoozed_until = CASE WHEN snoozed_until IS NULL OR ? > snoozed_until THEN ? "
         "ELSE snoozed_until END WHERE id=?",
-        (s["note"], s["budget"], s["preferred_store_id"], s["brand"],
+        (s["note"], s["budget"], s["preferred_store_id"], s["brand"], s["buy_qty"],
          s["snoozed_until"] or "", s["snoozed_until"], dst),
     )
     conn.execute("DELETE FROM item_catalog WHERE id=?", (src,))

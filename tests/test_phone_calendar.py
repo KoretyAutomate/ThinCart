@@ -23,6 +23,8 @@ from fastapi.testclient import TestClient
 os.environ["THINCART_DB"] = str(Path(os.environ.get("PYTEST_TMP", "/tmp")) / f"thincart_test_{uuid.uuid4().hex}.db")
 sys.path.insert(0, str(Path(__file__).parent.parent / "server"))
 
+import away_db
+
 import away
 
 
@@ -113,12 +115,11 @@ def test_pruning_stays_inside_the_servers_own_window(client):
     """A phone posting a year-wide window must not prune proposals older than
     anything the server would have read itself."""
     import app as appmod
-    import db as dbmod
 
     now = datetime.now(UTC)
     old = (now - timedelta(days=away.WINDOW_BACK_DAYS + 30)).date()
     # an older proposal, from a sync made months ago when this day was in range
-    dbmod.record_away_candidates(
+    away_db.record_away_candidates(
         appmod.conn,
         [away.travel.AwayCandidate(old + timedelta(days=n), "7:old:0", "Stay", "", "3-day all-day event")
          for n in range(3)],
@@ -218,12 +219,11 @@ def test_a_boundary_day_the_phone_only_partly_read_is_not_pruned(client):
     """Codex review 2026-09-26: on a New York evening the window's first local
     date is only partly covered by the phone's read."""
     import app as appmod
-    import db as dbmod
 
     now = datetime.now(UTC)
     first = (now - timedelta(days=away.WINDOW_BACK_DAYS)).astimezone(away.travel.HOME_TZ).date()
     edge = away.travel.AwayCandidate(first, "7:edge:0", "Stay", "", "travel booking")
-    dbmod.record_away_candidates(appmod.conn, [edge], "2026-01-01T00:00:00+00:00")
+    away_db.record_away_candidates(appmod.conn, [edge], "2026-01-01T00:00:00+00:00")
     appmod.conn.commit()
     r = _push(client, [])
     assert r.json()["dropped"] == 0
@@ -248,11 +248,10 @@ def test_a_legacy_google_proposal_is_reconciled_by_a_phone_read(client):
     """Codex review 2026-09-26: rows from the old Google pull have Google event
     ids, which name no phone calendar — they must not become unprunable."""
     import app as appmod
-    import db as dbmod
 
     first = date.today() - timedelta(days=30)
     legacy = away.travel.AwayCandidate(first, "lj2rnl3q6knq6ustu8tqj495s0", "Stay", "", "3-day all-day event")
-    dbmod.record_away_candidates(appmod.conn, [legacy], "2026-08-11T00:00:00+00:00")
+    away_db.record_away_candidates(appmod.conn, [legacy], "2026-08-11T00:00:00+00:00")
     appmod.conn.commit()
     assert _push(client, []).json()["dropped"] == 1
     assert _pending_days(client) == []

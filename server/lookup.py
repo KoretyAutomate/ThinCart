@@ -332,7 +332,7 @@ async def _algolia_multi(bodies: list[dict]) -> list[list[dict]] | None:
 
 
 async def wegmans_products_many(
-    terms: list[str], store_number: str, max_age: timedelta | None = None
+    terms: list[str], store_number: str, max_age: timedelta | None = None, limit: int = 5
 ) -> tuple[dict[str, list[dict]], bool]:
     """({term: records}, complete). Cache first; only the misses go over the wire.
 
@@ -345,7 +345,7 @@ async def wegmans_products_many(
     found: dict[str, list[dict]] = {}
     misses = []
     for term in terms:
-        key = f"{store_number}|{term.strip().lower()}|5"
+        key = f"{store_number}|{term.strip().lower()}|{limit}"
         hit = cache_get("product", key, max_age)
         if hit is not None:
             found[term] = hit
@@ -356,7 +356,7 @@ async def wegmans_products_many(
     if not terms:
         return {}, True          # an empty list is answered, not unavailable
     results = await _algolia_multi(
-        [{"query": t.strip(), "hitsPerPage": 5, "filters": f"storeNumber:{store_number}"} for t in misses]
+        [{"query": t.strip(), "hitsPerPage": limit, "filters": f"storeNumber:{store_number}"} for t in misses]
     )
     if results is None:
         return found, False
@@ -371,7 +371,7 @@ async def wegmans_products_many(
     stamp = now_iso()
     for term, hits in zip(misses, results, strict=False):
         parsed = parse_wegmans_hits(hits, stamp)
-        cache_put("product", f"{store_number}|{term.strip().lower()}|5", parsed)
+        cache_put("product", f"{store_number}|{term.strip().lower()}|{limit}", parsed)
         found[term] = parsed
     return found, True
 

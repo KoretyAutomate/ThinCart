@@ -22,8 +22,8 @@ from fastapi.testclient import TestClient
 
 import app as appmod
 import lookup
-import lookup_api
 import where
+import where_api
 
 client = TestClient(appmod.app)
 
@@ -117,46 +117,41 @@ def stores():
     ids = {}
     for name, num in (("Where A", "901"), ("Where B", "902")):
         op(type="store_upsert", store_name=name, store_chain="wegmans", store_chain_id=num)
-    for s in client.get("/api/state").json()["stores"]:
-        if s["name"] in ("Where A", "Where B"):
-            ids[s["name"]] = s["id"]
+    for st in client.get("/api/state").json()["stores"]:
+        if st["name"] in ("Where A", "Where B"):
+            ids[st["name"]] = st["id"]
     return ids
 
 
 def stub(monkeypatch, by_store, fail=()):
-    """by_store: {store_number: {term: [records]}}; stores in `fail` cannot be asked."""
+    """by_store: {store_number: {term: [records]}}; stores in `fail` cannot be asked.
+    Other priced stores left in the shared test DB answer "nothing"."""
     calls = []
 
-    async def fake(chain, terms, store, prefer=None, max_age=None, place=True):
-        calls.append({"store": store, "terms": list(terms), "max_age": max_age, "place": place})
+    async def fake(chain, terms, store, max_age=None):
+        calls.append({"store": store, "terms": list(terms), "max_age": max_age})
         if store in fail:
             return {}, False
         return {t: by_store.get(store, {}).get(t, []) for t in terms}, True
 
-    monkeypatch.setattr(lookup_api, "products_many", fake)
+    monkeypatch.setattr(where_api, "price_products_many", fake)
     return calls
 
 
-def add(name, **edit):
+def add(name, food=False, **edit):
     res = op(type="add", name=name, item_id=str(uuid.uuid4()))
     if edit:
         op(type="edit", item_id=res["item_id"], **edit)
+    if food:  # what enrichment would have said; organic applies to food only
+        appmod.conn.execute("UPDATE item_catalog SET is_edible=1 WHERE id=?", (res["catalog_id"],))
+        appmod.conn.commit()
     return res["catalog_id"]
 
 
-def test_where_names_the_cheapest_per_unit_and_never_saves_it(monkeypatch, stores):
-    cid = add("where butter")
-    calls = stub(monkeypatch, {
-        "901": {"where butter": [rec("Butter 8oz", 3.0, "$0.38/oz")]},
-        "902": {"where butter": [rec("Butter 16oz", 5.0, "$0.31/oz")]},
-    })
-    d = client.post("/api/where", json={"catalog_ids": [cid]}).json()
-    it = d["items"][str(cid)]
-    assert it["comparable"] and it["cheapest"]["store"] == "Where B"      # cheaper per ounce
-    assert [q["store"] for q in it["quotes"]][:2] == ["Where A", "Where B"]  # listed by amount
-    assert all(c["place"] is False and c["max_age"] == lookup.TTL["price"] for c in calls)
-    row = appmod.conn.execute("SELECT preferred_store_id FROM item_catalog WHERE id=?", (cid,)).fetchone()
-    assert row["preferred_store_id"] is None                               # a view, not a preference
+def ask(cid):
+    r = client.post("/api/where", json={"catalog_ids": [cid]})
+    assert r.status_code == 200, r.text
+    return r.json()["items"][str(cid)]
 
 
 @pytest.fixture
@@ -166,110 +161,347 @@ def organic_on():
     op(type="settings", organic=False)
 
 
-def test_where_searches_organic_and_filters_brand(monkeypatch, stores, organic_on):
-    cid = add("where milk", brand="Horizon")
+def test_cheapest_per_unit_we_compute_and_it_becomes_the_recommendation(monkeypatch, stores):
+    cid = add("quillbutter")
     calls = stub(monkeypatch, {
-        "901": {"Horizon organic where milk": [rec("Organic Milk", 4.0, "$0.03/fl oz", brand="Store"),
-                                               rec("Horizon Organic Milk", 5.0, "$0.04/fl oz", brand="Horizon")]},
-        "902": {"Horizon organic where milk": [rec("Horizon Milk", 3.0, "$0.02/fl oz", brand="Horizon")]},
+        "901": {"quillbutter": [rec("Quillbutter Sticks, 8 oz", 3.0, "")]},
+        "902": {"quillbutter": [rec("Quillbutter Tub, 16 oz", 5.0, "")]},
     })
-    d = client.post("/api/where", json={"catalog_ids": [cid]}).json()
-    it = d["items"][str(cid)]
-    # the brand is IN the search (Codex review 2026-09-28), and still checked on the results
-    assert any("Horizon organic where milk" in c["terms"] for c in calls)
-    assert [q["product"] for q in it["quotes"]] == ["Horizon Organic Milk"]
-    assert it["stores"][str(stores["Where B"])] == "no_match"
+    it = ask(cid)
+    assert it["comparable"] and it["cheapest"]["store"] == "Where B"      # $0.31/oz beats $0.38/oz
+    assert it["cheapest"]["unit_label"] == "$0.31/oz"
+    assert all(c["max_age"] == lookup.TTL["price"] for c in calls)
+    state = {i["catalog_id"]: i for i in client.get("/api/state").json()["items"]}
+    assert state[cid]["store"] == "Where B" and state[cid]["store_source"] == "price"
+    assert state[cid]["price"]["unit_label"] == "$0.31/oz"
+    row = appmod.conn.execute("SELECT preferred_store_id FROM item_catalog WHERE id=?", (cid,)).fetchone()
+    assert row["preferred_store_id"] is None                                # never saved as a preference
 
 
-def test_no_match_is_only_claimed_when_every_store_answered(monkeypatch, stores):
-    cid = add("where saffron")
-    stub(monkeypatch, {"901": {"where saffron": []}}, fail={"902"})
-    d = client.post("/api/where", json={"catalog_ids": [cid]}).json()
-    it = d["items"][str(cid)]
-    assert d["partial"] is True and it["reason"] == "unasked"
-    assert it["stores"][str(stores["Where B"])] == "unasked"
+def test_the_owners_pick_beats_the_price(monkeypatch, stores):
+    cid = add("quillmilk", store="Where A")
+    stub(monkeypatch, {"901": {"quillmilk": [rec("Quillmilk 64 fl oz", 6.0, "")]},
+                       "902": {"quillmilk": [rec("Quillmilk 64 fl oz", 4.0, "")]}})
+    ask(cid)
+    item = next(i for i in client.get("/api/state").json()["items"] if i["catalog_id"] == cid)
+    assert item["store"] == "Where A" and item["store_source"] == "preferred"
+    assert item["price"]["store"] == "Where B"                              # still shown beside it
+    op(type="edit", catalog_id=cid, store="")                               # "use cheapest"
+    item = next(i for i in client.get("/api/state").json()["items"] if i["catalog_id"] == cid)
+    assert item["store"] == "Where B" and item["store_source"] == "price"
+
+
+def test_how_much_i_want_beats_the_huge_bag(monkeypatch, stores):
+    """The owner's example: 2 lb of rice, not the 20 lb bag that is cheaper per pound."""
+    cid = add("quillrice", buy_qty="2 lb")
+    stub(monkeypatch, {"901": {"quillrice": [rec("Quillrice, 20 lb Bag", 20.0, "")]},
+                       "902": {"quillrice": [rec("Quillrice, 1 lb", 2.5, "")]}})
+    it = ask(cid)
+    assert it["dim"] == "weight" and it["cheapest"]["store"] == "Where B"
+    assert it["cheapest"]["total_label"] == "2 × 1 lb = $5.00"
+    no_qty = add("quillgrain")
+    stub(monkeypatch, {"901": {"quillgrain": [rec("Quillgrain, 20 lb Bag", 20.0, "")]},
+                       "902": {"quillgrain": [rec("Quillgrain, 1 lb", 2.5, "")]}})
+    assert ask(no_qty)["cheapest"]["store"] == "Where A"                    # per unit, without one
+
+
+def test_an_unreadable_amount_is_flagged_not_guessed(monkeypatch, stores):
+    cid = add("quillbeans", buy_qty="a few")
+    stub(monkeypatch, {"901": {"quillbeans": [rec("Quillbeans 15 oz", 1.0, "")]}})
+    it = ask(cid)
+    assert it["buy_qty_ok"] is False and it["dim"] == "weight"              # compared per unit instead
+
+
+def test_the_stores_ranking_picks_the_product_not_the_cheapest_match(monkeypatch, stores):
+    """PLAN.md §2026-10-04: the store's first matching result IS the product;
+    a cheaper, different product further down ("…Cakes") is not a size of it."""
+    cid = add("quillrye")
+    stub(monkeypatch, {"901": {"quillrye": [rec("Quillrye, 2 lb", 4.0, ""),
+                                            rec("Quillrye Cakes, 4 oz", 0.5, "")]}})
+    it = ask(cid)
+    assert [q["product"] for q in it["quotes"]] == ["Quillrye, 2 lb"]
+
+
+def test_sizes_of_the_same_product_compete_at_a_store(monkeypatch, stores):
+    cid = add("quilloats")
+    stub(monkeypatch, {"901": {"quilloats": [rec("Quilloats, 16 oz", 4.0, ""), rec("Quilloats, 42 oz", 6.0, "")]}})
+    it = ask(cid)
+    assert it["cheapest"]["product"] == "Quilloats, 42 oz"
+
+
+def test_organic_applies_to_food_only(monkeypatch, stores, organic_on):
+    """Paper towels were searched as "organic paper towels" and found nothing."""
+    towels = add("quilltowels")                                             # not food
+    calls = stub(monkeypatch, {"901": {"quilltowels": [rec("Quilltowels, 6 Rolls, 110 Sheets Per Roll", 9.0, "")]}})
+    it = ask(towels)
+    assert it["cheapest"] and not any("organic" in t for c in calls for t in c["terms"])
+    tea = add("quilltea", food=True)
+    calls = stub(monkeypatch, {"901": {"organic quilltea": [rec("Organic Quilltea 20 ct", 4.0, "")]}})
+    assert ask(tea)["cheapest"] and any("organic quilltea" in c["terms"] for c in calls)
+
+
+def test_with_organic_on_food_nobody_sells_organic_falls_back(monkeypatch, stores, organic_on):
+    cid = add("quillsalt", food=True)
+    stub(monkeypatch, {"901": {"organic quillsalt": [], "quillsalt": [rec("Quillsalt 26 oz", 2.0, "")]},
+                       "902": {"organic quillsalt": [], "quillsalt": [rec("Quillsalt 26 oz", 3.0, "")]}})
+    it = ask(cid)
+    assert it["organic_fallback"] is True and it["cheapest"]["store"] == "Where A"
+
+
+def test_no_fallback_while_a_store_could_not_be_asked(monkeypatch, stores, organic_on):
+    cid = add("quilloat", food=True)
+    stub(monkeypatch, {"901": {"organic quilloat": []}}, fail={"902"})
+    it = ask(cid)
+    assert it["organic_fallback"] is False and it["reason"] == "unasked"
+
+
+def test_a_saved_conventional_pick_is_a_conflict_not_a_fallback(monkeypatch, stores, organic_on):
+    cid = add("quillyogurt", food=True)
+    appmod.conn.execute(
+        "INSERT INTO product_picks(catalog_id, chain, sku, name, brand, pack_size, picked_at) "
+        "VALUES(?, 'wegmans', 'CONV', 'Plain Quillyogurt', '', '', '2026-09-27')", (cid,))
+    appmod.conn.commit()
+    stub(monkeypatch, {s: {"Plain Quillyogurt": [rec("Plain Quillyogurt 32 oz", 3.0, "", sku="CONV")]}
+                       for s in ("901", "902")})
+    it = ask(cid)
+    assert it["organic_fallback"] is False and it["quotes"] == [] and it["reason"] == "conflict"
+
+
+def test_a_failed_refresh_keeps_the_last_answer_a_definitive_miss_drops_it(monkeypatch, stores):
+    cid = add("quillpasta")
+    stub(monkeypatch, {"901": {"quillpasta": [rec("Quillpasta 16 oz", 2.0, "")]}})
+    ask(cid)
+    stub(monkeypatch, {}, fail={"901", "902"})
+    client.post("/api/where", json={"catalog_ids": [cid]})
+    item = next(i for i in client.get("/api/state").json()["items"] if i["catalog_id"] == cid)
+    assert item["price"] and item["price"]["store"] == "Where A"            # kept, with its age
+    stub(monkeypatch, {"901": {"quillpasta": []}, "902": {"quillpasta": []}})
+    ask(cid)
+    item = next(i for i in client.get("/api/state").json()["items"] if i["catalog_id"] == cid)
+    assert item["price"] is None and item["store_source"] != "price"
+
+
+def test_an_edit_hides_a_stale_answer_until_asked_again(monkeypatch, stores):
+    cid = add("quillflour")
+    stub(monkeypatch, {"901": {"quillflour": [rec("Quillflour 5 lb", 4.0, "")]}})
+    ask(cid)
+    op(type="edit", catalog_id=cid, buy_qty="2 lb")                         # a different question now
+    item = next(i for i in client.get("/api/state").json()["items"] if i["catalog_id"] == cid)
+    assert item["price"] is None
+
+
+def test_a_slow_answer_cannot_overwrite_a_newer_question():
+    import price_reco
+    cid = add("quillcorn")
+    old = price_reco.input_key(appmod.conn, cid)
+    op(type="edit", catalog_id=cid, brand="Acme")
+    answer = {"cheapest": {"store_id": 1, "amount": 1.0, "product": "x"}}
+    assert price_reco.save(appmod.conn, cid, old, answer, "2026-10-03T00:00:00+00:00") is False
 
 
 def test_where_is_a_503_when_nothing_could_be_asked(monkeypatch, stores):
-    cid = add("where cumin")
+    cid = add("quillcumin")
+    stub(monkeypatch, {}, fail={"901", "902"})
 
-    async def down(chain, terms, store, prefer=None, max_age=None, place=True):
+    async def down(chain, terms, store, max_age=None):
         return {}, False
 
-    monkeypatch.setattr(lookup_api, "products_many", down)
+    monkeypatch.setattr(where_api, "price_products_many", down)
     assert client.post("/api/where", json={"catalog_ids": [cid]}).status_code == 503
 
 
 def test_where_caps_the_request(stores):
-    ids = list(range(1, lookup_api.WHERE_MAX_ITEMS + 2))
+    ids = list(range(1, where_api.WHERE_MAX_ITEMS + 2))
     assert client.post("/api/where", json={"catalog_ids": ids}).status_code == 422
 
 
 def test_where_is_refused_when_prices_are_switched_off(monkeypatch, stores):
     monkeypatch.setattr(lookup, "MODE", "stores")
-    r = client.post("/api/where", json={"catalog_ids": [add("where salt")]})
+    r = client.post("/api/where", json={"catalog_ids": [add("quillsugar")]})
     assert r.status_code == 503 and r.json()["detail"]["code"] == lookup.DISABLED
 
 
-def test_with_organic_on_an_item_nobody_sells_organic_falls_back(monkeypatch, stores, organic_on):
-    """Paper towels do not come organic: with the household setting on, an item
-    no store carries organic is priced as the regular product, and says so."""
-    cid = add("where towels")
-    calls = stub(monkeypatch, {
-        "901": {"organic where towels": [], "where towels": [rec("Bounty Towels", 9.0, "$0.05/sq ft")]},
-        "902": {"organic where towels": [], "where towels": [rec("Viva Towels", 7.0, "$0.04/sq ft")]},
-    })
-    it = client.post("/api/where", json={"catalog_ids": [cid]}).json()["items"][str(cid)]
-    assert it["organic_fallback"] is True
-    assert {q["product"] for q in it["quotes"]} == {"Bounty Towels", "Viva Towels"}
-    assert any("where towels" in c["terms"] for c in calls)
-
-
-def test_no_fallback_while_a_store_could_not_be_asked(monkeypatch, stores, organic_on):
-    """An unreachable store might have had it organic: do not settle for
-    conventional on a partial answer."""
-    cid = add("where oats")
-    stub(monkeypatch, {"901": {"organic where oats": []}}, fail={"902"})
-    it = client.post("/api/where", json={"catalog_ids": [cid]}).json()["items"][str(cid)]
-    assert it["organic_fallback"] is False and it["reason"] == "unasked"
-
-
-def test_a_saved_conventional_pick_is_a_conflict_not_a_fallback(monkeypatch, stores, organic_on):
-    """Codex review 2026-09-27: with organic on, a saved conventional pick used
-    to be retried without the setting and priced as 'no organic found' — even
-    where the store had an organic product."""
-    cid = add("where yogurt")
-    appmod.conn.execute(
-        "INSERT INTO product_picks(catalog_id, chain, sku, name, brand, pack_size, picked_at) "
-        "VALUES(?, 'wegmans', 'CONV', 'Plain Yogurt', '', '', '2026-09-27')", (cid,))
-    appmod.conn.commit()
-    stub(monkeypatch, {s: {"Plain Yogurt": [rec("Plain Yogurt", 3.0, "$0.10/oz", sku="CONV"),
-                                            rec("Organic Yogurt", 4.0, "$0.13/oz", sku="ORG")]}
-                       for s in ("901", "902")})
-    it = client.post("/api/where", json={"catalog_ids": [cid]}).json()["items"][str(cid)]
-    assert it["organic_fallback"] is False and it["quotes"] == [] and it["reason"] == "conflict"
-
-
-def test_a_fallback_that_could_not_be_asked_says_unasked(monkeypatch, stores, organic_on):
-    """Codex review 2026-09-27: the regular-product pass failing was reported
-    as 'no match' — a claim about the shop, when it was a failure to ask."""
-    cid = add("where flour")
-    calls = []
-
-    async def fake(chain, terms, store, prefer=None, max_age=None, place=True):
-        calls.append(list(terms))
-        if any(t.startswith("organic") for t in terms):
-            return {t: [] for t in terms}, True      # asked: nobody has it organic
-        return {}, False                             # the regular pass fails
-
-    monkeypatch.setattr(lookup_api, "products_many", fake)
-    it = client.post("/api/where", json={"catalog_ids": [cid]}).json()["items"][str(cid)]
-    assert it["reason"] == "unasked" and "unasked" in it["stores"].values()
-
-
-def test_a_brand_already_in_the_name_is_not_repeated(monkeypatch, stores):
-    cid = add("Horizon where cream", brand="horizon")
+def test_the_brand_goes_into_the_search(monkeypatch, stores):
+    cid = add("quillcream", brand="Horizon")
     calls = stub(monkeypatch, {})
     client.post("/api/where", json={"catalog_ids": [cid]})
-    assert any("Horizon where cream" in c["terms"] for c in calls)
-    assert not any(t.lower().startswith("horizon horizon") for c in calls for t in c["terms"])
+    assert any("Horizon quillcream" in c["terms"] for c in calls)
+
+
+def test_a_definitive_answer_without_a_winner_clears_the_old_one(monkeypatch, stores):
+    """Codex review: the picked product went out of stock (conflict) and the
+    stale recommendation stayed in /api/state."""
+    cid = add("quillhoney")
+    stub(monkeypatch, {"901": {"quillhoney": [rec("Quillhoney 12 oz", 4.0, "")]}})
+    ask(cid)
+    stub(monkeypatch, {"901": {"quillhoney": [rec("Quillhoney 12 oz", 4.0, "", available=False)]},
+                       "902": {"quillhoney": []}})
+    ask(cid)
+    item = next(i for i in client.get("/api/state").json()["items"] if i["catalog_id"] == cid)
+    assert item["price"] is None
+
+
+def test_weight_and_volume_stay_apart_except_for_liquids(monkeypatch, stores):
+    cid = add("quillsyrup")                                                  # not a liquid word
+    stub(monkeypatch, {"901": {"quillsyrup": [rec("Quillsyrup 12 oz", 4.0, "")]},
+                       "902": {"quillsyrup": [rec("Quillsyrup 12 fl oz", 3.0, "")]}})
+    it = ask(cid)
+    assert it["dim"] == "weight" and it["cheapest"]["store"] == "Where A"   # the fl oz one is not compared
+    milk = add("quill milk")
+    stub(monkeypatch, {"901": {"quill milk": [rec("Quill Milk 59 oz", 5.0, "")]},
+                       "902": {"quill milk": [rec("Quill Milk 64 fl oz", 6.0, "")]}})
+    it = ask(milk)
+    assert it["comparable"] and {q["store"] for q in it["quotes"]} == {"Where A", "Where B"}
+
+
+def test_a_partial_refresh_does_not_replace_a_complete_answer(monkeypatch, stores):
+    """Codex review: the cheapest store unreachable on refresh let the next one
+    take its place as 'cheapest' with no warning."""
+    cid = add("quillpeas")
+    stub(monkeypatch, {"901": {"quillpeas": [rec("Quillpeas 16 oz", 2.0, "")]},
+                       "902": {"quillpeas": [rec("Quillpeas 16 oz", 5.0, "")]}})
+    ask(cid)
+    stub(monkeypatch, {"902": {"quillpeas": [rec("Quillpeas 16 oz", 5.0, "")]}}, fail={"901"})
+    client.post("/api/where", json={"catalog_ids": [cid]})
+    item = next(i for i in client.get("/api/state").json()["items"] if i["catalog_id"] == cid)
+    assert item["price"]["store"] == "Where A" and item["price"]["partial"] is False
+
+
+def test_a_store_moved_to_another_chain_is_a_new_question(stores):
+    import price_reco
+    cid = add("quillchain")
+    before = price_reco.input_key(appmod.conn, cid)
+    appmod.conn.execute("UPDATE stores SET chain='shoprite' WHERE id=?", (stores["Where A"],))
+    appmod.conn.commit()
+    try:
+        assert price_reco.input_key(appmod.conn, cid) != before
+    finally:
+        appmod.conn.execute("UPDATE stores SET chain='wegmans' WHERE id=?", (stores["Where A"],))
+        appmod.conn.commit()
+
+
+def test_a_winner_its_own_store_contradicts_is_dropped_even_on_a_partial_refresh(monkeypatch, stores):
+    """Codex review: A had been cheapest; A now says its product is gone while
+    B is unreachable — A's old recommendation must not stand."""
+    cid = add("quilllentils")
+    stub(monkeypatch, {"901": {"quilllentils": [rec("Quilllentils 16 oz", 2.0, "")]},
+                       "902": {"quilllentils": [rec("Quilllentils 16 oz", 5.0, "")]}})
+    ask(cid)
+    stub(monkeypatch, {"901": {"quilllentils": [rec("Quilllentils 16 oz", 2.0, "", available=False)]}},
+         fail={"902"})
+    client.post("/api/where", json={"catalog_ids": [cid]})
+    item = next(i for i in client.get("/api/state").json()["items"] if i["catalog_id"] == cid)
+    assert item["price"] is None
+
+
+def test_the_price_age_is_the_fetch_not_the_comparison(monkeypatch, stores):
+    cid = add("quillbarley")
+    old = rec("Quillbarley 16 oz", 2.0, "")
+    old["fetched_at"] = "2026-10-01T00:00:00+00:00"
+    stub(monkeypatch, {"901": {"quillbarley": [old]}})
+    ask(cid)
+    item = next(i for i in client.get("/api/state").json()["items"] if i["catalog_id"] == cid)
+    assert item["price"]["fetched_at"] == "2026-10-01T00:00:00+00:00"
+
+
+def test_found_organic_replaces_a_conventional_stand_in(monkeypatch, stores, organic_on):
+    """Codex review: the stored answer was a regular product (nobody had it
+    organic); A is now unreachable but B has organic — B's organic wins."""
+    cid = add("quillkale", food=True)
+    stub(monkeypatch, {"901": {"organic quillkale": [], "quillkale": [rec("Quillkale 16 oz", 2.0, "")]},
+                       "902": {"organic quillkale": [], "quillkale": [rec("Quillkale 16 oz", 3.0, "")]}})
+    assert ask(cid)["organic_fallback"] is True
+    stub(monkeypatch, {"902": {"organic quillkale": [rec("Organic Quillkale 16 oz", 4.0, "")]}}, fail={"901"})
+    client.post("/api/where", json={"catalog_ids": [cid]})
+    item = next(i for i in client.get("/api/state").json()["items"] if i["catalog_id"] == cid)
+    assert item["price"]["store"] == "Where B" and "Organic" in item["price"]["product"]
+
+
+def test_a_conventional_stand_in_is_kept_until_its_regular_product_is_checked(monkeypatch, stores, organic_on):
+    """Codex review: A's stand-in was dropped when A said 'no organic' while B
+    was unreachable — the regular search never ran, so A never contradicted it."""
+    cid = add("quillchard", food=True)
+    stub(monkeypatch, {"901": {"organic quillchard": [], "quillchard": [rec("Quillchard 16 oz", 2.0, "")]},
+                       "902": {"organic quillchard": [], "quillchard": [rec("Quillchard 16 oz", 3.0, "")]}})
+    assert ask(cid)["organic_fallback"] is True
+    stub(monkeypatch, {"901": {"organic quillchard": []}}, fail={"902"})
+    client.post("/api/where", json={"catalog_ids": [cid]})
+    item = next(i for i in client.get("/api/state").json()["items"] if i["catalog_id"] == cid)
+    assert item["price"] and item["price"]["store"] == "Where A"
+
+
+def test_organic_found_but_unrankable_still_ends_the_stand_in(monkeypatch, stores, organic_on):
+    """Codex review: organic kale sold by the bunch could not be ranked against
+    the stand-in sold by weight, so the conventional recommendation stayed."""
+    cid = add("quillcollard", food=True)
+    stub(monkeypatch, {"901": {"organic quillcollard": [], "quillcollard": [rec("Quillcollard 16 oz", 2.0, "")]},
+                       "902": {"organic quillcollard": [], "quillcollard": [rec("Quillcollard 16 oz", 3.0, "")]}})
+    assert ask(cid)["organic_fallback"] is True
+    stub(monkeypatch, {"901": {"organic quillcollard": [rec("Organic Quillcollard, 1 Bunch", 3.0, "")]},
+                       "902": {"organic quillcollard": []}})
+    client.post("/api/where", json={"catalog_ids": [cid]})
+    item = next(i for i in client.get("/api/state").json()["items"] if i["catalog_id"] == cid)
+    assert item["price"] is None or "Organic" in item["price"]["product"]
+
+
+def test_the_organic_stand_in_warning_survives_into_state(monkeypatch, stores, organic_on):
+    cid = add("quillsorrel", food=True)
+    stub(monkeypatch, {"901": {"organic quillsorrel": [], "quillsorrel": [rec("Quillsorrel 4 oz", 2.0, "")]},
+                       "902": {"organic quillsorrel": [], "quillsorrel": [rec("Quillsorrel 4 oz", 3.0, "")]}})
+    ask(cid)
+    item = next(i for i in client.get("/api/state").json()["items"] if i["catalog_id"] == cid)
+    assert item["price"]["organic_fallback"] is True
+
+
+def test_a_disproved_organic_winner_goes_even_if_its_store_misses_the_regular_search(monkeypatch, stores, organic_on):
+    """Codex review: A's organic winner was disproved by the organic search,
+    then A was unreachable for the regular one — and the disproved answer stayed."""
+    cid = add("quillparsnip", food=True)
+    stub(monkeypatch, {"901": {"organic quillparsnip": [rec("Organic Quillparsnip 16 oz", 2.0, "")]}})
+    ask(cid)
+
+    async def fake(chain, terms, store, max_age=None):
+        if any(t.startswith("organic") for t in terms):
+            return {t: [] for t in terms}, True                       # nobody has it organic now
+        if store == "901":
+            return {}, False                                          # A unreachable for the regular search
+        return {t: [rec("Quillparsnip 16 oz", 3.0, "")] for t in terms}, True
+
+    monkeypatch.setattr(where_api, "price_products_many", fake)
+    client.post("/api/where", json={"catalog_ids": [cid]})
+    item = next(i for i in client.get("/api/state").json()["items"] if i["catalog_id"] == cid)
+    assert item["price"]["store"] == "Where B" and item["price"]["organic_fallback"] is True
+
+
+def test_size_groups_keep_product_numbers_and_word_sizes(monkeypatch, stores):
+    """Codex review: '2%' and '1%' milk grouped as sizes of one product; a
+    half gallon and a gallon of the same milk were not."""
+    cid = add("quillmilk2", buy_qty="1 gal")
+    stub(monkeypatch, {"901": {"quillmilk2": [rec("Quillmilk2, Half Gallon", 4.0, ""),
+                                              rec("Quillmilk2, 1 Gallon", 6.0, "")]},
+                       "902": {"quillmilk2": [rec("Quillmilk2, 1 Gallon", 7.0, "")]}})
+    it = ask(cid)
+    assert it["cheapest"]["store"] == "Where A" and it["cheapest"]["total_label"].endswith("$6.00")
+    pct = add("quill 2% milk")
+    stub(monkeypatch, {"901": {"quill 2% milk": [rec("Quill Milk, 2%, 64 fl oz", 4.0, ""),
+                                                 rec("Quill Milk, 1%, 128 fl oz", 4.0, "")]}})
+    assert [q["product"] for q in ask(pct)["quotes"]] == ["Quill Milk, 2%, 64 fl oz"]
+
+
+def test_pack_counts_are_sizes_of_one_product(monkeypatch, stores):
+    """Codex review: a six-pack and a twelve-pack of the same seltzer were
+    treated as different products, hiding the cheaper way to buy 144 fl oz."""
+    cid = add("quillfizz", buy_qty="144 fl oz")
+    stub(monkeypatch, {"901": {"quillfizz": [rec("Quillfizz, 12 fl oz (Pack of 6)", 6.0, ""),
+                                             rec("Quillfizz, 12 fl oz (Pack of 12)", 9.0, "")]}})
+    it = ask(cid)
+    assert it["cheapest"]["product"] == "Quillfizz, 12 fl oz (Pack of 12)"
+    assert it["cheapest"]["total_label"].endswith("$9.00")
+
+
+def test_another_size_must_still_name_the_item(monkeypatch, stores):
+    """Codex review: 'Large Shrimp' joined 'Jumbo Shrimp' as a size of it."""
+    cid = add("jumbo quillshrimp")
+    stub(monkeypatch, {"901": {"jumbo quillshrimp": [rec("Brand Jumbo Quillshrimp, 1 lb", 12.0, ""),
+                                                     rec("Brand Large Quillshrimp, 1 lb", 8.0, "")]}})
+    assert [q["product"] for q in ask(cid)["quotes"]] == ["Brand Jumbo Quillshrimp, 1 lb"]

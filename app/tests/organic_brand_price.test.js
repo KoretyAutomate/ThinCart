@@ -181,9 +181,13 @@ function openEditor(b, i) {
                { store: "Whole Foods", amount: 6.29, unit_price: "$6.29/count", product: "365 Milk",
                  pack_size: "64 fl oz", exact: true }] },
       "3": { cheapest: null, quotes: [], comparable: false, reason: "unasked" },
+      "4": { cheapest: { store_id: 7, store: "Wegmans", amount: 4, unit_label: "$0.33/oz", product: "Syrup 12 oz",
+                         exact: false, fetched_at: "" }, comparable: true,
+             quotes: [{ store_id: 7, store: "Wegmans", amount: 4, unit_label: "$0.33/oz", product: "Syrup 12 oz" },
+                      { store_id: 8, store: "Whole Foods", amount: 3, product: "Syrup", pack_size: "12 fl oz" }] },
     } };
     const b = boot({ items: [item(1, "milk", { store: "Wegmans", store_source: "history" }), item(2, "bread"),
-                             item(3, "eggs")],
+                             item(3, "eggs"), item(4, "syrup")],
                      queue: [{ op_id: "q3", type: "add", name: "tea", item_id: "n3", actor: "t" }], where });
     await settle();
     b.doc.getElementById("stores-btn").click();
@@ -191,9 +195,9 @@ function openEditor(b, i) {
     await settle(); await settle();
     const req = b.calls.find(c => c.url === "/api/where");
     check("asked for the server's items only (not the queued tea)",
-      req && JSON.stringify(req.body.catalog_ids) === "[1,2,3]", req && req.body);
+      req && JSON.stringify(req.body.catalog_ids) === "[1,2,3,4]", req && req.body);
     const groups = [...b.doc.querySelectorAll("#plan-groups .plangroup")].map(g => g.textContent);
-    const wf = groups.find(g => /Whole Foods/.test(g)) || "";
+    const wf = groups.find(g => g.startsWith("🏬 Whole Foods")) || "";   // the group headed Whole Foods
     check("milk moved to its cheapest store", /milk/.test(wf) && /\$3\.49/.test(wf) && /best match/.test(wf), groups);
     check("and the store left out says why (Codex review 2026-09-28)",
       /⚠ Wegmans: your chosen product no longer matches/.test(wf), wf);
@@ -203,6 +207,8 @@ function openEditor(b, i) {
       /Wegmans \$3\.99 Wegmans Milk 16 oz \$0\.25\/oz \(best match\)/.test(all)
       && /Whole Foods \$6\.29 365 Milk 64 fl oz/.test(all), all);
     check("an unreachable store is named as the reason", /unreachable/.test(all), all);
+    check("a product that cannot be compared is still shown beside the winner (Codex review)",
+      /not comparable: Whole Foods \$3\.00 Syrup 12 fl oz/.test(all), all);
     check("a queued item says it is not synced", /not synced/.test(all), all);
     check("nothing was saved", !b.ops().some(o => o.type === "edit"), b.ops());
     b.doc.getElementById("plan-byprice").click();
@@ -248,7 +254,7 @@ function openEditor(b, i) {
     await settle(); await settle();
     const note = c.doc.getElementById("plan-price-note").textContent;
     const all = [...c.doc.querySelectorAll("#plan-groups .plangroup")].map(g => g.textContent).join("|");
-    check("with 🌱 on, the note says organic", /🌱 Organic/.test(note), note);
+    check("with 🍃 on, the note says organic for food", /🍃 Organic for food/.test(note), note);
     check("an item nobody sells organic says it fell back", /no organic found/.test(all), all);
   }
 
@@ -258,6 +264,10 @@ function openEditor(b, i) {
     const b = boot({ items: [item(1, "milk")], where: null });
     const answers = [];
     b.w.fetch = (url, opts) => {
+      if (String(url).startsWith("/api/state"))     // the post-check resync sees the same list
+        return Promise.resolve({ ok: true, status: 200, json: async () => (
+          { revision: 1, items: [item(1, "milk")], stores: STORES, settings: { organic: false }, picks: {},
+            suggestions: [], away_pending: 0 }) });
       if (String(url) !== "/api/where")
         return Promise.resolve({ ok: true, status: 200, json: async () => ({}), text: async () => "" });
       const n = answers.length;
@@ -376,6 +386,17 @@ function openEditor(b, i) {
     await settle(); await settle();
     check("(b2) a changed pick at another chain re-asks", t.asked.length === before + 1, t.asked);
 
+    // (b3) the server's price question changes with nothing the phone can see
+    t = mk([item(1, "milk", { price_key: "k1" })]);
+    b = boot({ items: t.state.items, fetchImpl: t.fetch });
+    await settle();
+    b.doc.getElementById("stores-btn").click(); b.doc.getElementById("plan-byprice").click();
+    await settle(); await settle();
+    const n0 = t.asked.length;
+    t.push(b, st([item(1, "milk", { price_key: "k2" })]));
+    await settle(); await settle();
+    check("(b3) a new server-side question re-asks", t.asked.length === n0 + 1, t.asked);
+
     // (c) price mode on before any store is linked; linking one asks
     t = mk([item(1, "milk")], []);
     b = boot({ items: t.state.items, stores: [], fetchImpl: t.fetch });
@@ -458,6 +479,148 @@ function openEditor(b, i) {
     await settle(); await settle();
     check("an old one is", n === 2, n);
     b.w.Date.now = realNow;
+  }
+
+  console.log("\n--- 8. price-first where to buy (PLAN.md Phase 8) -------------------");
+  {
+    const price = { store: "Whole Foods", amount: 2.5, product: "Rice 1 lb", unit_label: "$0.16/oz",
+                    total_label: "2 × 1 lb = $5.00", exact: false, computed_at: new Date().toISOString() };
+    const priced = item(1, "rice", { store: "Whole Foods", store_source: "price", price, buy_qty: "2 lb",
+                                     buy_qty_ok: true, history_store: "Wegmans" });
+    const b = boot({ items: [priced] });
+    await settle();
+    const chip = b.rows()[0].querySelector(".stchip");
+    check("the chip says the price chose the store", chip && chip.classList.contains("price")
+      && /💲 Whole Foods/.test(chip.textContent), chip && chip.textContent);
+    openEditor(b, 0); await settle();
+    check("the editor shows how", /2 × 1 lb = \$5\.00/.test(b.doc.getElementById("sheet-price").textContent),
+      b.doc.getElementById("sheet-price").textContent);
+    const opts = [...b.doc.querySelectorAll("#sheet-stores .stopt")].map(o => o.textContent);
+    check("'no pick' reads as the cheapest store", opts[0] === "💲 Cheapest (Whole Foods)", opts);
+    check("the amount field shows what is set", b.doc.getElementById("sheet-buyqty").value === "2 lb");
+    b.doc.getElementById("sheet-buyqty").value = "3 lb";
+    b.doc.getElementById("sheet-save").click();
+    await settle();
+    const edit = b.ops().find(o => o.type === "edit");
+    check("a changed amount is sent", edit && edit.buy_qty === "3 lb", edit);
+    const row = b.rows()[0].textContent;
+    check("and until it syncs the old price is not shown — history stands in",
+      /🏬 Wegmans/.test(row) && !/Whole Foods/.test(row), row);
+
+    // the owner's own pick wins, and the editor shows the cheaper store beside it
+    const c = boot({ items: [item(2, "milk", { store: "Wegmans", store_source: "preferred", price,
+                                                history_store: null })] });
+    await settle();
+    openEditor(c, 0); await settle();
+    check("your pick and the cheapest are both shown",
+      /Cheapest: Whole Foods[^]*you chose Wegmans/.test(c.doc.getElementById("sheet-price").textContent),
+      c.doc.getElementById("sheet-price").textContent);
+    [...c.doc.querySelectorAll("#sheet-stores .stopt")][0].click();    // "use cheapest"
+    c.doc.getElementById("sheet-save").click();
+    await settle();
+    const clear = c.ops().find(o => o.type === "edit");
+    check("choosing the cheapest clears your pick", clear && clear.store === "", clear);
+    check("and the row moves to the cheapest store at once (offline too)",
+      /💲 Whole Foods/.test(c.rows()[0].textContent), c.rows()[0].textContent);
+
+    const e = boot({ items: [item(5, "kale", { store: "Wegmans", store_source: "price",
+      price: { ...price, store: "Wegmans", organic_fallback: true } })] });
+    await settle();
+    openEditor(e, 0); await settle();
+    check("a regular-product stand-in says so in the editor (Codex review)",
+      /no organic found/.test(e.doc.getElementById("sheet-price").textContent),
+      e.doc.getElementById("sheet-price").textContent);
+
+    const d = boot({ items: [item(3, "beans", { buy_qty: "a few", buy_qty_ok: false })] });
+    await settle();
+    openEditor(d, 0); await settle();
+    check("an amount the server could not read is flagged",
+      /Not understood/.test(d.doc.getElementById("sheet-buyqty-warn").textContent));
+  }
+
+  console.log("\n--- 8c. your pick holds with price details showing (Codex review) ---");
+  {
+    const where = { partial: false, items: {
+      "1": { cheapest: { store_id: 8, store: "Whole Foods", amount: 3, unit_label: "$0.05/fl oz", product: "Milk",
+                         exact: false, fetched_at: "" }, quotes: [{}], comparable: true } } };
+    const b = boot({ items: [item(1, "milk", { store: "Wegmans", store_source: "preferred" })], where });
+    await settle();
+    b.doc.getElementById("stores-btn").click();
+    b.doc.getElementById("plan-byprice").click();
+    await settle(); await settle();
+    const groups = [...b.doc.querySelectorAll("#plan-groups .plangroup")].map(g => g.textContent);
+    const weg = groups.find(g => g.startsWith("🏬 Wegmans")) || "";
+    check("the item stays under the store you chose", /milk/.test(weg), groups);
+    check("and the cheaper store is named beside it", /Cheapest: Whole Foods[^]*you chose Wegmans/.test(weg), weg);
+    const f = boot({ items: [item(1, "milk", { store: "Wegmans", store_source: "preferred" })],
+                     where: { partial: false, items: { "1": { ...where.items["1"], organic_fallback: true } } } });
+    await settle();
+    f.doc.getElementById("stores-btn").click();
+    f.doc.getElementById("plan-byprice").click();
+    await settle(); await settle();
+    const fg = [...f.doc.querySelectorAll("#plan-groups .plangroup")].map(g => g.textContent).join("|");
+    check("a regular-product stand-in says so under your pick too (Codex review)", /no organic found/.test(fg), fg);
+  }
+
+  console.log("\n--- 8d. the plan and the chip agree on a partial check (Codex review)");
+  {
+    const price = { store: "Wegmans", amount: 2, product: "Peas", unit_label: "$0.13/oz", total_label: "",
+                    exact: false, computed_at: new Date().toISOString() };
+    const where = { partial: true, items: {
+      "1": { cheapest: { store_id: 8, store: "Whole Foods", amount: 5, unit_label: "$0.31/oz", product: "Peas",
+                         exact: false, fetched_at: "" }, quotes: [{}], comparable: true,
+             stores: { "7": "unasked", "8": "ok" } } } };
+    const b = boot({ items: [item(1, "peas", { store: "Wegmans", store_source: "price", price })], where });
+    await settle();
+    b.doc.getElementById("stores-btn").click();
+    b.doc.getElementById("plan-byprice").click();
+    await settle(); await settle();
+    const groups = [...b.doc.querySelectorAll("#plan-groups .plangroup")].map(g => g.textContent);
+    const weg = groups.find(g => g.startsWith("🏬 Wegmans")) || "";
+    check("grouped where the chip says (the kept answer)", /peas/.test(weg), groups);
+    check("the partial check is shown, labelled, not obeyed", /latest check[^]*Whole Foods/.test(weg), weg);
+  }
+
+  console.log("\n--- 8b. pending 🍃 / pick / amount changes hide the stored price ----");
+  {
+    const price = { store: "Whole Foods", amount: 2.5, product: "Rice 1 lb", unit_label: "$0.16/oz",
+                    total_label: "", exact: false, computed_at: new Date().toISOString() };
+    const mk = () => item(1, "rice", { store: "Whole Foods", store_source: "price", price, history_store: "Wegmans" });
+    for (const [label, op] of [
+      ["a queued 🍃 change", { op_id: "s9", type: "settings", organic: true, actor: "t" }],
+      ["a queued product pick", { op_id: "p9", type: "product_pick", catalog_id: 1, pick_chain: "wegmans",
+                                  pick_sku: "X", pick_name: "x", actor: "t" }],
+      ["a queued amount", { op_id: "q9", type: "edit", item_id: "i1", catalog_id: 1, buy_qty: "2 lb", actor: "t" }],
+    ]) {
+      const b = boot({ items: [mk()], queue: [op] });
+      await settle();
+      const row = b.rows()[0].textContent;
+      check(`${label}: history stands in for the price until it syncs`,
+        /🏬 Wegmans/.test(row) && !/Whole Foods/.test(row), row);
+    }
+    // and the price details view treats an unsynced amount as unsettled
+    const where = { partial: false, items: {} };
+    const b = boot({ items: [mk(), item(2, "tea")], where,
+                     queue: [{ op_id: "q8", type: "edit", item_id: "i1", catalog_id: 1, buy_qty: "3 lb", actor: "t" }] });
+    await settle();
+    b.doc.getElementById("stores-btn").click();
+    b.doc.getElementById("plan-byprice").click();
+    await settle(); await settle();
+    const req = b.calls.find(c => c.url === "/api/where");
+    check("an unsynced amount is not priced on the old one", req && JSON.stringify(req.body.catalog_ids) === "[2]",
+      req && req.body);
+  }
+
+  console.log("\n--- 4i. a price check pulls the saved recommendation (Codex review) -");
+  {
+    const b = boot({ items: [item(1, "milk")], where: { partial: false, items: {} } });
+    await settle();
+    const before = b.calls.filter(c => c.url.startsWith("/api/state")).length;
+    b.doc.getElementById("stores-btn").click();
+    b.doc.getElementById("plan-byprice").click();
+    await settle(); await settle();
+    const after = b.calls.filter(c => c.url.startsWith("/api/state")).length;
+    check("the list is re-fetched after the check, socket or not", after > before, [before, after]);
   }
 
   console.log("\n--- 5. no priced store: say what to do ------------------------------");
