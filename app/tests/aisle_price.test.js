@@ -148,10 +148,10 @@ const AISLES_OK = {
     check("the looked-up item is in its aisle", g.includes("Aisle 2"), g);
     check("the unasked item is NOT called unknown", g.includes("Not looked up"), g);
     check("the genuinely unknown item is", g.includes("Aisle unknown"), g);
-    // the owner's call, 2026-10-04: unknown goes on TOP, folded, not at the tail
-    check("unknown and never-asked are folded at the top",
+    // the owner's call, 2026-10-04: unknown goes on TOP, not at the tail (open by default)
+    check("unknown and never-asked are on top, open",
       g.indexOf("Aisle unknown") < g.indexOf("Aisle 2") && g.indexOf("Not looked up") < g.indexOf("Aisle 2")
-      && /▸ 🤷 Aisle unknown/.test(g), g);
+      && /▾ 🤷 Aisle unknown/.test(g), g);
     check("and it says a lookup fell short", /could not be looked up/i.test(b.note()), b.note());
   }
 

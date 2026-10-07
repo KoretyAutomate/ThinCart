@@ -2785,3 +2785,5 @@ Decision:
 - Those top groups are folded by default (a short line with a count); tapping
   the heading opens/folds it, remembered per phone. Nothing here is sent to the
   server — it is this phone's view only.
+
+- 2026-10-07 (owner): the top groups start OPEN; tapping a heading folds it (remembered per phone).

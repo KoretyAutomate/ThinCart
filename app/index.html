@@ -2937,7 +2937,7 @@ function groupOf(it) {
 /* 📍 "this store only" and the folded groups (the owner's ask, 2026-10-04).
  * Both are this phone's view only — nothing is sent. 📍 is meaningful only
  * while "I'm at" a store, so it switches off with it. */
-const HERE_KEY = 'pc_here', FOLD_KEY = 'pc_folded';
+const HERE_KEY = 'pc_here', FOLD_KEY = 'pc_folds'  // renamed 2026-10-07: older saves assumed folded-by-default;
 const NOSTORE_GROUP = () => ({ key: 'zzx-nostore', label: T().unassigned, approx: false, rank: [-2], fold: true });
 function hereStore() {
   let on = false;
@@ -2949,8 +2949,9 @@ function foldedGroups() {
     const v = JSON.parse(localStorage.getItem(FOLD_KEY) || 'null');
     if (Array.isArray(v)) return new Set(v);
   } catch (e) { /* none saved */ }
-  // folded until opened: the point of putting them on top is a short line
-  return new Set(['zzx-nostore', 'zzy-unasked', 'zzz-unknown']);
+  // open until folded: nothing to buy is out of sight unless you chose so
+  // (the owner's call, 2026-10-07)
+  return new Set();
 }
 function toggleFold(key) {
   const f = foldedGroups();

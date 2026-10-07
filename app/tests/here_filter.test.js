@@ -6,7 +6,8 @@
  * - 📍 appears only while "I'm at" a store. On, the list keeps what to buy
  *   THERE, hides items for other stores (and says how many), and folds the
  *   items with no store yet into one group at the top.
- * - In aisle order, "Aisle unknown" / "Not looked up" are on top and folded;
+ * - In aisle order, "Aisle unknown" / "Not looked up" are on top. All top
+ *   groups start OPEN (owner, 2026-10-07);
  *   tapping a heading opens or folds it, and the choice is remembered.
  *
  * Run: cd app && npm install && npm test
@@ -46,6 +47,8 @@ function boot({ items, at = null, view = "cat", here = false, aisles = null, pla
   w.localStorage.setItem("pc_view", view);
   if (at) w.localStorage.setItem("pc_at", JSON.stringify({ name: at, at: Date.now() }));
   if (here) w.localStorage.setItem("pc_here", "1");
+  // a save from the folded-by-default days must not keep groups folded
+  w.localStorage.setItem("pc_folded", JSON.stringify(["zzx-nostore", "zzy-unasked", "zzz-unknown"]));
   w.fetch = (url) => {
     const u = String(url);
     if (u.startsWith("/api/state")) return Promise.resolve({ ok: true, status: 200, json: async () => state });
@@ -103,16 +106,16 @@ function boot({ items, at = null, view = "cat", here = false, aisles = null, pla
     check("items for another store are hidden, and it says so",
       !b.rows().some(r => r.endsWith("milk")) && /ShopRite/.test(b.note()) && /1/.test(b.note()), [b.rows(), b.note()]);
     const g = b.groups();
-    check("no-store items are one folded group at the top, with their count",
-      /^▸ 🛒 Anywhere/.test(g[0]) && g[0].endsWith("2"), g);
-    check("folded: its items are not drawn", b.rows().map(r => r.split(" ").pop()).join(",") === "rice,salt", b.rows());
+    check("no-store items are one OPEN group at the top, with their count",
+      /^▾ 🛒 Anywhere/.test(g[0]) && g[0].endsWith("2")
+      && b.rows().map(r => r.split(" ").pop()).join(",") === "tofu,kale,rice,salt", [g, b.rows()]);
     b.doc.querySelector("#list .cat.fold").click();
     await drain();
-    check("tapping the heading opens it, on top",
-      /^▾/.test(b.groups()[0]) && b.rows().map(r => r.split(" ").pop()).join(",") === "tofu,kale,rice,salt",
+    check("tapping the heading folds it: its items are not drawn",
+      /^▸/.test(b.groups()[0]) && b.rows().map(r => r.split(" ").pop()).join(",") === "rice,salt",
       [b.groups(), b.rows()]);
-    check("the open/folded choice is remembered",
-      JSON.parse(b.w.localStorage.getItem("pc_folded")).indexOf("zzx-nostore") === -1);
+    check("the folded choice is remembered",
+      JSON.parse(b.w.localStorage.getItem("pc_folds")).indexOf("zzx-nostore") !== -1);
     b.btn().click();
     await drain();
     check("📍 off again: everything back, no note", b.rows().length === 5 && b.note() === "", b.note());
@@ -133,13 +136,14 @@ function boot({ items, at = null, view = "cat", here = false, aisles = null, pla
     } });
     for (let i = 0; i < 4; i++) await drain();
     const g = b.groups();
-    check("unknown and not-looked-up come before the aisles, folded",
-      g.length === 3 && /^▸ 🤷 Aisle unknown/.test(g[0]) && /^▸ ⏳/.test(g[1]) && g[2] === "Aisle 2", g);
-    check("only the aisle's item is drawn", b.rows().map(r => r.split(" ").pop()).join(",") === "bread", b.rows());
+    check("unknown and not-looked-up come before the aisles, open",
+      g.length === 3 && /^▾ 🤷 Aisle unknown/.test(g[0]) && /^▾ ⏳/.test(g[1]) && g[2] === "Aisle 2", g);
+    check("every item is drawn, unknown first",
+      b.rows().map(r => r.split(" ").pop()).join(",") === "milk,rice,bread", b.rows());
     b.doc.querySelectorAll("#list .cat.fold")[0].click();
     await drain();
-    check("opening unknown shows its item first",
-      b.rows().map(r => r.split(" ").pop()).join(",") === "milk,bread", b.rows());
+    check("folding unknown hides only its item",
+      b.rows().map(r => r.split(" ").pop()).join(",") === "rice,bread", b.rows());
   }
 
   console.log(`\n================ ${passed} passed, ${failed} failed ================`);
