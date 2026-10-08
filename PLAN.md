@@ -2787,3 +2787,26 @@ Decision:
   server — it is this phone's view only.
 
 - 2026-10-07 (owner): the top groups start OPEN; tapping a heading folds it (remembered per phone).
+
+## 2026-10-07 — iPhone for the owner's wife (decision: home-screen web app)
+
+The owner asked for iOS and Android compatibility. Options put to them: the
+existing home-screen web app (free, no Mac) or a native Capacitor iOS shell
+(TestFlight; needs a Mac for Xcode and a $99/yr Apple Developer account, and
+cannot be built or tested from the Linux DGX). **Chosen: home-screen web app.**
+The calendar read stays Android-only; travel days are household-wide, so it
+covers both phones.
+
+Audit of `app/index.html` for iOS Safari (no WebKit on the build box — Playwright
+WebKit needs `sudo playwright install-deps` — so static and jsdom checks only,
+and a real-phone check is the owner's step):
+- No regex lookbehind or other syntax newer than iOS 13: the page parses on old iPhones.
+- **Fixed:** `black-translucent` status bar drew the page under the status bar,
+  hiding the clock and every full-screen panel's ✕ button; now opaque `black`.
+- **Fixed:** `#qty` was 14px, which zooms the page on focus; now 16px.
+- **Fixed:** long press on a list row could raise the iOS callout; `-webkit-touch-callout:none`.
+- **Fixed:** the location-denied help said "Android → Settings"; it now names the
+  iPhone path on an iPhone or iPad (EN and JA).
+- **Added:** `apple-mobile-web-app-title`.
+- Already fine: opaque icons (iOS fills transparency with black), queue flushing
+  in the page (no Background Sync), reconnect on `visibilitychange` / `pageshow`.

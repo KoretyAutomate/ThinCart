@@ -5,7 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <meta name="theme-color" content="#2f6f4f">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<!-- "black" (opaque), not "black-translucent": translucent draws the page UNDER the
+     iPhone status bar, hiding the clock and every full-screen panel's ✕ close
+     button behind it. Opaque keeps the page below the bar, no insets to get right. -->
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="ThinCart">
 <link rel="manifest" href="/manifest.json">
 <link rel="apple-touch-icon" href="/icon-192.png">
 <title>ThinCart</title>
@@ -64,7 +68,7 @@
     border-radius:10px; outline:none; min-width:0;
   }
   #name:focus { border-color:var(--green); }
-  #qty { width:74px; font-size:.9rem; padding:10px 8px; border:1.5px solid #d4dcd4; border-radius:10px; outline:none; }
+  #qty { width:74px; font-size:1rem;   /* 16px: smaller makes iOS zoom the page on focus */ padding:10px 8px; border:1.5px solid #d4dcd4; border-radius:10px; outline:none; }
   button.add-btn {
     background:var(--green); color:#fff; border:none; border-radius:10px;
     font-size:1.3rem; width:46px; flex-shrink:0; cursor:pointer;
@@ -102,6 +106,7 @@
   li.item {
     position:relative; overflow:hidden; border-radius:12px; margin-bottom:8px;
     box-shadow:0 1px 2px #0000000a; user-select:none; -webkit-user-select:none;
+    -webkit-touch-callout:none;           /* iOS: no copy/share callout on a long press */
     cursor:pointer; touch-action:pan-y;   /* vertical scroll native, horizontal = swipe */
   }
   li.item .under {
@@ -857,6 +862,7 @@ const STR = {
     gps_test:'📍 Check what the phone can see',
     gps_reading:'Reading…',
     gps_denied:'Location refused, or unavailable. Android → Settings → Apps → ThinCart → Permissions → Location.',
+    gps_denied_ios:'Location refused, or unavailable. iPhone → Settings → Privacy & Security → Location Services → Safari Websites (or ThinCart) → While Using the App.',
     gps_none:'No pinned store has coordinates yet, so nothing can be matched.',
     gps_far:(n,km)=>`Read your position. Nearest pinned store: ${n}, ${km} km away — too far to offer (within 300 m it asks).`,
     gps_near:(n,m)=>`Read your position. ${n} is ${m} m away — you'd be asked about this one.`,
@@ -1008,6 +1014,7 @@ const STR = {
     gps_test:'📍 現在地が読めるか確認',
     gps_reading:'取得中…',
     gps_denied:'位置情報が拒否されたか、取得できません。Android の設定 → アプリ → ThinCart → 権限 → 位置情報 を確認してください。',
+    gps_denied_ios:'位置情報が拒否されたか、取得できません。iPhone の設定 → プライバシーとセキュリティ → 位置情報サービス → Safari Webサイト（または ThinCart）→「App の使用中のみ許可」を確認してください。',
     gps_none:'座標を持つ登録店舗がまだありません。照合できません。',
     gps_far:(n,km)=>`現在地を取得しました。最寄りの登録店舗は ${n}（${km} km）— 遠いので提案しません（300 m 以内で確認します）。`,
     gps_near:(n,m)=>`現在地を取得しました。${n} まで ${m} m — この店舗について確認が出ます。`,
@@ -1577,7 +1584,8 @@ $('set-btn').onclick = () => {
  * by naming the nearest pinned store and how far away it is. */
 $('gps-test').onclick = () => {
   const out = $('gps-out');
-  if (!navigator.geolocation) { out.textContent = T().gps_denied; return; }
+  const denied = () => IS_IOS() ? T().gps_denied_ios : T().gps_denied;
+  if (!navigator.geolocation) { out.textContent = denied(); return; }
   out.textContent = T().gps_reading;
   navigator.geolocation.getCurrentPosition(pos => {
     const pinned = (base.stores || []).filter(s => s.lat != null && s.lon != null);
@@ -1590,7 +1598,7 @@ $('gps-test').onclick = () => {
     out.textContent = bestKm <= GPS_RADIUS_KM
       ? T().gps_near(best.name, Math.round(bestKm * 1000))
       : T().gps_far(best.name, bestKm.toFixed(1));
-  }, () => { out.textContent = T().gps_denied; },
+  }, () => { out.textContent = denied(); },
   { timeout: 10000, maximumAge: 0 });
 };
 $('set-close').onclick = () => $('set-panel').style.display = 'none';
@@ -3004,6 +3012,9 @@ const setCurrentStore = name => name
  * set silently, because a wrong "I'm at" stamps every check-off with the
  * wrong shop and re-sorts the list for the wrong aisles. "Not here" is
  * remembered for the session so the question is asked once, not per render. */
+// iPadOS Safari reports itself as a Mac, with a touch screen
+const IS_IOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent)
+  || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const GPS_DISMISS = 'pc_gps_no', GPS_RADIUS_KM = 0.3;
 function kmBetween(lat1, lon1, lat2, lon2) {
   const r = Math.PI / 180, dp = (lat2 - lat1) * r, dl = (lon2 - lon1) * r;

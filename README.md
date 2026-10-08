@@ -98,9 +98,24 @@ Shell tests: `cd mobile && npm install && npm test`.
 1. ~~Enable Tailscale Serve + HTTPS~~ **done 2026-07-03**:
    `https://spark-d28c.<your-tailnet>.ts.net` → proxy `100.112.171.54:8123`
    (disable with `tailscale serve --https=443 off`).
-2. **Wife's iPhone**: install Tailscale from the App Store, sign in (invite her
-   or share your account), then open https://spark-d28c.<your-tailnet>.ts.net
-   **in Safari** → Share → *Add to Home Screen*. (The Pixel uses the sideloaded
+2. **Wife's iPhone** (no App Store build, no Mac, no fee — the same web app the
+   Pixel's shell wraps):
+   1. Install **Tailscale** from the App Store and sign in. Invite her from the
+      Tailscale admin console (Users → Invite) or share a node; her phone must
+      show as connected before the page loads.
+   2. Open https://spark-d28c.<your-tailnet>.ts.net **in Safari** (not inside
+      another app's browser) → Share → *Add to Home Screen* → Add.
+   3. Open ThinCart from the new home-screen icon and type her name when asked.
+      Her list is the same list; edits sync both ways.
+   4. If the "📍 are you at …?" guess does nothing, allow location: iPhone
+      Settings → Privacy & Security → Location Services → Safari Websites.
+   Keep Tailscale switched on, as on the Pixel. iOS has no Background Sync and
+   drops the live connection when the app is backgrounded; the page reconnects
+   and sends anything queued the moment it is reopened (`wake()` in
+   `app/index.html`). **Not on iPhone:** the calendar read (travel days) — it
+   is native Android code. Travel days are household-wide, so the Pixel's
+   calendar already covers both of you. The server pushes no notifications, so
+   there is nothing that needs the native app. (The Pixel uses the sideloaded
    app instead — see *Install as an app* above.)
 3. **Allow calendar access on the Pixel** (for travel-aware cycles — see below).
 
