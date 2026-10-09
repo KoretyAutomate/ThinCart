@@ -2810,3 +2810,16 @@ and a real-phone check is the owner's step):
 - **Added:** `apple-mobile-web-app-title`.
 - Already fine: opaque icons (iOS fills transparency with black), queue flushing
   in the page (no Background Sync), reconnect on `visibilitychange` / `pageshow`.
+
+## 2026-10-09 — a dropdown tap must not open Purchase cycles; the tray folds
+
+Owner: tapping the first add-item option added it but also opened the
+suggestions panel; make that field collapsible. Cause: the first dropdown row
+sits exactly over the tray label (y 113–158 vs 128–142 on a Pixel 7 emulation).
+The row acts on pointerdown and removes the dropdown; the click the same finger
+still produces lands on the label, which opened Purchase cycles. (It was
+untraceable on the earlier emulation because the test data had no suggestions,
+so the tray was hidden.) Fix: the click that follows a dropdown tap is swallowed
+(capture phase; any new press cancels the guard). The tray label now FOLDS the
+chips (remembered per phone, `pc_tray_folded`); the full panel opens from a
+separate "All ›" button and the "+N more" chip.
