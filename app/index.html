@@ -364,8 +364,13 @@
   #ideas .status { text-align:center; color:var(--muted); margin:40px 12px; font-size:.92rem; }
   #ideas .topbtn { background:#ffffff2b; border:none; color:#fff; font-size:.8rem;
     font-weight:700; padding:5px 12px; border-radius:999px; cursor:pointer; }
-  #tray .tray-label { cursor:pointer; }
-  #tray .tray-label::after { content:' ▸'; color:var(--green); }
+  #tray .tray-head { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+  #tray .tray-label { cursor:pointer; flex:1; margin:0 6px; }
+  #tray .tray-label::after { content:' ▾'; color:var(--green); }
+  #tray.collapsed .tray-label::after { content:' ▸'; }
+  #tray.collapsed #chips { display:none; }
+  #tray-all { border:none; background:none; color:var(--green-dark); font:inherit;
+    font-size:.78rem; font-weight:700; cursor:pointer; padding:4px 8px; }
   .chip.more { background:#eef1ec; border-style:solid; border-color:#d4dcd4; color:var(--muted); }
   #cyc { position:fixed; inset:0; background:var(--bg); z-index:35; display:none;
          flex-direction:column; }
@@ -484,7 +489,10 @@
 </div>
 
 <div id="tray">
-  <div class="tray-label" id="tray-label" role="button"></div>
+  <div class="tray-head">
+    <div class="tray-label" id="tray-label" role="button" aria-expanded="true"></div>
+    <button id="tray-all" type="button"></button>
+  </div>
   <div id="chips"></div>
 </div>
 
@@ -741,7 +749,7 @@ const CATS = {  // category → [emoji, JA label, EN label]
 };
 const STR = {
   en: {
-    add_ph:'Add item… (milk, eggs, apples …)', qty_ph:'qty', tray:'Suggested — probably due',
+    add_ph:'Add item… (milk, eggs, apples …)', qty_ph:'qty', tray:'Suggested — probably due', tray_all:'All ›',
     empty:'List is empty — nice work 🎉', uncat:'📦 Uncategorized',
     sheet_broken:'Could not load this item — tell Claude what ⚙️ says.',
     sheet_name:'Name', sheet_qty:'Quantity', sheet_cat:'Category', sheet_save:'Save changes',
@@ -894,7 +902,7 @@ const STR = {
     stores_note:'Long-press an item to pin its store, or pick “I’m at…” while shopping — check-offs then remember where things were bought and the plan fills itself in.',
   },
   ja: {
-    add_ph:'追加… (牛乳, 卵, りんご など)', qty_ph:'数量', tray:'提案 — そろそろ買い時',
+    add_ph:'追加… (牛乳, 卵, りんご など)', qty_ph:'数量', tray:'提案 — そろそろ買い時', tray_all:'すべて ›',
     empty:'リストは空です 🎉', uncat:'📦 未分類',
     sheet_broken:'この品目を読み込めませんでした — ⚙️ の内容をお知らせください。',
     sheet_name:'名前', sheet_qty:'数量', sheet_cat:'カテゴリー', sheet_save:'変更を保存',
@@ -1065,6 +1073,7 @@ function applyLang() {
   $('lang').textContent = lang === 'en' ? '🌐 EN' : '🌐 日本語';
   $('name').placeholder = T().add_ph;   $('qty').placeholder = T().qty_ph;
   $('tray-label').textContent = T().tray;
+  $('tray-all').textContent = T().tray_all;
   $('empty').textContent = T().empty;
   $('sheet-name-label').textContent = T().sheet_name;
   $('sheet-qty-label').textContent = T().sheet_qty;
@@ -1259,7 +1268,25 @@ const evidence = c =>
   T().tier_evidence(c.events, c.spread === null ? '—' : c.spread)
   + (c.trusted ? '' : ' · ' + T().tier_shaky);
 
-$('tray-label').onclick = e => { gtrace('tray-label:' + e.type); openCycles(); };
+/* The label FOLDS the chips (remembered per phone); the full panel opens only
+ * from "All ›" and the "+N more" chip. The label used to open the panel, and it
+ * sits directly under the add-item dropdown — a tap on a dropdown row landed on
+ * it and opened Purchase cycles uninvited. */
+const TRAY_KEY = 'pc_tray_folded';
+function applyTrayFold() {
+  let folded = false;
+  try { folded = localStorage.getItem(TRAY_KEY) === '1'; } catch (e) { /* this view only */ }
+  $('tray').classList.toggle('collapsed', folded);
+  $('tray-label').setAttribute('aria-expanded', String(!folded));
+}
+$('tray-label').onclick = e => {
+  gtrace('tray-label:' + e.type);
+  const folded = !$('tray').classList.contains('collapsed');
+  try { localStorage.setItem(TRAY_KEY, folded ? '1' : '0'); } catch (err) { /* this view only */ }
+  applyTrayFold();
+};
+$('tray-all').onclick = e => { gtrace('tray-all:' + e.type); openCycles(); };
+applyTrayFold();
 $('cyc-close').onclick = () => $('cyc').style.display = 'none';
 
 /* Opened by the tray label and the "+N more" chip only. The owner saw it open
@@ -3102,6 +3129,21 @@ function candRank(keys, q) {
   return rank;
 }
 
+/* A tap on a dropdown row acts on pointerdown and removes the dropdown. The click
+ * the same finger still produces is then delivered to whatever lies UNDER the
+ * row — the suggestions tray, whose label sat exactly beneath the first option.
+ * So the click that follows a dropdown tap is swallowed (capture phase, nothing
+ * else sees it). Any new press cancels the guard, so a real tap is never eaten. */
+let swallowClickUntil = 0;
+const swallowNextClick = () => { swallowClickUntil = Date.now() + 700; };
+document.addEventListener('pointerdown', e => {
+  if (!e.target.closest || !e.target.closest('.cand')) swallowClickUntil = 0;
+}, true);
+document.addEventListener('click', e => {
+  if (Date.now() < swallowClickUntil) { e.preventDefault(); e.stopPropagation(); }
+  swallowClickUntil = 0;
+}, true);
+
 function renderCands() {
   const q = fold($('name').value);
   const box = $('cands');
@@ -3158,6 +3200,7 @@ function renderCands() {
       : (c.category ? (CATS[c.category] || CATS.other)[lang==='ja'?1:2] : '');
     div.addEventListener('pointerdown', e => {
       e.preventDefault();                        // fires before blur → keyboard stays
+      swallowNextClick();                        // the dropdown is about to vanish
       const qty = $('qty').value.trim();
       hideCands();
       if (on) {          // already on the list → open the editor instead of re-adding
