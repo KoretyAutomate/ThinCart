@@ -2829,3 +2829,25 @@ Left alone as genuine synonyms: ピーマン (bell/green pepper), 卵 (egg), ヨ
 as borderline, 海苔 (seaweed), パン粉 (breadcrumbs), オートミール (oats), コンソメ
 (bouillon). The enrichment guard (`_english_mismatch`) already keeps a typed
 "paprika"/"radish" from being folded back; tests pin that.
+
+## 2026-10-09 — the edit sheet shows the name the list shows
+
+Owner: with English selected, ✎ Edit shows the name in Japanese. The sheet filled
+its Name box from `it.name` (the stored catalog name, Japanese for seeded rows)
+while the row and the sheet title use `disp(it)`. The box now holds the displayed
+name, and Save compares against that, so an untouched name sends no rename (the
+server's rename path is unchanged; renaming through an alias is still refused
+with `rename_skipped`).
+
+## 2026-10-09 — a dropdown tap must not open Purchase cycles; the tray folds
+
+Owner: tapping the first add-item option added it but also opened the
+suggestions panel; make that field collapsible. Cause: the first dropdown row
+sits exactly over the tray label (y 113–158 vs 128–142 on a Pixel 7 emulation).
+The row acts on pointerdown and removes the dropdown; the click the same finger
+still produces lands on the label, which opened Purchase cycles. (It was
+untraceable on the earlier emulation because the test data had no suggestions,
+so the tray was hidden.) Fix: the click that follows a dropdown tap is swallowed
+(capture phase; any new press cancels the guard). The tray label now FOLDS the
+chips (remembered per phone, `pc_tray_folded`); the full panel opens from a
+separate "All ›" button and the "+N more" chip.
