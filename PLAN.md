@@ -2811,6 +2811,25 @@ and a real-phone check is the owner's step):
 - Already fine: opaque icons (iOS fills transparency with black), queue flushing
   in the page (no Background Sync), reconnect on `visibilitychange` / `pageshow`.
 
+## 2026-10-09 — English names that are another product (red bell pepper ≠ paprika)
+
+Owner: "red bell pepper" is changed to "paprika"; check for the same elsewhere.
+Cause: seed_catalog (and older LLM merges, from before the macaroni guard) gave
+Japanese rows an English alias that is another product at a US store. `パプリカ`
+carried "paprika" (Japanese usage; in English the spice), so "red bell pepper"
+resolved onto it and displayed as the first English alias, "paprika".
+Scan of every live row with 2+ English names found the same flaw on 大根
+("radish"), 長ねぎ ("leek"), みかん ("orange"), かぼちゃ ("pumpkin"; kabocha is its
+own squash) and シリアル ("granola"). `server/repair_aliases.py` drops exactly
+those (dry run by default; `--apply` backs up first; idempotent) and
+`seed_catalog.py` no longer carries them, so `seed()` cannot restore them.
+Applied to the live DB 2026-10-09 (backup `thincart.pre-aliases-20261009T222156Z.db`).
+Left alone as genuine synonyms: ピーマン (bell/green pepper), 卵 (egg), ヨーグルト
+(yoghurt), マヨネーズ (mayo), エリンギ (king oyster), トイレットペーパー, 食器用洗剤; and,
+as borderline, 海苔 (seaweed), パン粉 (breadcrumbs), オートミール (oats), コンソメ
+(bouillon). The enrichment guard (`_english_mismatch`) already keeps a typed
+"paprika"/"radish" from being folded back; tests pin that.
+
 ## 2026-10-09 — the edit sheet shows the name the list shows
 
 Owner: with English selected, ✎ Edit shows the name in Japanese. The sheet filled
