@@ -2811,6 +2811,15 @@ and a real-phone check is the owner's step):
 - Already fine: opaque icons (iOS fills transparency with black), queue flushing
   in the page (no Background Sync), reconnect on `visibilitychange` / `pageshow`.
 
+## 2026-10-09 — the edit sheet shows the name the list shows
+
+Owner: with English selected, ✎ Edit shows the name in Japanese. The sheet filled
+its Name box from `it.name` (the stored catalog name, Japanese for seeded rows)
+while the row and the sheet title use `disp(it)`. The box now holds the displayed
+name, and Save compares against that, so an untouched name sends no rename (the
+server's rename path is unchanged; renaming through an alias is still refused
+with `rename_skipped`).
+
 ## 2026-10-09 — a dropdown tap must not open Purchase cycles; the tray folds
 
 Owner: tapping the first add-item option added it but also opened the
