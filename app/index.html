@@ -2710,12 +2710,16 @@ function openSheet(it) {
 
 function fillSheet(it) {
   clearAddRowOnSave = false;
-  editState = { it, category: it.category || 'other',
+  // The name shown is the one the list shows: English mode with an English name
+  // shows that, not the stored Japanese one. Saving compares against THIS, so an
+  // untouched name sends no rename.
+  const shownName = disp(it) || '';
+  editState = { it, shownName, category: it.category || 'other',
                 // only an EXPLICIT preference preselects — a history-derived
                 // recommendation must not silently become a pin on Save
                 store: it.store_source === 'preferred' ? it.store : '' };
   $('sheet-title').textContent = disp(it);
-  $('sheet-name').value = it.name || '';
+  $('sheet-name').value = shownName;
   $('sheet-qty').value = it.qty_note || '';
   $('sheet-note-input').value = it.note || '';
   $('sheet-budget').value = it.budget == null ? '' : String(it.budget);
@@ -2758,7 +2762,7 @@ function saveSheet() {
   const fields = { type:'edit', item_id: it.id };
   if (it.catalog_id) fields.catalog_id = it.catalog_id;
   let changed = false;
-  if (name && name !== it.name)                    { fields.name = name;                 changed = true; }
+  if (name && name !== editState.shownName)        { fields.name = name;                 changed = true; }
   if (qty !== (it.qty_note || ''))                 { fields.qty_note = qty;              changed = true; }
   if (editState.category !== (it.category || 'other')) { fields.category = editState.category; changed = true; }
   if (note !== (it.note || ''))                    { fields.note = note;                 changed = true; }
