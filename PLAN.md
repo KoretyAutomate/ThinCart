@@ -2862,3 +2862,11 @@ else the first asked. The state's `price.also` lists the rest; the list row and
 the edit sheet say "also X", the where-to-buy line says "Same price at A = B",
 and 📍 keeps an item (when its store came from price, never from the owner's own
 pick) on the list at every tied store.
+
+## A history store is not a preference (2026-10-10)
+
+The owner set no store for "air chilled chicken drumpsticks" yet saw `🏬 Wegmans`
+on the row: that was the store it was bought at before (history), drawn in the
+same 🏬 style as an explicit pick. The row now reads `🕘 Wegmans (usual)` and the
+editor's no-preference button reads "no preference · usually Wegmans", so a
+store the owner never chose cannot pass for one they did.

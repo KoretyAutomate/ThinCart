@@ -505,7 +505,7 @@ function openEditor(b, i) {
     check("a changed amount is sent", edit && edit.buy_qty === "3 lb", edit);
     const row = b.rows()[0].textContent;
     check("and until it syncs the old price is not shown — history stands in",
-      /🏬 Wegmans/.test(row) && !/Whole Foods/.test(row), row);
+      /🕘 Wegmans/.test(row) && !/Whole Foods/.test(row), row);
 
     // the owner's own pick wins, and the editor shows the cheaper store beside it
     const c = boot({ items: [item(2, "milk", { store: "Wegmans", store_source: "preferred", price,
@@ -596,7 +596,7 @@ function openEditor(b, i) {
       await settle();
       const row = b.rows()[0].textContent;
       check(`${label}: history stands in for the price until it syncs`,
-        /🏬 Wegmans/.test(row) && !/Whole Foods/.test(row), row);
+        /🕘 Wegmans/.test(row) && !/Whole Foods/.test(row), row);
     }
     // and the price details view treats an unsynced amount as unsettled
     const where = { partial: false, items: {} };

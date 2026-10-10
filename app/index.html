@@ -826,7 +826,7 @@ const STR = {
     why_uncomparable:'different sizes/units — not ranked',
     best_match:'best match', not_synced:'not synced yet', not_compared:'not comparable',
     store_none:'no preference', new_store_inline:'new store…',
-    store_cheapest:s=>`💲 Cheapest (${s})`,
+    store_cheapest:s=>`💲 Cheapest (${s})`, store_usual:s=>`no preference · usually ${s}`,
     buyqty_label:'How much I want', buyqty_ph:'e.g. 2 lb, 6 rolls, 1 gal — empty = any size',
     buyqty_bad:'Not understood — try "2 lb", "6 rolls", "1 gal" or "12". Prices compare per unit meanwhile.',
     price_partial:' (not every store could be checked)',
@@ -980,7 +980,7 @@ const STR = {
     why_uncomparable:'サイズ・単位が違うため順位なし',
     best_match:'近い商品', not_synced:'未同期', not_compared:'比較不可',
     store_none:'指定なし', new_store_inline:'新しい店…',
-    store_cheapest:s=>`💲 最安（${s}）`,
+    store_cheapest:s=>`💲 最安（${s}）`, store_usual:s=>`指定なし・いつもは${s}`,
     buyqty_label:'買いたい量', buyqty_ph:'例: 2 lb、6 rolls、1 gal — 空欄 = サイズ問わず',
     buyqty_bad:'読み取れません — 「2 lb」「6 rolls」「1 gal」「12」のように入力してください。それまでは単価で比較します。',
     price_partial:'（一部の店は未確認）',
@@ -2311,7 +2311,10 @@ function render() {
         const sc = document.createElement('span');
         sc.className = 'stchip' + (it.store_source === 'history' ? ' hist' : it.store_source === 'price' ? ' price' : '');
         const tiedNames = it.store_source === 'price' && it.price ? it.price.also || [] : [];
-        sc.textContent = (it.store_source === 'price' ? '💲 ' : '🏬 ') + [it.store, ...tiedNames].join(' = ');
+        // a store from purchase history is where you USUALLY buy it, not a pick:
+        // it must not read like one (owner, 2026-10-10)
+        sc.textContent = it.store_source === 'history' ? `🕘 ${it.store} ${T().src_hist}`
+          : (it.store_source === 'price' ? '💲 ' : '🏬 ') + [it.store, ...tiedNames].join(' = ');
         sub.appendChild(sc);
       }
       if (it.brand) {
@@ -2495,7 +2498,8 @@ function renderStoreOpts() {
   };
   // no pick = the price decides; say which store that is when one is known
   const pr = editState.it.price;
-  mk(pr ? T().store_cheapest(pr.store) : T().store_none, '');
+  const usual = editState.it.history_store;
+  mk(pr ? T().store_cheapest(pr.store) : usual ? T().store_usual(usual) : T().store_none, '');
   names.forEach(n => mk('🏬 ' + n, n));
   const inp = document.createElement('input');
   inp.id = 'sheet-newstore'; inp.placeholder = '＋ ' + T().new_store_inline;

@@ -66,6 +66,16 @@ function boot(items, at) {
     /Same price at ShopRite = Wegmans/.test(d.w.__line) && !/unreachable/i.test(d.w.__line), d.w.__line);
   const chip = [...b.doc.querySelectorAll("#list li.item .stchip")].map(e => e.textContent);
   check("the list row names both tied stores", chip.some(t => t === "💲 Wegmans = ShopRite"), chip);
+  // a store from purchase history is not a preference and must not look like one
+  const h = boot([{ ...item(9, "drumsticks", "Wegmans", null), store_source: "history", history_store: "Wegmans" }], "Wegmans");
+  await drain();
+  const hc = [...h.doc.querySelectorAll("#list li.item .stchip")].map(e => e.textContent);
+  check("a history store reads as 'usual', not as a pick", hc[0] === "🕘 Wegmans (usual)", hc);
+  h.doc.querySelector("#list li.item .edit").dispatchEvent(new h.w.Event("click", { bubbles: true }));
+  await drain();
+  const np = h.doc.querySelector("#sheet-stores .stopt.sel");
+  check("the editor says no preference, and where it usually is", np && np.textContent === "no preference · usually Wegmans",
+    np && np.textContent);
   console.log(`\n================ ${passed} passed, ${failed} failed ================`);
   if (failed) process.exit(1);
 })();
