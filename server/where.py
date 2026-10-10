@@ -294,8 +294,10 @@ def compare(cands: list[tuple[dict, dict, bool]], wanted: tuple[str, float] | No
                 row["total_label"] = (f"{packs} × {row['qty_label']} = ${total:.2f}" if packs > 1
                                       else f"{row['qty_label']} = ${total:.2f}")
                 row["metric"] = (total, packs * qty - wanted[1])
+                row["cost"] = round(total, 2)
             else:
                 row["metric"] = (r["amount"] / qty, 0)
+                row["cost"] = r["amount"] / qty
         rows.append(row)
     ranked = sorted((r for r in rows if r["metric"] is not None), key=lambda r: r["metric"])
     best_per_store: dict[int, dict] = {}

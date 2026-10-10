@@ -117,6 +117,21 @@ def _reason(statuses: set[str]) -> str:
     return "conflict" if "conflict" in statuses else "pick_missing" if "pick_missing" in statuses else "no_match"
 
 
+def _reconcile(old_rows: list[dict], old: dict | None, fresh: dict, unasked: list[int]) -> list[dict]:
+    """The lowest-priced rows among the old winners that could not be asked
+    (old cost) and the fresh quotes of the stores that were (fresh cost), when
+    both are costs in one dimension. Otherwise only the unasked winners stand."""
+    stale = [w for w in old_rows if w["store_id"] in unasked]
+    if not old or old.get("dim") is None or old.get("dim") != fresh.get("dim"):
+        return stale
+    pool = [w for w in stale if w.get("cost") is not None]
+    pool += [q for q in fresh["quotes"] if q.get("cost") is not None and q["store_id"] not in unasked]
+    if len(pool) < len(stale) or not pool:
+        return stale
+    low = min(w["cost"] for w in pool)
+    return [w for w in pool if abs(w["cost"] - low) < 1e-9]
+
+
 async def _persist(items: dict[int, dict], result: dict[str, dict]) -> None:
     """Keep each cheapest answer. A stored answer survives a refresh only when
     its own winning store could not be asked — that store may still be the
@@ -150,12 +165,12 @@ async def _persist(items: dict[int, dict], result: dict[str, dict]) -> None:
                 else r["organic_stores"]
             unasked = [w for w in winners if checked_by.get(str(w), "unasked") == "unasked"]
             if unasked and not organic_now:
-                # Keep the old answer for the winners that could not be asked,
-                # and only those: one this refresh DID answer is judged by the
-                # fresh comparison, not by a stale quote. (A fresh cheaper quote
-                # still waits for a full check, as with a single winner.)
-                kept = [w for w in old_rows if w["store_id"] in unasked]
-                if old and len(kept) < len(winners):
+                # Winners that could not be asked keep their old quote; the
+                # stores that answered are judged on their fresh quote, in the
+                # same dimension, so a confirmed tie stays and a cheaper price
+                # becomes the winner.
+                kept = _reconcile(old_rows, old, r, unasked)
+                if old and [w["store_id"] for w in kept] != winners:
                     changed |= price_reco.save(conn, cid, it["key"], {**old, "cheapest": kept[0], "tied": kept[1:]}, ts)
                 continue
             if r["cheapest"]:

@@ -563,3 +563,44 @@ def test_a_refresh_that_disproves_part_of_a_tie_drops_only_that_store(monkeypatc
     client.post("/api/where", json={"catalog_ids": [cid]})
     item = next(i for i in client.get("/api/state").json()["items"] if i["catalog_id"] == cid)
     assert item["price"]["store"] == "Where A" and item["price"]["also"] == []
+
+
+def _twin(monkeypatch, name, second):
+    """A and B tied at $4; a refresh then cannot ask A and B answers `second`."""
+    cid = add(name)
+    stub(monkeypatch, {"901": {name: [rec(f"{name} 8 oz", 4.0, "")]}, "902": {name: [rec(f"{name} 8 oz", 4.0, "")]}})
+    ask(cid)
+    stub(monkeypatch, {"902": {name: [rec(f"{name} {second}", 0, "")]}}, fail={"901"})
+    return cid
+
+
+def _after(cid):
+    client.post("/api/where", json={"catalog_ids": [cid]})
+    item = next(i for i in client.get("/api/state").json()["items"] if i["catalog_id"] == cid)
+    return {item["price"]["store"], *item["price"]["also"]}
+
+
+def test_a_tie_the_reachable_store_confirms_stays(monkeypatch, stores):
+    cid = _twin(monkeypatch, "quillconfirm", "8 oz")
+    monkeypatch.setattr(where_api, "price_products_many", _fixed(monkeypatch, "quillconfirm", 4.0, "8 oz"))
+    assert _after(cid) == {"Where A", "Where B"}
+
+
+def test_a_reachable_store_in_a_different_pack_size_is_judged_per_unit(monkeypatch, stores):
+    cid = _twin(monkeypatch, "quillsize", "4 oz")
+    monkeypatch.setattr(where_api, "price_products_many", _fixed(monkeypatch, "quillsize", 4.0, "4 oz"))
+    assert _after(cid) == {"Where A"}                     # $1.00/oz is no longer $0.50/oz
+
+
+def test_a_reachable_store_that_undercuts_the_unreachable_one_wins(monkeypatch, stores):
+    cid = _twin(monkeypatch, "quillunder", "8 oz")
+    monkeypatch.setattr(where_api, "price_products_many", _fixed(monkeypatch, "quillunder", 2.0, "8 oz"))
+    assert _after(cid) == {"Where B"}
+
+
+def _fixed(monkeypatch, name, amount, size):
+    async def fake(chain, terms, store, max_age=None):
+        if store == "901":
+            return {}, False
+        return {t: [rec(f"{name} {size}", amount, "")] if store == "902" else [] for t in terms}, True
+    return fake
