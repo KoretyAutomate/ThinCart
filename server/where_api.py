@@ -150,10 +150,11 @@ async def _persist(items: dict[int, dict], result: dict[str, dict]) -> None:
                 else r["organic_stores"]
             unasked = [w for w in winners if checked_by.get(str(w), "unasked") == "unasked"]
             if unasked and not organic_now:
-                # keep the old answer for the winners that could not be asked,
-                # but not for one this refresh answered with something dearer
-                now = {q["store_id"]: q["amount"] for q in r["quotes"]}
-                kept = [w for w in old_rows if w["store_id"] in unasked or now.get(w["store_id"]) == w["amount"]]
+                # Keep the old answer for the winners that could not be asked,
+                # and only those: one this refresh DID answer is judged by the
+                # fresh comparison, not by a stale quote. (A fresh cheaper quote
+                # still waits for a full check, as with a single winner.)
+                kept = [w for w in old_rows if w["store_id"] in unasked]
                 if old and len(kept) < len(winners):
                     changed |= price_reco.save(conn, cid, it["key"], {**old, "cheapest": kept[0], "tied": kept[1:]}, ts)
                 continue
