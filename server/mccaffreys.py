@@ -49,6 +49,23 @@ def _pack(size: str) -> str:
     return size.strip()
 
 
+# "Family Pack (3 lb. minimum)", "min. 2 lbs": the least a per-pound product
+# can be bought in. Its `size` ("1 LB") is only the pricing basis.
+_MINIMUM = re.compile(
+    r"(\d+(?:\.\d+)?)\s*lbs?\.?\s*min(?:imum)?\b|\bmin(?:imum)?\.?\s*(\d+(?:\.\d+)?)\s*lbs?\b", re.I)
+
+
+def _minimum_lb(name: str, size: str) -> float | None:
+    """Pounds a per-pound product must be bought in, when its name says so.
+    Read as a 1 lb package, a "3 lb minimum" family pack at $2.29/lb would beat
+    a real $3.29 pound — but the till charges at least $6.87."""
+    if size.strip().upper() not in ("1 LB", "LB"):
+        return None
+    m = _MINIMUM.search(name)
+    n = float(m.group(1) or m.group(2)) if m else 0.0
+    return n if n > 1 else None
+
+
 def _place(loc: str) -> dict[str, str]:
     """'2 R' -> aisle 2, right side; 'PRODUCE' -> the Produce department."""
     loc = loc.strip()
@@ -73,15 +90,20 @@ def parse_search(payload: dict, store: str, stamp: str | None = None) -> list[di
         if not sku or not name or not isinstance(price, (int, float)) or price <= 0:
             continue
         place = _place(str(h.get("location") or ""))
+        amount = float(price) / float(per)
+        pack = _pack(str(h.get("size") or ""))
+        least = _minimum_lb(name, str(h.get("size") or ""))
+        if least:
+            amount, pack = amount * least, f"{least:g} lb"
         out.append({
             "sku": sku,
             "name": name,
             "brand": (h.get("brand") or "").strip(),
             "sub_brand": "",
-            "pack_size": _pack(str(h.get("size") or "")),
+            "pack_size": pack,
             "upc": str(h.get("scanCode") or ""),
             "store_number": store,
-            "amount": round(float(price) / float(per), 2),
+            "amount": round(amount, 2),
             "unit_price": "",
             "aisle": place.get("aisle", ""), "aisle_side": place.get("aisle_side", ""),
             "section": "", "shelf": "",

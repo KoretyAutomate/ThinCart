@@ -2923,3 +2923,8 @@ row was right while the aisle beside it was blank. Fix: every lookup_api path
 searches by the English name (`_search_name`), the same rule as where_api. All
 173 Japanese items have an English alias today; one without still falls back to
 the display name.
+
+Same push, Codex finding on the McCaffrey's adapter: a per-pound product whose
+name states a minimum ("Family Pack (3 lb. minimum)", "min. 2 lbs") was read as
+a 1 lb package and could beat a real pound. It is now priced at its least
+purchase (pack "3 lb", amount 3 × the per-pound price).

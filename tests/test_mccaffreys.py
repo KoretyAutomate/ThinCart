@@ -128,3 +128,25 @@ def test_unconfigured_sends_nothing_and_says_so(monkeypatch):
     assert asyncio.run(lookup._mc_search("eggs", "1000-7", 5)) is None and not sent
     got = asyncio.run(branches.resolve_branch("mccaffreys", PIN))
     assert got == {"chain_store_id": "", "reason": mccaffreys.NOT_CONFIGURED}
+
+
+def test_a_minimum_weight_pack_is_priced_at_its_least_purchase():
+    """A per-pound family pack with a minimum is not a one-pound package: for a
+    wanted pound it costs the minimum's worth, so a real $3.29 pound wins."""
+    import quantity
+    import where
+
+    payload = {"code": 0, "items": [
+        {"id": "f", "name": "USDA Chicken Drumsticks Family Pack (3 lb. minimum)", "actualPrice": 2.29,
+         "size": "1 LB", "location": "MEAT"},
+        {"id": "g", "name": "Chicken Drumsticks min. 2 lbs", "actualPrice": 2.50, "size": "1 LB"},
+        {"id": "h", "name": "Mini Peppers", "actualPrice": 3.99, "size": "16 OZ"},
+    ]}
+    f, g, h = mccaffreys.parse_search(payload, "1000-7") or []
+    assert (f["pack_size"], f["amount"]) == ("3 lb", 6.87)
+    assert (g["pack_size"], g["amount"]) == ("2 lb", 5.0)
+    assert (h["pack_size"], h["amount"]) == ("16 OZ", 3.99)          # "Mini" is not a minimum
+    pound = {"sku": "p", "name": "Chicken Drumsticks", "pack_size": "1 lb", "amount": 3.29}
+    store = {"id": 9, "name": "McCaffrey's"}
+    got = where.compare([(store, f, False), (store, pound, False)], quantity.parse_wanted("1 lb"))
+    assert got["cheapest"]["product"] == "Chicken Drumsticks"
