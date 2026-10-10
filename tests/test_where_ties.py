@@ -117,3 +117,13 @@ def test_a_surviving_tie_still_saves_the_fresh_quote_and_check(monkeypatch, stor
     assert item["price"]["partial"] is True                 # this check could not reach A
     if item["price"]["store"] == "Where B":
         assert item["price"]["amount"] == 8.0               # B's new package, not the old $4
+
+
+def test_an_unreachable_store_beaten_once_is_not_forgotten(monkeypatch, stores):
+    """Codex review: A and B tie at $4; A stays unreachable while B drops to $2
+    and then rises to $8. A's uncontradicted $4 must win again."""
+    cid = _twin(monkeypatch, "quillheld", "8 oz")
+    monkeypatch.setattr(where_api, "price_products_many", _fixed(monkeypatch, "quillheld", 2.0, "8 oz"))
+    assert _after(cid) == {"Where B"}
+    monkeypatch.setattr(where_api, "price_products_many", _fixed(monkeypatch, "quillheld", 8.0, "8 oz"))
+    assert _after(cid) == {"Where A"}

@@ -95,3 +95,18 @@ def test_a_price_question_reaches_the_adapter(monkeypatch):
     found, complete = asyncio.run(chain_lookup.price_products_many("mccaffreys", ["egg whites"], "1000-7"))
     assert complete and asked == [("egg whites", "1000-7", chain_lookup.PRICE_LIMIT)]
     assert found["egg whites"][0]["source"] == "mccaffreys"
+
+
+def test_a_name_only_store_resolves_through_resolve_branch(monkeypatch):
+    import branches
+
+    async def stores():
+        return STORES
+
+    monkeypatch.setattr(branches, "mccaffreys_stores", stores)
+    for name in ("McCaffrey's Pennington", "McCaffreys Pennington", "McCaffrey’s Pennington"):
+        assert chains.town_from_name(name, "mccaffreys") == "pennington", name
+        got = asyncio.run(branches.resolve_branch("mccaffreys", {"name": name, "address": ""}))
+        assert got["chain_store_id"] == "1000-5097" and "Pennington" in got["confirm"], (name, got)
+    got = asyncio.run(branches.resolve_branch("mccaffreys", PIN))
+    assert got == {"chain_store_id": "1000-7", "reason": ""}

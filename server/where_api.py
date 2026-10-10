@@ -117,19 +117,24 @@ def _reason(statuses: set[str]) -> str:
     return "conflict" if "conflict" in statuses else "pick_missing" if "pick_missing" in statuses else "no_match"
 
 
-def _reconcile(old_rows: list[dict], old: dict | None, fresh: dict, unasked: list[int]) -> list[dict]:
-    """The lowest-priced rows among the old winners that could not be asked
-    (old cost) and the fresh quotes of the stores that were (fresh cost), when
-    both are costs in one dimension. Otherwise only the unasked winners stand."""
-    stale = [w for w in old_rows if w["store_id"] in unasked]
+def _reconcile(stale: list[dict], old: dict | None, fresh: dict, unasked: list[int]) -> tuple[list[dict], list[dict]]:
+    """(winners, held). `stale` is every old quote whose store could not be
+    asked this time — the old winners AND quotes held from earlier partial
+    checks. Winners are the lowest-priced among those (old cost) and the fresh
+    quotes of the stores that answered (fresh cost), when all are costs in one
+    dimension; held is the rest of `stale`, kept until its store answers, so a
+    store that stays unreachable is never forgotten. Otherwise the unasked old
+    winners stand as they were."""
     if not old or old.get("dim") is None or old.get("dim") != fresh.get("dim"):
-        return stale
+        return [w for w in stale if not w.get("held")], []
     pool = [w for w in stale if w.get("cost") is not None]
     if len(pool) < len(stale) or not pool:   # a pre-tie answer has no costs to compare
-        return stale
+        return [w for w in stale if not w.get("held")], []
     pool += [q for q in fresh["quotes"] if q.get("cost") is not None and q["store_id"] not in unasked]
     low = min(w["cost"] for w in pool)
-    return [w for w in pool if abs(w["cost"] - low) < 1e-9]
+    win = [{k: v for k, v in w.items() if k != "held"} for w in pool if abs(w["cost"] - low) < 1e-9]
+    ids = {w["store_id"] for w in win}
+    return win, [{**w, "held": True} for w in stale if w["store_id"] not in ids]
 
 
 async def _persist(items: dict[int, dict], result: dict[str, dict]) -> None:
@@ -163,19 +168,31 @@ async def _persist(items: dict[int, dict], result: dict[str, dict]) -> None:
             # did not run) means not contradicted — keep it (Codex review).
             checked_by = r["regular_stores"] if (old and old.get("organic_fallback")) or not it["organic"] \
                 else r["organic_stores"]
-            unasked = [w for w in winners if checked_by.get(str(w), "unasked") == "unasked"]
+            not_asked = {w["store_id"] for w in old_rows + (old or {}).get("held", [])
+                         if checked_by.get(str(w["store_id"]), "unasked") == "unasked"}
+            unasked = [w for w in winners if w in not_asked]
             if unasked and not organic_now:
                 # Winners that could not be asked keep their old quote; the
                 # stores that answered are judged on their fresh quote, in the
                 # same dimension, so a confirmed tie stays and a cheaper price
-                # becomes the winner.
-                kept = _reconcile(old_rows, old, r, unasked)
-                if old and kept != old_rows:
+                # becomes the winner. A beaten unreachable quote is HELD, not
+                # dropped, until its own store answers (Codex review).
+                stale = [w for w in old_rows + (old or {}).get("held", []) if w["store_id"] in not_asked]
+                kept, held = _reconcile(stale, old, r, sorted(not_asked))
+                if old and (kept != old_rows or held != old.get("held", [])):
                     # the statuses are THIS check's: the new winner was found by a partial one
                     fresh = {k: r[k] for k in ("stores", "organic_stores", "regular_stores")}
-                    changed |= price_reco.save(
-                        conn, cid, it["key"], {**old, **fresh, "cheapest": kept[0], "tied": kept[1:]}, ts)
+                    changed |= price_reco.save(conn, cid, it["key"], {
+                        **old, **fresh, "cheapest": kept[0], "tied": kept[1:], "held": held}, ts)
                 continue
+            if r["cheapest"] and old and not organic_now and not_asked:
+                # no old winner is unreachable, but a HELD quote still is: it competes
+                kept, held = _reconcile([w for w in old.get("held", []) if w["store_id"] in not_asked],
+                                        old, r, sorted(not_asked))
+                if kept:
+                    changed |= price_reco.save(conn, cid, it["key"],
+                                               {**r, "cheapest": kept[0], "tied": kept[1:], "held": held}, ts)
+                    continue
             if r["cheapest"]:
                 changed |= price_reco.save(conn, cid, it["key"], r, ts)
             elif not partial or winner is not None:

@@ -2896,3 +2896,14 @@ household's pin resolves to 1000-7, and with organic off, egg whites compare at
 McCaffrey's $5.99 / 32 oz ($0.19/oz) against ShopRite and both Whole Foods.
 With organic on McCaffrey's correctly answers "no match": it stocks no organic
 egg whites.
+
+**Review, 2026-10-10.** Fixed: a name-only "McCaffrey's Pennington" left
+"s-pennington" as its town (the possessive survived the needle); the needles now
+include the possessive spellings, tested through `resolve_branch`. Fixed (price
+ties): an unreachable store's quote beaten by a fresh one in a partial check is
+now HELD in the stored answer (`held`) until its own store answers, so it is
+not forgotten when the fresh price later rises. **Rejected:** "require
+THINCART_MCCAFFREYS_SITE and disable the adapter when unset" — the same request
+declined for Wegmans/ShopRite above, for the same reason: the default is the
+verified endpoint, it is overridable, and a stale one fails visibly as
+"couldn't reach", never as a wrong price.
