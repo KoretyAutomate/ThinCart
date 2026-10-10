@@ -2310,7 +2310,8 @@ function render() {
       if (it.store) {
         const sc = document.createElement('span');
         sc.className = 'stchip' + (it.store_source === 'history' ? ' hist' : it.store_source === 'price' ? ' price' : '');
-        sc.textContent = (it.store_source === 'price' ? '💲 ' : '🏬 ') + it.store;
+        const tiedNames = it.store_source === 'price' && it.price ? it.price.also || [] : [];
+        sc.textContent = (it.store_source === 'price' ? '💲 ' : '🏬 ') + [it.store, ...tiedNames].join(' = ');
         sub.appendChild(sc);
       }
       if (it.brand) {
