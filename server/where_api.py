@@ -125,12 +125,15 @@ def _reconcile(stale: list[dict], old: dict | None, fresh: dict, unasked: list[i
     dimension; held is the rest of `stale`, kept until its store answers, so a
     store that stays unreachable is never forgotten. Otherwise the unasked old
     winners stand as they were."""
-    if not old or old.get("dim") is None or old.get("dim") != fresh.get("dim"):
+    if not old or old.get("dim") is None:
         return [w for w in stale if not w.get("held")], []
     pool = [w for w in stale if w.get("cost") is not None]
     if len(pool) < len(stale) or not pool:   # a pre-tie answer has no costs to compare
         return [w for w in stale if not w.get("held")], []
-    pool += [q for q in fresh["quotes"] if q.get("cost") is not None and q["store_id"] not in unasked]
+    # fresh quotes in another dimension (or none at all) cannot be weighed
+    # against the old costs; the unreachable stores' quotes still stand
+    if fresh.get("dim") == old["dim"]:
+        pool += [q for q in fresh["quotes"] if q.get("cost") is not None and q["store_id"] not in unasked]
     low = min(w["cost"] for w in pool)
     win = [{k: v for k, v in w.items() if k != "held"} for w in pool if abs(w["cost"] - low) < 1e-9]
     ids = {w["store_id"] for w in win}
@@ -185,7 +188,7 @@ async def _persist(items: dict[int, dict], result: dict[str, dict]) -> None:
                     changed |= price_reco.save(conn, cid, it["key"], {
                         **old, **fresh, "cheapest": kept[0], "tied": kept[1:], "held": held}, ts)
                 continue
-            if r["cheapest"] and old and not organic_now and not_asked:
+            if old and not organic_now and not_asked:
                 # no old winner is unreachable, but a HELD quote still is: it competes
                 kept, held = _reconcile([w for w in old.get("held", []) if w["store_id"] in not_asked],
                                         old, r, sorted(not_asked))

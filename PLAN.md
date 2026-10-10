@@ -2902,8 +2902,10 @@ egg whites.
 include the possessive spellings, tested through `resolve_branch`. Fixed (price
 ties): an unreachable store's quote beaten by a fresh one in a partial check is
 now HELD in the stored answer (`held`) until its own store answers, so it is
-not forgotten when the fresh price later rises. **Rejected:** "require
-THINCART_MCCAFFREYS_SITE and disable the adapter when unset" — the same request
-declined for Wegmans/ShopRite above, for the same reason: the default is the
-verified endpoint, it is overridable, and a stale one fails visibly as
-"couldn't reach", never as a wrong price.
+not forgotten when the fresh price later rises. Also fixed: a held quote now survives a check where the reachable store has no
+match at all. **Endpoint:** `THINCART_MCCAFFREYS_SITE` is REQUIRED, with no
+default in code — the house rule that endpoint config lives in configuration,
+not in fallbacks. Unset, the adapter sends nothing and the store's link answers
+"McCaffrey's prices are not configured". Set in the systemd unit to
+`https://express.mccaffreys.com`. (The older adapters keep their documented
+defaults; changing them is a separate decision.)

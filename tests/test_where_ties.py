@@ -127,3 +127,18 @@ def test_an_unreachable_store_beaten_once_is_not_forgotten(monkeypatch, stores):
     assert _after(cid) == {"Where B"}
     monkeypatch.setattr(where_api, "price_products_many", _fixed(monkeypatch, "quillheld", 8.0, "8 oz"))
     assert _after(cid) == {"Where A"}
+
+
+def test_a_held_quote_survives_a_check_where_the_other_store_has_nothing(monkeypatch, stores):
+    """Codex review: A held at $4 (unreachable); B then has no match, then $8."""
+    cid = _twin(monkeypatch, "quillgap", "8 oz")
+    monkeypatch.setattr(where_api, "price_products_many", _fixed(monkeypatch, "quillgap", 2.0, "8 oz"))
+    assert _after(cid) == {"Where B"}
+
+    async def nothing(chain, terms, store, max_age=None):
+        return ({}, False) if store == "901" else ({t: [] for t in terms}, True)
+
+    monkeypatch.setattr(where_api, "price_products_many", nothing)
+    assert _after(cid) == {"Where A"}
+    monkeypatch.setattr(where_api, "price_products_many", _fixed(monkeypatch, "quillgap", 8.0, "8 oz"))
+    assert _after(cid) == {"Where A"}

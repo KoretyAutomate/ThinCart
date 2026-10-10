@@ -45,6 +45,8 @@ async def resolve_branch(chain: str, pin: dict) -> dict:
 
 
 async def _mccaffreys(pin: dict, named: str) -> dict:
+    if not mccaffreys.SITE:
+        return {"chain_store_id": "", "reason": mccaffreys.NOT_CONFIGURED}
     stores = await mccaffreys_stores()
     if stores is None:
         return {"chain_store_id": "", "reason": "could not read McCaffrey's store list"}

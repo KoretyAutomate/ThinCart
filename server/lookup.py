@@ -520,9 +520,12 @@ async def mccaffreys_stores() -> list[dict] | None:
     cached = cache_get("chain", "mccaffreys:stores")
     if cached:
         return cached
+    if not mccaffreys.SITE:
+        log.info("mccaffreys lookup skipped: %s", mccaffreys.NOT_CONFIGURED)
+        return None
     try:
         async with httpx.AsyncClient(timeout=20) as client:
-            r = await client.get(mccaffreys.STORES_URL, headers={"User-Agent": USER_AGENT})
+            r = await client.get(mccaffreys.SITE + mccaffreys.STORES_URL, headers={"User-Agent": USER_AGENT})
             r.raise_for_status()
             stores = mccaffreys.trim_stores(r.json())
     except Exception as e:
@@ -534,7 +537,11 @@ async def mccaffreys_stores() -> list[dict] | None:
 
 
 async def _mc_search(term: str, store: str, limit: int) -> list[dict] | None:
-    got = await _mc_post(mccaffreys.SEARCH_URL.format(store=store), {"q": term.strip(), "pn": 1, "ps": limit})
+    if not mccaffreys.SITE:
+        log.info("mccaffreys lookup skipped: %s", mccaffreys.NOT_CONFIGURED)
+        return None
+    got = await _mc_post(mccaffreys.SITE + mccaffreys.SEARCH_URL.format(store=store),
+                         {"q": term.strip(), "pn": 1, "ps": limit})
     return None if got is None else mccaffreys.parse_search(got, store)
 
 

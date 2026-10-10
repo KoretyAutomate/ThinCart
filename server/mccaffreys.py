@@ -25,10 +25,14 @@ from datetime import UTC, datetime
 
 from chains import close, postcode
 
-SITE = os.environ.get("THINCART_MCCAFFREYS_SITE", "https://express.mccaffreys.com").strip().rstrip("/")
-SEARCH_URL = SITE + "/s/{store}/api/b"
-STORES_URL = SITE + "/api/stores"
-PRODUCT_URL = SITE + "/s/{store}/i/{id}"
+# Theirs, and configured rather than assumed: set in the systemd unit
+# (https://express.mccaffreys.com, verified 2026-10-10). Unset means the
+# adapter is unconfigured — no request is sent and the store says so.
+SITE = os.environ.get("THINCART_MCCAFFREYS_SITE", "").strip().rstrip("/")
+SEARCH_URL = "/s/{store}/api/b"
+STORES_URL = "/api/stores"
+PRODUCT_URL = "/s/{store}/i/{id}"
+NOT_CONFIGURED = "McCaffrey's prices are not configured (THINCART_MCCAFFREYS_SITE)"
 
 # their abbreviations -> what quantity.parse reads ("FZ" is fluid ounces)
 _UNITS = {"FZ": "fl oz", "FLOZ": "fl oz"}
@@ -83,7 +87,7 @@ def parse_search(payload: dict, store: str, stamp: str | None = None) -> list[di
             "section": "", "shelf": "",
             "available": not h.get("outOfStock") or bool(h.get("sellOutOfStock")),
             "source": "mccaffreys",
-            "source_url": PRODUCT_URL.format(store=store, id=sku),
+            "source_url": SITE + PRODUCT_URL.format(store=store, id=sku),
             "fetched_at": stamp,
         })
     return out

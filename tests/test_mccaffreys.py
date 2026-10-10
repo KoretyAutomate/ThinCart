@@ -7,6 +7,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "server"))
 
 import chain_lookup
@@ -15,6 +17,11 @@ import lookup
 import mccaffreys
 
 FIX = Path(__file__).parent / "fixtures"
+
+
+@pytest.fixture(autouse=True)
+def configured(monkeypatch):
+    monkeypatch.setattr(mccaffreys, "SITE", "https://express.mccaffreys.com")
 SEARCH = json.loads((FIX / "mccaffreys_search.json").read_text())
 STORES = mccaffreys.trim_stores(json.loads((FIX / "mccaffreys_stores.json").read_text())) or []
 
@@ -110,3 +117,14 @@ def test_a_name_only_store_resolves_through_resolve_branch(monkeypatch):
         assert got["chain_store_id"] == "1000-5097" and "Pennington" in got["confirm"], (name, got)
     got = asyncio.run(branches.resolve_branch("mccaffreys", PIN))
     assert got == {"chain_store_id": "1000-7", "reason": ""}
+
+
+def test_unconfigured_sends_nothing_and_says_so(monkeypatch):
+    import branches
+    monkeypatch.setattr(mccaffreys, "SITE", "")
+    monkeypatch.setattr(lookup, "cache_get", lambda *a, **k: None)
+    sent = []
+    monkeypatch.setattr(lookup, "_mc_post", lambda *a, **k: sent.append(a))
+    assert asyncio.run(lookup._mc_search("eggs", "1000-7", 5)) is None and not sent
+    got = asyncio.run(branches.resolve_branch("mccaffreys", PIN))
+    assert got == {"chain_store_id": "", "reason": mccaffreys.NOT_CONFIGURED}
