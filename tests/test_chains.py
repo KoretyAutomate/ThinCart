@@ -64,7 +64,7 @@ def store_id(name, **extra):
 
 def test_most_stores_are_not_a_chain_we_can_ask():
     assert chains.detect("Corner Veg Guy") == ""
-    assert chains.detect("McCaffrey's Food Market", "McCaffrey's") == ""
+    assert chains.detect("Maruichi Japanese Food & Deli") == ""   # McCaffrey's became one on 2026-10-10
 
 
 def test_the_three_chains_are_recognised_by_name_or_osm_brand():

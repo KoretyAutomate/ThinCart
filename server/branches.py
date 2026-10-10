@@ -11,10 +11,12 @@ places everything with no visible sign, and the household would trust it.
 """
 
 import links
+import mccaffreys
 import shoprite
 import wholefoods
 from chains import CHAINS, address_town_state, close, detect, postcode, town_from_name
-from lookup import follow_link, reverse_geocode, shoprite_stores, wegmans_store_number, wholefoods_store
+from lookup import (follow_link, mccaffreys_stores, reverse_geocode, shoprite_stores, wegmans_store_number,
+                    wholefoods_store)
 from wegmans import wegmans_slug
 
 
@@ -37,7 +39,24 @@ async def resolve_branch(chain: str, pin: dict) -> dict:
         return await _wholefoods(pin, address, named)
     if chain == "shoprite":
         return await _shoprite(address, named)
+    if chain == "mccaffreys":
+        return await _mccaffreys(pin, named)
     return {"chain_store_id": "", "reason": "no price adapter for this store"}
+
+
+async def _mccaffreys(pin: dict, named: str) -> dict:
+    stores = await mccaffreys_stores()
+    if stores is None:
+        return {"chain_store_id": "", "reason": "could not read McCaffrey's store list"}
+    branch = mccaffreys.find_branch(stores, pin, town=named)
+    if not branch:
+        return {"chain_store_id": "", "reason": "no McCaffrey's branch at that address"
+                if pin.get("address") else f"no single McCaffrey's branch in '{named}'"}
+    out: dict = {"chain_store_id": branch["id"], "reason": ""}
+    if not pin.get("address"):
+        out.update({"address": branch["address"], "confirm": f"{branch['name']} — {branch['address']}",
+                    "lat": branch["lat"], "lon": branch["lon"]})
+    return out
 
 
 async def _wegmans(address: str) -> dict:

@@ -2870,3 +2870,29 @@ on the row: that was the store it was bought at before (history), drawn in the
 same 🏬 style as an explicit pick. The row now reads `🕘 Wegmans (usual)` and the
 editor's no-preference button reads "no preference · usually Wegmans", so a
 store the owner never chose cannot pass for one they did.
+
+## McCaffrey's price source (2026-10-10)
+
+McCaffrey's own site (mccaffreys.com) has no shop, only a fortnightly PDF
+circular; the owner found its online shop, McCaffrey's Express
+(express.mccaffreys.com). That runs on ECRS's web store, whose JSON API answers
+plain HTTPS with no key or session:
+
+- `POST /s/<branch>/api/b {"q", "pn", "ps"}` searches ONE branch ("1000-7" is
+  Princeton). Each hit carries `actualPrice` for `actualPriceDivider` units
+  ("10 for $10" = 10.0 / 10), `size` ("32 OZ", "12 FZ" = fl oz, "1 LB" for goods
+  priced per pound) and `location` ("2 R" = aisle 2 right; "MEAT" = department).
+- `GET /api/stores` lists the nine branches with ZIP and coordinates. A pin
+  resolves by a ZIP only one branch has, else by coordinates within 1.5 km,
+  else (name-only store) the one branch in the named town. Never a nearest guess.
+- `outOfStock` is the online shop's stock; `sellOutOfStock: true` means it is
+  sold anyway, so the record is available. Nearly every meat-counter item is
+  "out of stock" online.
+
+Adapter: `server/mccaffreys.py` (pure), fetchers in `lookup.py`, dispatch in
+`chain_lookup.py`, branch in `branches.py`. The shelf rides on every search hit,
+so there is no per-product placement request. Verified live 2026-10-10: the
+household's pin resolves to 1000-7, and with organic off, egg whites compare at
+McCaffrey's $5.99 / 32 oz ($0.19/oz) against ShopRite and both Whole Foods.
+With organic on McCaffrey's correctly answers "no match": it stocks no organic
+egg whites.

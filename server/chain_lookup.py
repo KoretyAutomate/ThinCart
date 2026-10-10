@@ -51,6 +51,7 @@ async def _chain_search(chain: str, term: str, store: str, limit: int,
     recs = lookup.cache_get("product", key, max_age)
     if recs is None:
         fetched = await (lookup._wf_search(term, store) if chain == "wholefoods"
+                         else lookup._mc_search(term, store, limit) if chain == "mccaffreys"
                          else lookup._sr_search(term, store, limit))
         if fetched is None:
             return None

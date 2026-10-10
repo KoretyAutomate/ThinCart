@@ -46,6 +46,7 @@ CHAINS: dict[str, Chain] = {
     "wegmans": Chain("wegmans", "Wegmans", ("wegmans",)),
     "wholefoods": Chain("wholefoods", "Whole Foods", ("whole foods", "wholefoods")),
     "shoprite": Chain("shoprite", "ShopRite", ("shoprite", "shop rite", "shop-rite")),
+    "mccaffreys": Chain("mccaffreys", "McCaffrey's", ("mccaffrey", "mc caffrey")),
 }
 
 

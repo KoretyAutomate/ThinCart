@@ -38,6 +38,7 @@ import httpx
 from curl_cffi.requests import AsyncSession
 from fastapi import HTTPException
 
+import mccaffreys
 import osm
 import shoprite
 import wholefoods
@@ -500,4 +501,47 @@ async def _sr_location(rsid: str, sku: str) -> dict | None:
         return None
 
 
-_LOCATE = {"wholefoods": _wf_location, "shoprite": _sr_location}
+# --- McCaffrey's: plain JSON (PLAN.md §2026-10-10) ------------------------------
+
+
+async def _mc_post(url: str, body: dict) -> Any | None:
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.post(url, json=body, headers={"User-Agent": USER_AGENT})
+            r.raise_for_status()
+            return r.json()
+    except Exception as e:
+        log.warning("mccaffreys request failed (%s): %s", url.split("?")[0][:90], e)
+        return None
+
+
+async def mccaffreys_stores() -> list[dict] | None:
+    """Every branch, trimmed to what find_branch reads. One request a month."""
+    cached = cache_get("chain", "mccaffreys:stores")
+    if cached:
+        return cached
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.get(mccaffreys.STORES_URL, headers={"User-Agent": USER_AGENT})
+            r.raise_for_status()
+            stores = mccaffreys.trim_stores(r.json())
+    except Exception as e:
+        log.warning("mccaffreys store list failed: %s", e)
+        return None
+    if stores:
+        cache_put("chain", "mccaffreys:stores", stores)
+    return stores
+
+
+async def _mc_search(term: str, store: str, limit: int) -> list[dict] | None:
+    got = await _mc_post(mccaffreys.SEARCH_URL.format(store=store), {"q": term.strip(), "pn": 1, "ps": limit})
+    return None if got is None else mccaffreys.parse_search(got, store)
+
+
+async def _mc_location(store: str, sku: str) -> dict | None:
+    """The shelf rides on every search hit, so there is nothing to ask here:
+    a hit with no shelf is unknown, and asking again would not change that."""
+    return None
+
+
+_LOCATE = {"wholefoods": _wf_location, "shoprite": _sr_location, "mccaffreys": _mc_location}
