@@ -1773,10 +1773,11 @@ function whereLineMain(it, w, unsettled) {
     const how = [q.total_label || q.unit_label || '$' + q.amount.toFixed(2),
                  w.organic_fallback ? T().no_organic : ''].filter(Boolean).join(' · ');
     // grouped under the owner's pick: name the store the cheaper price is at
-    if (it.store_source === 'preferred' && it.store !== q.store)
+    const winners = [q.store, ...tied];
+    if (it.store_source === 'preferred' && !winners.includes(it.store))
       return T().price_line(names, how, agoLabel(q.fetched_at), it.store);
     // a partial check that could not reach the stored winner: shown, not obeyed
-    if (it.store_source === 'price' && it.store !== q.store)
+    if (it.store_source === 'price' && !winners.includes(it.store))
       return T().partial_check(names, how);
     // products that could not be measured in the winner's unit are still shown
     const unranked = (w.quotes || []).filter(u => !u.unit_label && u.store_id !== q.store_id);
@@ -2192,6 +2193,7 @@ $('storelink').addEventListener('keydown', e => { if (e.key === 'Enter') { e.pre
 window.openSheet = openSheet;
 // the parity test runs the shared split_organic cases through this function
 window.splitOrganic = splitOrganic;
+window.whereLine = whereLine;
 
 /* 🍃 is one switch for the household (PLAN.md Phase 7A, revised): both phones
  * see the same setting. The toast says what it now means, with an undo. */

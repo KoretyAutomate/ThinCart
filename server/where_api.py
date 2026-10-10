@@ -134,7 +134,10 @@ async def _persist(items: dict[int, dict], result: dict[str, dict]) -> None:
             r = result[str(cid)]
             partial = "unasked" in r["stores"].values()
             old = price_reco.stored_answer(conn, cid, it["key"])
-            winner = old["cheapest"]["store_id"] if old and old.get("cheapest") else None
+            # every store at the old lowest price: a tie has more than one winner
+            old_rows = [old["cheapest"], *old.get("tied", [])] if old and old.get("cheapest") else []
+            winners = [w["store_id"] for w in old_rows]
+            winner = winners[0] if winners else None
             # a regular product stood in only because nobody had it organic;
             # an organic one now found replaces it, wherever the old one was
             # organic products found at all — ranked or not — end the stand-in
@@ -145,7 +148,14 @@ async def _persist(items: dict[int, dict], result: dict[str, dict]) -> None:
             # did not run) means not contradicted — keep it (Codex review).
             checked_by = r["regular_stores"] if (old and old.get("organic_fallback")) or not it["organic"] \
                 else r["organic_stores"]
-            if winner is not None and checked_by.get(str(winner), "unasked") == "unasked" and not organic_now:
+            unasked = [w for w in winners if checked_by.get(str(w), "unasked") == "unasked"]
+            if unasked and not organic_now:
+                # keep the old answer for the winners that could not be asked,
+                # but not for one this refresh answered with something dearer
+                now = {q["store_id"]: q["amount"] for q in r["quotes"]}
+                kept = [w for w in old_rows if w["store_id"] in unasked or now.get(w["store_id"]) == w["amount"]]
+                if old and len(kept) < len(winners):
+                    changed |= price_reco.save(conn, cid, it["key"], {**old, "cheapest": kept[0], "tied": kept[1:]}, ts)
                 continue
             if r["cheapest"]:
                 changed |= price_reco.save(conn, cid, it["key"], r, ts)

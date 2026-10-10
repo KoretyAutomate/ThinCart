@@ -547,3 +547,19 @@ def test_the_store_you_already_buy_at_wins_the_tie(monkeypatch, stores):
     ask(cid)
     item = next(i for i in client.get("/api/state").json()["items"] if i["catalog_id"] == cid)
     assert item["store"] == "Where B" and item["price"]["also"] == ["Where A"]
+
+
+def test_a_refresh_that_disproves_part_of_a_tie_drops_only_that_store(monkeypatch, stores):
+    """Codex review: A and B tied at $4; now A cannot be asked and B costs $8.
+    A may still be $4, so it stays; B is no longer a winner and no tie."""
+    cid = add("quilltwin")
+    iid = op(type="add", name="quilltwin", item_id=str(uuid.uuid4()))["item_id"]
+    op(type="checkoff", item_id=iid, store="Where B")              # history favours B
+    add("quilltwin")
+    stub(monkeypatch, {"901": {"quilltwin": [rec("Quilltwin 8 oz", 4.0, "")]},
+                       "902": {"quilltwin": [rec("Quilltwin 8 oz", 4.0, "")]}})
+    ask(cid)
+    stub(monkeypatch, {"902": {"quilltwin": [rec("Quilltwin 8 oz", 8.0, "")]}}, fail={"901"})
+    client.post("/api/where", json={"catalog_ids": [cid]})
+    item = next(i for i in client.get("/api/state").json()["items"] if i["catalog_id"] == cid)
+    assert item["price"]["store"] == "Where A" and item["price"]["also"] == []
