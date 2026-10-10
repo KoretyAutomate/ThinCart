@@ -267,13 +267,21 @@ def history_stores(conn: sqlite3.Connection) -> dict[int, int]:
     return hist
 
 
+def price_pick(answer: dict, history_store: int | None) -> dict:
+    """The row a price answer recommends. Stores tied at the lowest price are
+    all the cheapest; the one the household already buys at wins the tie."""
+    rows = [answer["cheapest"], *answer.get("tied", [])]
+    return next((r for r in rows if r["store_id"] == history_store), rows[0])
+
+
 def recommended_stores(conn: sqlite3.Connection, prices: dict[int, dict] | None = None) -> dict[int, tuple[int, str]]:
     """catalog_id -> (store_id, source). The owner's explicit pick wins; then
     the cheapest store from the last price answer still current for the item
     (PLAN.md Phase 8.1); else the store it was bought at most often."""
     rec: dict[int, tuple[int, str]] = {cid: (sid, "history") for cid, sid in history_stores(conn).items()}
+    hist = history_stores(conn)
     for cid, answer in (prices or {}).items():
-        rec[cid] = (answer["cheapest"]["store_id"], "price")
+        rec[cid] = (price_pick(answer, hist.get(cid))["store_id"], "price")
     for r in conn.execute("SELECT id, preferred_store_id FROM item_catalog WHERE preferred_store_id IS NOT NULL"):
         rec[r["id"]] = (r["preferred_store_id"], "preferred")
     return rec
@@ -386,16 +394,19 @@ def _picks_by_chain(conn: sqlite3.Connection) -> dict[str, dict[str, str]]:
     return out
 
 
-def _price_brief(answer: dict | None, store_names: dict) -> dict | None:
+def _price_brief(answer: dict | None, store_names: dict, history_store: int | None = None) -> dict | None:
     """What the list needs from a stored price answer: the cheapest store and
     how it was decided ("$0.21/oz", "2 × 1 lb = $5.98"), with its age."""
     if not answer or not answer.get("cheapest"):
         return None
-    c = answer["cheapest"]
+    c = price_pick(answer, history_store)
     store = store_names.get(c["store_id"])
     if store is None:
         return None
-    return {"store": store, "amount": c["amount"], "product": c["product"],
+    # the other stores at this same lowest price (the phone's 📍 needs them)
+    also = [store_names[r["store_id"]] for r in [answer["cheapest"], *answer.get("tied", [])]
+            if r["store_id"] != c["store_id"] and r["store_id"] in store_names]
+    return {"store": store, "also": also, "amount": c["amount"], "product": c["product"],
             "unit_label": c.get("unit_label", ""), "total_label": c.get("total_label", ""),
             "exact": c.get("exact", False), "computed_at": answer.get("computed_at", ""),
             # when the store's price was FETCHED — a comparison over a cached
@@ -448,7 +459,7 @@ def state(conn: sqlite3.Connection, now=None) -> dict:
         # its open price view on it, so a change only the server can see (an
         # enrichment making the item food, under 🍃) is still a new question
         d["price_key"] = price_reco.input_key(conn, d["catalog_id"], priced)
-        d["price"] = _price_brief(prices.get(d["catalog_id"]), store_names)
+        d["price"] = _price_brief(prices.get(d["catalog_id"]), store_names, hist.get(d["catalog_id"]))
         items.append(d)
     import catalog
     import plants as plantvocab

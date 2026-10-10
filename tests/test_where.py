@@ -505,3 +505,45 @@ def test_another_size_must_still_name_the_item(monkeypatch, stores):
     stub(monkeypatch, {"901": {"jumbo quillshrimp": [rec("Brand Jumbo Quillshrimp, 1 lb", 12.0, ""),
                                                      rec("Brand Large Quillshrimp, 1 lb", 8.0, "")]}})
     assert [q["product"] for q in ask(cid)["quotes"]] == ["Brand Jumbo Quillshrimp, 1 lb"]
+
+
+# --- ties: the same lowest price at more than one store ------------------------
+
+def test_a_tie_names_every_store_at_the_lowest_price(monkeypatch, stores):
+    cid = add("quilltie")
+    stub(monkeypatch, {"901": {"quilltie": [rec("Quilltie 16 oz", 4.0, "")]},
+                       "902": {"quilltie": [rec("Quilltie 16 oz", 4.0, "")]}})
+    it = ask(cid)
+    assert it["cheapest"]["store"] in ("Where A", "Where B")
+    assert [t["store"] for t in it["tied"]] == [({"Where A", "Where B"} - {it["cheapest"]["store"]}).pop()]
+    state = {i["catalog_id"]: i for i in client.get("/api/state").json()["items"]}
+    pr = state[cid]["price"]
+    assert sorted([pr["store"], *pr["also"]]) == ["Where A", "Where B"]
+
+
+def test_no_tie_when_a_store_is_even_a_cent_dearer(monkeypatch, stores):
+    cid = add("quillnotie")
+    stub(monkeypatch, {"901": {"quillnotie": [rec("Quillnotie 16 oz", 4.0, "")]},
+                       "902": {"quillnotie": [rec("Quillnotie 16 oz", 4.01, "")]}})
+    it = ask(cid)
+    assert it["cheapest"]["store"] == "Where A" and it["tied"] == []
+
+
+def test_a_tie_on_the_wanted_amount_counts_the_cost_not_the_pack(monkeypatch, stores):
+    cid = add("quillpack", buy_qty="2 lb")
+    stub(monkeypatch, {"901": {"quillpack": [rec("Quillpack, 1 lb", 2.5, "")]},
+                       "902": {"quillpack": [rec("Quillpack, 2 lb", 5.0, "")]}})
+    it = ask(cid)
+    assert len(it["tied"]) == 1                                # 2 × 1 lb = $5.00 = 2 lb = $5.00
+
+
+def test_the_store_you_already_buy_at_wins_the_tie(monkeypatch, stores):
+    cid = add("quillhabit")
+    iid = op(type="add", name="quillhabit", item_id=str(uuid.uuid4()))["item_id"]
+    op(type="checkoff", item_id=iid, store="Where B")          # bought at B before
+    add("quillhabit")
+    stub(monkeypatch, {"901": {"quillhabit": [rec("Quillhabit 8 oz", 3.0, "")]},
+                       "902": {"quillhabit": [rec("Quillhabit 8 oz", 3.0, "")]}})
+    ask(cid)
+    item = next(i for i in client.get("/api/state").json()["items"] if i["catalog_id"] == cid)
+    assert item["store"] == "Where B" and item["price"]["also"] == ["Where A"]

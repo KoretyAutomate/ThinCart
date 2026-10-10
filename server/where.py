@@ -301,7 +301,19 @@ def compare(cands: list[tuple[dict, dict, bool]], wanted: tuple[str, float] | No
     best_per_store: dict[int, dict] = {}
     for r in ranked + [r for r in rows if r["metric"] is None]:
         best_per_store.setdefault(r["store_id"], r)
+    # Other stores at the SAME lowest price: with an amount wanted, the same
+    # cost in cents; without one, the same unit price (not just the same rounded label).
+    tied: list[dict] = []
+    if ranked:
+        first = ranked[0]
+        same = (lambda r: round(r["metric"][0], 2) == round(first["metric"][0], 2)) if wanted \
+            else (lambda r: abs(r["metric"][0] - first["metric"][0]) < 1e-9)
+        seen = {first["store_id"]}
+        for r in ranked[1:]:
+            if r["store_id"] not in seen and same(r):
+                seen.add(r["store_id"])
+                tied.append(r)
     for r in rows:
         r.pop("metric", None)
-    return {"dim": dim, "cheapest": ranked[0] if ranked else None,
+    return {"dim": dim, "cheapest": ranked[0] if ranked else None, "tied": tied,
             "comparable": bool(ranked), "quotes": list(best_per_store.values())}

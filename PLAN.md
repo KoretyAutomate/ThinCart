@@ -2851,3 +2851,14 @@ so the tray was hidden.) Fix: the click that follows a dropdown tap is swallowed
 (capture phase; any new press cancels the guard). The tray label now FOLDS the
 chips (remembered per phone, `pc_tray_folded`); the full panel opens from a
 separate "All ›" button and the "+N more" chip.
+
+## Price ties: every store at the lowest price (2026-10-10)
+
+`where.compare` used to name only the first of several stores with the same
+lowest price. It now also returns `tied` (other stores at the same cost in
+cents when an amount is wanted, else the exact same unit price). The suggested
+store among tied ones is the one the household already buys at (`db.price_pick`),
+else the first asked. The state's `price.also` lists the rest; the list row and
+the edit sheet say "also X", the where-to-buy line says "Same price at A = B",
+and 📍 keeps an item (when its store came from price, never from the owner's own
+pick) on the list at every tied store.

@@ -831,6 +831,8 @@ const STR = {
     buyqty_bad:'Not understood — try "2 lb", "6 rolls", "1 gal" or "12". Prices compare per unit meanwhile.',
     price_partial:' (not every store could be checked)',
     partial_check:(st, how)=>`latest check (some stores unreachable): ${st} ${how} — keeping the last full answer`,
+    tied_also:a=>`also ${a.join(', ')}`,
+    tied_same:a=>`Same price at ${a.join(' = ')}`,
     price_line:(st, how, ago, mine)=>`💲 Cheapest: ${st}${how ? ' · ' + how : ''}${ago ? ' · ' + ago : ''}${mine ? ' · you chose ' + mine : ''}`,
     stores_title:'🏬 Stores & plan', at_h:'I’m at… (tags purchases for 6 h)',
     plan_h:'Where to buy today', manage_h:'Stores', at_none:'— none —',
@@ -983,6 +985,8 @@ const STR = {
     buyqty_bad:'読み取れません — 「2 lb」「6 rolls」「1 gal」「12」のように入力してください。それまでは単価で比較します。',
     price_partial:'（一部の店は未確認）',
     partial_check:(st, how)=>`最新の確認（一部の店に接続できず）: ${st} ${how} — 前回の完全な結果を維持`,
+    tied_also:a=>`${a.join('、')}も同額`,
+    tied_same:a=>`同価格: ${a.join(' = ')}`,
     price_line:(st, how, ago, mine)=>`💲 最安: ${st}${how ? ' · ' + how : ''}${ago ? ' · ' + ago : ''}${mine ? ' · 指定: ' + mine : ''}`,
     stores_title:'🏬 店舗とプラン', at_h:'いまいる店（6時間有効）',
     plan_h:'今日どこで買う？', manage_h:'店舗リスト', at_none:'— なし —',
@@ -1764,17 +1768,20 @@ function whereLineMain(it, w, unsettled) {
   if (!w) return '';
   if (w.cheapest) {
     const q = w.cheapest;
+    const tied = (w.tied || []).map(t => t.store);
+    const names = [q.store, ...tied].join(' = ');
     const how = [q.total_label || q.unit_label || '$' + q.amount.toFixed(2),
                  w.organic_fallback ? T().no_organic : ''].filter(Boolean).join(' · ');
     // grouped under the owner's pick: name the store the cheaper price is at
     if (it.store_source === 'preferred' && it.store !== q.store)
-      return T().price_line(q.store, how, agoLabel(q.fetched_at), it.store);
+      return T().price_line(names, how, agoLabel(q.fetched_at), it.store);
     // a partial check that could not reach the stored winner: shown, not obeyed
     if (it.store_source === 'price' && it.store !== q.store)
-      return T().partial_check(q.store, how);
+      return T().partial_check(names, how);
     // products that could not be measured in the winner's unit are still shown
     const unranked = (w.quotes || []).filter(u => !u.unit_label && u.store_id !== q.store_id);
-    return [q.total_label || `$${q.amount.toFixed(2)}`, q.unit_label || q.unit_price, q.product,
+    return [tied.length ? T().tied_same([q.store, ...tied]) : '',
+            q.total_label || `$${q.amount.toFixed(2)}`, q.unit_label || q.unit_price, q.product,
             q.exact ? '' : '(' + T().best_match + ')', w.organic_fallback ? T().no_organic : '',
             agoLabel(q.fetched_at),
             unranked.length ? T().not_compared + ': ' + unranked.map(u =>
@@ -1935,7 +1942,8 @@ function renderPlan() {
         i.qty_note, i.budget != null ? fmtYen(i.budget) : '',
         i.store_source === 'history' ? T().src_hist : '',
         i.store_source === 'price' && i.price ? '💲 ' + (i.price.total_label || i.price.unit_label || '$' + i.price.amount)
-          + (i.price.organic_fallback ? ' · ' + T().no_organic : '') : '',
+          + (i.price.organic_fallback ? ' · ' + T().no_organic : '')
+          + (i.price.also && i.price.also.length ? ' · ' + T().tied_also(i.price.also) : '') : '',
       ].filter(Boolean).join(' ');
       div.appendChild(p);
     }
@@ -2216,7 +2224,7 @@ function render() {
   // 📍: what to buy HERE. Items for another store go; items with no store yet
   // stay, folded at the top — any of them may be bought here.
   const all = items.length;
-  if (here) items = items.filter(i => !i.store || i.store === here);
+  if (here) items = items.filter(i => !i.store || i.store === here || tiedAt(i, here));
   $('herenote').textContent = here ? T().here_note(here, all - items.length) : '';
   $('herenote').classList.toggle('on', !!here);
   const grp = it => (here && !it.store) ? NOSTORE_GROUP() : groupOf(it);
@@ -2755,7 +2763,7 @@ function fillSheet(it) {
   $('sheet-buyqty-warn').textContent = it.buy_qty && it.buy_qty_ok === false ? T().buyqty_bad : '';
   // the price suggestion beside the owner's own pick (PLAN.md Phase 8.1)
   const pr = it.price;
-  $('sheet-price').textContent = pr ? T().price_line(pr.store,
+  $('sheet-price').textContent = pr ? T().price_line([pr.store, ...(pr.also || [])].join(' = '),
     [pr.total_label || pr.unit_label, pr.organic_fallback ? T().no_organic : ''].filter(Boolean).join(' · '),
     agoLabel(pr.fetched_at || pr.computed_at), it.store_source === 'preferred' && it.store !== pr.store ? it.store : '')
     + (pr.partial ? T().price_partial : '') : '';
@@ -2978,6 +2986,11 @@ function groupOf(it) {
  * while "I'm at" a store, so it switches off with it. */
 const HERE_KEY = 'pc_here', FOLD_KEY = 'pc_folds'  // renamed 2026-10-07: older saves assumed folded-by-default;
 const NOSTORE_GROUP = () => ({ key: 'zzx-nostore', label: T().unassigned, approx: false, rank: [-2], fold: true });
+/* Tied for the lowest price: the item is cheapest at every one of those stores,
+ * so it belongs on the list of whichever of them you are standing in. */
+function tiedAt(it, store) {
+  return it.store_source === 'price' && !!it.price && (it.price.also || []).includes(store);
+}
 function hereStore() {
   let on = false;
   try { on = localStorage.getItem(HERE_KEY) === '1'; } catch (e) { /* private window */ }
