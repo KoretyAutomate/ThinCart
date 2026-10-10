@@ -1767,8 +1767,10 @@ function whereLineMain(it, w, unsettled) {
   if (it.pending || unsettled(it)) return T().not_synced;
   if (!w) return '';
   if (w.cheapest) {
-    const q = w.cheapest;
-    const tied = (w.tied || []).map(t => t.store);
+    // tied stores tie on cost, not on package: show the quote of the store
+    // the item is grouped under
+    const q = [w.cheapest, ...(w.tied || [])].find(r => r.store === it.store) || w.cheapest;
+    const tied = [w.cheapest, ...(w.tied || [])].filter(r => r !== q).map(t => t.store);
     const names = [q.store, ...tied].join(' = ');
     const how = [q.total_label || q.unit_label || '$' + q.amount.toFixed(2),
                  w.organic_fallback ? T().no_organic : ''].filter(Boolean).join(' · ');

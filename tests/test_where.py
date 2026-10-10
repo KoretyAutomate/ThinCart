@@ -604,3 +604,15 @@ def _fixed(monkeypatch, name, amount, size):
             return {}, False
         return {t: [rec(f"{name} {size}", amount, "")] if store == "902" else [] for t in terms}, True
     return fake
+
+
+def test_a_surviving_tie_still_saves_the_fresh_quote_and_check(monkeypatch, stores):
+    cid = _twin(monkeypatch, "quillrefresh", "8 oz")
+    monkeypatch.setattr(where_api, "price_products_many", _fixed(monkeypatch, "quillrefresh", 8.0, "16 oz"))
+    client.post("/api/where", json={"catalog_ids": [cid]})
+    item = next(i for i in client.get("/api/state").json()["items"] if i["catalog_id"] == cid)
+    names = {item["price"]["store"], *item["price"]["also"]}
+    assert names == {"Where A", "Where B"}
+    assert item["price"]["partial"] is True                 # this check could not reach A
+    if item["price"]["store"] == "Where B":
+        assert item["price"]["amount"] == 8.0               # B's new package, not the old $4

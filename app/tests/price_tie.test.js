@@ -61,7 +61,7 @@ function boot(items, at) {
   const d = boot([item(1, "rice", "ShopRite", PRICE("ShopRite", ["Wegmans"]))], "ShopRite");
   await drain();
   d.w.__line = d.w.whereLine({ store: 'ShopRite', store_source: 'price' }, { cheapest: { store: 'Wegmans', amount: 4, product: 'x',
-    unit_label: '$0.25/oz', fetched_at: '', exact: true }, tied: [{ store: 'ShopRite' }], quotes: [], stores: {} }, () => false);
+    unit_label: '$0.25/oz', fetched_at: '', exact: true }, tied: [{ store: 'ShopRite', amount: 4, product: 'y', unit_label: '$0.25/oz', fetched_at: '', exact: true }], quotes: [], stores: {} }, () => false);
   check("a tie picked by history says 'Same price', not 'keeping the last answer'",
     /Same price at Wegmans = ShopRite/.test(d.w.__line) && !/unreachable/i.test(d.w.__line), d.w.__line);
   console.log(`\n================ ${passed} passed, ${failed} failed ================`);

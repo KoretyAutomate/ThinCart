@@ -125,9 +125,9 @@ def _reconcile(old_rows: list[dict], old: dict | None, fresh: dict, unasked: lis
     if not old or old.get("dim") is None or old.get("dim") != fresh.get("dim"):
         return stale
     pool = [w for w in stale if w.get("cost") is not None]
-    pool += [q for q in fresh["quotes"] if q.get("cost") is not None and q["store_id"] not in unasked]
-    if len(pool) < len(stale) or not pool:
+    if len(pool) < len(stale) or not pool:   # a pre-tie answer has no costs to compare
         return stale
+    pool += [q for q in fresh["quotes"] if q.get("cost") is not None and q["store_id"] not in unasked]
     low = min(w["cost"] for w in pool)
     return [w for w in pool if abs(w["cost"] - low) < 1e-9]
 
@@ -170,8 +170,11 @@ async def _persist(items: dict[int, dict], result: dict[str, dict]) -> None:
                 # same dimension, so a confirmed tie stays and a cheaper price
                 # becomes the winner.
                 kept = _reconcile(old_rows, old, r, unasked)
-                if old and [w["store_id"] for w in kept] != winners:
-                    changed |= price_reco.save(conn, cid, it["key"], {**old, "cheapest": kept[0], "tied": kept[1:]}, ts)
+                if old and kept != old_rows:
+                    # the statuses are THIS check's: the new winner was found by a partial one
+                    fresh = {k: r[k] for k in ("stores", "organic_stores", "regular_stores")}
+                    changed |= price_reco.save(
+                        conn, cid, it["key"], {**old, **fresh, "cheapest": kept[0], "tied": kept[1:]}, ts)
                 continue
             if r["cheapest"]:
                 changed |= price_reco.save(conn, cid, it["key"], r, ts)
