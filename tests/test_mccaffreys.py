@@ -142,9 +142,16 @@ def test_a_minimum_weight_pack_is_priced_at_its_least_purchase():
          "size": "1 LB", "location": "MEAT"},
         {"id": "g", "name": "Chicken Drumsticks min. 2 lbs", "actualPrice": 2.50, "size": "1 LB"},
         {"id": "h", "name": "Mini Peppers", "actualPrice": 3.99, "size": "16 OZ"},
+        {"id": "i", "name": "Ground Beef (1 lb minimum)", "actualPrice": 4.0, "size": "LB"},
+        {"id": "j", "name": "Shrimp .5 lb. minimum", "actualPrice": 4.0, "size": "1 LB"},
+        {"id": "k", "name": "Salmon min. 1 1/2 lbs", "actualPrice": 4.0, "size": "1 LB"},
     ]}
-    f, g, h = mccaffreys.parse_search(payload, "1000-7") or []
-    assert (f["pack_size"], f["amount"], f["min_weight_oz"], f["by_weight"]) == ("1 LB", 2.29, 48, True)
+    f, g, h, i, j, k = mccaffreys.parse_search(payload, "1000-7") or []
+    assert (i["pack_size"], i["min_weight_oz"]) == ("1 lb", 16)       # bare LB; a 1 lb minimum kept
+    assert (j["min_weight_oz"], k["min_weight_oz"]) == (8, 24)         # fractions, not their tails
+    quarter = where.compare([({"id": 9, "name": "M"}, i, False)], quantity.parse_wanted("0.25 lb"))
+    assert quarter["cheapest"]["total"] == 4.0
+    assert (f["pack_size"], f["amount"], f["min_weight_oz"], f["by_weight"]) == ("1 lb", 2.29, 48, True)
     assert g["min_weight_oz"] == 32
     assert h["min_weight_oz"] == 0 and h["by_weight"] is False        # "Mini" is not a minimum
     pound = {"sku": "p", "name": "Chicken Drumsticks", "pack_size": "1 lb", "amount": 3.29}

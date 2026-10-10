@@ -23,6 +23,7 @@ import os
 import re
 from datetime import UTC, datetime
 
+import quantity
 from chains import close, postcode
 
 # Theirs, and configured rather than assumed: set in the systemd unit
@@ -43,16 +44,19 @@ def now_iso() -> str:
 
 
 def _pack(size: str) -> str:
+    if _per_lb(size):
+        return "1 lb"           # a bare "LB" is the same per-pound basis as "1 LB"
     parts = size.strip().split()
     if len(parts) == 2 and parts[1].upper() in _UNITS:
         return f"{parts[0]} {_UNITS[parts[1].upper()]}"
     return size.strip()
 
 
-# "Family Pack (3 lb. minimum)", "min. 2 lbs": the least a per-pound product
-# can be bought in. Its `size` ("1 LB") is only the pricing basis.
-_MINIMUM = re.compile(
-    r"(\d+(?:\.\d+)?)\s*lbs?\.?\s*min(?:imum)?\b|\bmin(?:imum)?\.?\s*(\d+(?:\.\d+)?)\s*lbs?\b", re.I)
+# "Family Pack (3 lb. minimum)", "min. 1 1/2 lbs": the least a per-pound product
+# can be bought in. Its `size` ("1 LB") is only the pricing basis. Matched on
+# quantity's normalised text, so ".5" and "1 1/2" arrive as 0.5 and 1.5 and a
+# number is never the tail of a larger one.
+_MINIMUM = re.compile(rf"{quantity._NUM}\s*lbs?\s*min(?:imum)?\b|\bmin(?:imum)?\s*{quantity._NUM}\s*lbs?\b")
 
 
 def _per_lb(size: str) -> bool:
@@ -65,9 +69,9 @@ def _minimum_lb(name: str, size: str) -> float | None:
     beat a real $3.29 pound — but the till charges at least $6.87."""
     if not _per_lb(size):
         return None
-    m = _MINIMUM.search(name)
+    m = _MINIMUM.search(quantity._norm(name))
     n = float(m.group(1) or m.group(2)) if m else 0.0
-    return n if n > 1 else None
+    return n if n > 0 else None
 
 
 def _place(loc: str) -> dict[str, str]:

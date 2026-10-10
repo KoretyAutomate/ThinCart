@@ -2931,4 +2931,6 @@ a 1 lb package and could beat a real pound. The record now carries
 per-pound price: 1 lb wanted costs 3 lb's worth, 4 lb wanted costs 4 lb (not
 two 3 lb packs, Codex's second round). Per-pound records also carry
 `by_weight`, so a wanted 3.5 lb costs 3.5 lb pro rata, not 4 whole pounds
-(third round). The unit price is unchanged.
+(third round). Minimums are read from quantity's normalised text (".5", "1 1/2"),
+any positive minimum counts, and a bare "LB" size is "1 lb" (fourth round).
+The unit price is unchanged.
