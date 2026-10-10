@@ -131,8 +131,9 @@ def test_unconfigured_sends_nothing_and_says_so(monkeypatch):
 
 
 def test_a_minimum_weight_pack_is_priced_at_its_least_purchase():
-    """A per-pound family pack with a minimum is not a one-pound package: for a
-    wanted pound it costs the minimum's worth, so a real $3.29 pound wins."""
+    """A per-pound pack with a minimum is a floor, not a package: a wanted pound
+    costs the minimum's worth (so a real $3.29 pound wins), and a wanted 4 lb
+    costs 4 lb at the per-pound price, not two 3 lb packs."""
     import quantity
     import where
 
@@ -143,10 +144,15 @@ def test_a_minimum_weight_pack_is_priced_at_its_least_purchase():
         {"id": "h", "name": "Mini Peppers", "actualPrice": 3.99, "size": "16 OZ"},
     ]}
     f, g, h = mccaffreys.parse_search(payload, "1000-7") or []
-    assert (f["pack_size"], f["amount"]) == ("3 lb", 6.87)
-    assert (g["pack_size"], g["amount"]) == ("2 lb", 5.0)
-    assert (h["pack_size"], h["amount"]) == ("16 OZ", 3.99)          # "Mini" is not a minimum
+    assert (f["pack_size"], f["amount"], f["min_weight_oz"]) == ("1 LB", 2.29, 48)
+    assert g["min_weight_oz"] == 32
+    assert h["min_weight_oz"] == 0                                    # "Mini" is not a minimum
     pound = {"sku": "p", "name": "Chicken Drumsticks", "pack_size": "1 lb", "amount": 3.29}
+    other = {"id": 3, "name": "Elsewhere"}
     store = {"id": 9, "name": "McCaffrey's"}
-    got = where.compare([(store, f, False), (store, pound, False)], quantity.parse_wanted("1 lb"))
-    assert got["cheapest"]["product"] == "Chicken Drumsticks"
+    one = where.compare([(store, f, False), (other, pound, False)], quantity.parse_wanted("1 lb"))
+    assert one["cheapest"]["product"] == "Chicken Drumsticks"
+    four = where.compare([(store, f, False), (other, pound, False)], quantity.parse_wanted("4 lb"))
+    assert (four["cheapest"]["store"], four["cheapest"]["total"]) == ("McCaffrey's", 9.16)
+    plain = where.compare([(store, f, False), (other, pound, False)], None)
+    assert plain["cheapest"]["store"] == "McCaffrey's"                # unit price is still $2.29/lb

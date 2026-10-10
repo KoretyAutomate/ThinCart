@@ -56,9 +56,9 @@ _MINIMUM = re.compile(
 
 
 def _minimum_lb(name: str, size: str) -> float | None:
-    """Pounds a per-pound product must be bought in, when its name says so.
-    Read as a 1 lb package, a "3 lb minimum" family pack at $2.29/lb would beat
-    a real $3.29 pound — but the till charges at least $6.87."""
+    """The least weight (lb) a per-pound product is sold in, when its name says
+    so. Read as a 1 lb package, a "3 lb minimum" family pack at $2.29/lb would
+    beat a real $3.29 pound — but the till charges at least $6.87."""
     if size.strip().upper() not in ("1 LB", "LB"):
         return None
     m = _MINIMUM.search(name)
@@ -90,20 +90,19 @@ def parse_search(payload: dict, store: str, stamp: str | None = None) -> list[di
         if not sku or not name or not isinstance(price, (int, float)) or price <= 0:
             continue
         place = _place(str(h.get("location") or ""))
-        amount = float(price) / float(per)
-        pack = _pack(str(h.get("size") or ""))
         least = _minimum_lb(name, str(h.get("size") or ""))
-        if least:
-            amount, pack = amount * least, f"{least:g} lb"
         out.append({
             "sku": sku,
             "name": name,
             "brand": (h.get("brand") or "").strip(),
             "sub_brand": "",
-            "pack_size": pack,
+            "pack_size": _pack(str(h.get("size") or "")),
             "upc": str(h.get("scanCode") or ""),
             "store_number": store,
-            "amount": round(amount, 2),
+            "amount": round(float(price) / float(per), 2),
+            # a floor on how much is bought, not a package size: where.compare
+            # prices max(wanted, minimum) at the per-pound price
+            "min_weight_oz": least * 16 if least else 0,
             "unit_price": "",
             "aisle": place.get("aisle", ""), "aisle_side": place.get("aisle_side", ""),
             "section": "", "shelf": "",

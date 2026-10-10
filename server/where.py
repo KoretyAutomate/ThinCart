@@ -289,7 +289,10 @@ def compare(cands: list[tuple[dict, dict, bool]], wanted: tuple[str, float] | No
             row["qty_label"] = quantity.qty_label(qty, dim)
             row["unit_label"] = quantity.unit_label(r["amount"], qty, dim)
             if wanted:
-                total, packs = quantity.cost_to_cover(r["amount"], qty, wanted[1])
+                # a by-weight product with a minimum ("3 lb. minimum"): at least
+                # that much is bought, whatever smaller amount is wanted
+                floor = (r.get("min_weight_oz") or 0) if dim == "weight" else 0
+                total, packs = quantity.cost_to_cover(r["amount"], qty, max(wanted[1], floor))
                 row["packs"], row["total"] = packs, total
                 row["total_label"] = (f"{packs} × {row['qty_label']} = ${total:.2f}" if packs > 1
                                       else f"{row['qty_label']} = ${total:.2f}")
