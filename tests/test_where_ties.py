@@ -142,3 +142,6 @@ def test_a_held_quote_survives_a_check_where_the_other_store_has_nothing(monkeyp
     assert _after(cid) == {"Where A"}
     monkeypatch.setattr(where_api, "price_products_many", _fixed(monkeypatch, "quillgap", 8.0, "8 oz"))
     assert _after(cid) == {"Where A"}
+    # the revived answer keeps its dimension: a fresh cheaper B still wins
+    monkeypatch.setattr(where_api, "price_products_many", _fixed(monkeypatch, "quillgap", 1.0, "8 oz"))
+    assert _after(cid) == {"Where B"}

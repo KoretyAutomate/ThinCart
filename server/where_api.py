@@ -190,11 +190,18 @@ async def _persist(items: dict[int, dict], result: dict[str, dict]) -> None:
                 continue
             if old and not organic_now and not_asked:
                 # no old winner is unreachable, but a HELD quote still is: it competes
-                kept, held = _reconcile([w for w in old.get("held", []) if w["store_id"] in not_asked],
-                                        old, r, sorted(not_asked))
+                stale = [w for w in old.get("held", []) if w["store_id"] in not_asked]
+                kept, held = _reconcile(stale, old, r, sorted(not_asked))
                 if kept:
+                    # A revived held quote is the OLD comparison's: its dimension
+                    # and organic stand-in travel with it, not the fresh result's
+                    # (which may have no dimension at all); a fresh winner keeps
+                    # the fresh comparison's.
+                    revived = kept[0]["store_id"] in {w["store_id"] for w in stale}
+                    base = {**old, **{k: r[k] for k in ("stores", "organic_stores", "regular_stores")}} \
+                        if revived else r
                     changed |= price_reco.save(conn, cid, it["key"],
-                                               {**r, "cheapest": kept[0], "tied": kept[1:], "held": held}, ts)
+                                               {**base, "cheapest": kept[0], "tied": kept[1:], "held": held}, ts)
                     continue
             if r["cheapest"]:
                 changed |= price_reco.save(conn, cid, it["key"], r, ts)
