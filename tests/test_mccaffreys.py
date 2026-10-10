@@ -144,9 +144,9 @@ def test_a_minimum_weight_pack_is_priced_at_its_least_purchase():
         {"id": "h", "name": "Mini Peppers", "actualPrice": 3.99, "size": "16 OZ"},
     ]}
     f, g, h = mccaffreys.parse_search(payload, "1000-7") or []
-    assert (f["pack_size"], f["amount"], f["min_weight_oz"]) == ("1 LB", 2.29, 48)
+    assert (f["pack_size"], f["amount"], f["min_weight_oz"], f["by_weight"]) == ("1 LB", 2.29, 48, True)
     assert g["min_weight_oz"] == 32
-    assert h["min_weight_oz"] == 0                                    # "Mini" is not a minimum
+    assert h["min_weight_oz"] == 0 and h["by_weight"] is False        # "Mini" is not a minimum
     pound = {"sku": "p", "name": "Chicken Drumsticks", "pack_size": "1 lb", "amount": 3.29}
     other = {"id": 3, "name": "Elsewhere"}
     store = {"id": 9, "name": "McCaffrey's"}
@@ -154,5 +154,9 @@ def test_a_minimum_weight_pack_is_priced_at_its_least_purchase():
     assert one["cheapest"]["product"] == "Chicken Drumsticks"
     four = where.compare([(store, f, False), (other, pound, False)], quantity.parse_wanted("4 lb"))
     assert (four["cheapest"]["store"], four["cheapest"]["total"]) == ("McCaffrey's", 9.16)
+    part = where.compare([(store, f, False), (other, {**pound, "pack_size": "3.5 lb", "amount": 8.50}, False)],
+                         quantity.parse_wanted("3.5 lb"))
+    assert (part["cheapest"]["store"], part["cheapest"]["total"]) == ("McCaffrey's", 8.02)   # pro rata
+    assert part["cheapest"]["total_label"] == "56 oz = $8.02"
     plain = where.compare([(store, f, False), (other, pound, False)], None)
     assert plain["cheapest"]["store"] == "McCaffrey's"                # unit price is still $2.29/lb

@@ -2929,4 +2929,6 @@ name states a minimum ("Family Pack (3 lb. minimum)", "min. 2 lbs") was read as
 a 1 lb package and could beat a real pound. The record now carries
 `min_weight_oz`, and `where.compare` prices max(wanted, minimum) at the
 per-pound price: 1 lb wanted costs 3 lb's worth, 4 lb wanted costs 4 lb (not
-two 3 lb packs, Codex's second round). The unit price is unchanged.
+two 3 lb packs, Codex's second round). Per-pound records also carry
+`by_weight`, so a wanted 3.5 lb costs 3.5 lb pro rata, not 4 whole pounds
+(third round). The unit price is unchanged.

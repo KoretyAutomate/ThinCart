@@ -289,14 +289,19 @@ def compare(cands: list[tuple[dict, dict, bool]], wanted: tuple[str, float] | No
             row["qty_label"] = quantity.qty_label(qty, dim)
             row["unit_label"] = quantity.unit_label(r["amount"], qty, dim)
             if wanted:
-                # a by-weight product with a minimum ("3 lb. minimum"): at least
-                # that much is bought, whatever smaller amount is wanted
-                floor = (r.get("min_weight_oz") or 0) if dim == "weight" else 0
-                total, packs = quantity.cost_to_cover(r["amount"], qty, max(wanted[1], floor))
+                if r.get("by_weight") and dim == "weight":
+                    # weighed at the till: the amount wanted, or the product's
+                    # minimum ("3 lb. minimum") if that is more — never whole packs
+                    buy = max(wanted[1], r.get("min_weight_oz") or 0)
+                    total, packs = round(r["amount"] / qty * buy, 2), 1
+                    row["total_label"] = f"{quantity.qty_label(buy, dim)} = ${total:.2f}"
+                else:
+                    total, packs = quantity.cost_to_cover(r["amount"], qty, wanted[1])
+                    buy = packs * qty
+                    row["total_label"] = (f"{packs} × {row['qty_label']} = ${total:.2f}" if packs > 1
+                                          else f"{row['qty_label']} = ${total:.2f}")
                 row["packs"], row["total"] = packs, total
-                row["total_label"] = (f"{packs} × {row['qty_label']} = ${total:.2f}" if packs > 1
-                                      else f"{row['qty_label']} = ${total:.2f}")
-                row["metric"] = (total, packs * qty - wanted[1])
+                row["metric"] = (total, buy - wanted[1])
                 row["cost"] = round(total, 2)
             else:
                 row["metric"] = (r["amount"] / qty, 0)

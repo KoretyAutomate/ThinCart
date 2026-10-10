@@ -55,11 +55,15 @@ _MINIMUM = re.compile(
     r"(\d+(?:\.\d+)?)\s*lbs?\.?\s*min(?:imum)?\b|\bmin(?:imum)?\.?\s*(\d+(?:\.\d+)?)\s*lbs?\b", re.I)
 
 
+def _per_lb(size: str) -> bool:
+    return size.strip().upper() in ("1 LB", "LB")
+
+
 def _minimum_lb(name: str, size: str) -> float | None:
     """The least weight (lb) a per-pound product is sold in, when its name says
     so. Read as a 1 lb package, a "3 lb minimum" family pack at $2.29/lb would
     beat a real $3.29 pound — but the till charges at least $6.87."""
-    if size.strip().upper() not in ("1 LB", "LB"):
+    if not _per_lb(size):
         return None
     m = _MINIMUM.search(name)
     n = float(m.group(1) or m.group(2)) if m else 0.0
@@ -100,8 +104,9 @@ def parse_search(payload: dict, store: str, stamp: str | None = None) -> list[di
             "upc": str(h.get("scanCode") or ""),
             "store_number": store,
             "amount": round(float(price) / float(per), 2),
-            # a floor on how much is bought, not a package size: where.compare
-            # prices max(wanted, minimum) at the per-pound price
+            # "1 LB" is a per-pound price, weighed at the till: where.compare
+            # prices max(wanted, minimum) pro rata rather than in whole pounds
+            "by_weight": _per_lb(str(h.get("size") or "")),
             "min_weight_oz": least * 16 if least else 0,
             "unit_price": "",
             "aisle": place.get("aisle", ""), "aisle_side": place.get("aisle_side", ""),
