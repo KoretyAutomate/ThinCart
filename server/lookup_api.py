@@ -21,6 +21,7 @@ import sqlite3
 
 from fastapi import APIRouter, HTTPException, Query
 
+import db
 import lookup
 from lookup import (
     DISABLED,
@@ -50,6 +51,23 @@ def _db() -> sqlite3.Connection:
     if lookup._conn is None:
         raise HTTPException(503, {"code": UNAVAILABLE})
     return lookup._conn
+
+
+def _search_name(catalog_id: int) -> str | None:
+    """What to type into a chain's search box for this item: its English name.
+
+    The display name is whatever the household typed, often Japanese. Chain
+    catalogues are English, so "冷凍ブルーベリー" finds nothing at Wegmans and a
+    fresh pint at Whole Foods; with no aisle back, the item reads as "aisle
+    unknown" or lands on the wrong shelf. The price comparison already searched
+    in English (where_api._items); this is the same rule for every other path.
+    None when there is no such item."""
+    r = _db().execute(
+        "SELECT display_name, aliases_json FROM item_catalog WHERE id=?", (catalog_id,)
+    ).fetchone()
+    if r is None:
+        return None
+    return db.name_en(r["aliases_json"], r["display_name"]) or r["display_name"]
 
 
 def _store_row(store_id: int) -> dict | None:
@@ -138,15 +156,15 @@ async def products_search(catalog_id: int, store_id: int) -> dict:
     store = _store_row(store_id)
     if not store or not store["chain_store_id"]:
         raise HTTPException(400, "that store has no price source")
-    row = _db().execute("SELECT display_name FROM item_catalog WHERE id=?", (catalog_id,)).fetchone()
-    if row is None:
+    search_name = _search_name(catalog_id)
+    if search_name is None:
         raise HTTPException(404, "no such item")
     # Search for the REMEMBERED product where there is one. Searching the
     # generic name again can leave the chosen sku outside the top hits, so the
     # options come back without it — the pick is shown as made yet cannot be
     # seen or compared, which defeats remembering it at all.
     pick = _pick_for(catalog_id, store["chain"])
-    term = (pick["name"] if pick else "") or row["display_name"]
+    term = (pick["name"] if pick else "") or search_name
     recs = await products(store["chain"], term, store["chain_store_id"],
                           prefer_sku=pick["sku"] if pick else None)
     if recs is None:
@@ -185,8 +203,8 @@ async def prices(
     about ITS remembered pick — or, before one, the item's own name.
     """
     _require("price")
-    row = _db().execute("SELECT display_name FROM item_catalog WHERE id=?", (catalog_id,)).fetchone()
-    if row is None:
+    search_name = _search_name(catalog_id)
+    if search_name is None:
         raise HTTPException(404, "no such item")
     # Quotes are claims about ONE product. Once the household has said which jar
     # they buy, another jar's price is not a cheaper version of it — and putting
@@ -200,7 +218,7 @@ async def prices(
         pick = _pick_for(catalog_id, store["chain"])
         mine = bool(sku) and (chain == store["chain"] or not chain)
         want = (sku if mine else "") or (pick["sku"] if pick else None)
-        term = (name if mine else "") or (pick["name"] if pick else row["display_name"])
+        term = (name if mine else "") or (pick["name"] if pick else search_name)
         # A price may be served from cache, but only a price-fresh one: the same
         # record is happily reused for months to answer "which aisle".
         recs = await products(store["chain"], term, store["chain_store_id"],
@@ -242,14 +260,15 @@ async def aisles(store_id: int) -> dict:
     if not store or not store["chain_store_id"]:
         raise HTTPException(400, "that store has no aisle data")
     rows = _db().execute(
-        "SELECT i.catalog_id, c.display_name FROM items i "
+        "SELECT i.catalog_id, c.display_name, c.aliases_json FROM items i "
         "JOIN item_catalog c ON c.id = i.catalog_id"
     ).fetchall()
     picks = {r["catalog_id"]: _pick_for(r["catalog_id"], store["chain"]) for r in rows}
     terms = {}
     for r in rows:
         p = picks.get(r["catalog_id"])
-        terms[r["catalog_id"]] = p["name"] if p else r["display_name"]
+        terms[r["catalog_id"]] = p["name"] if p else (
+            db.name_en(r["aliases_json"], r["display_name"]) or r["display_name"])
     # EVERY pick under a term, not the last one written: two items can share a
     # search term and mean different jars, and each has to find its shelf.
     prefer: dict[str, list[str]] = {}

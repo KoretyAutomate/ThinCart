@@ -2909,3 +2909,17 @@ not in fallbacks. Unset, the adapter sends nothing and the store's link answers
 "McCaffrey's prices are not configured". Set in the systemd unit to
 `https://express.mccaffreys.com`. (The older adapters keep their documented
 defaults; changing them is a separate decision.)
+
+### Aisles searched by the Japanese name (2026-10-10)
+
+Reported in the store: frozen blueberries and peanut butter (and often produce)
+showed no or the wrong aisle at Wegmans. Cause: `/api/aisles`,
+`/api/products/search` and `/api/prices` typed the item's display name into the
+chain search, and 173 of 281 items are named in Japanese. Wegmans returns
+nothing for "冷凍ブルーベリー" (verified live, test_results/aisle_english_live_2026-10-10.txt);
+Whole Foods returns a fresh pint instead of frozen. The price comparison
+(`where_api._items`) already searched by `db.name_en`, so the cheapest-store
+row was right while the aisle beside it was blank. Fix: every lookup_api path
+searches by the English name (`_search_name`), the same rule as where_api. All
+173 Japanese items have an English alias today; one without still falls back to
+the display name.

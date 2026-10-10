@@ -482,3 +482,39 @@ def test_a_store_with_no_chain_says_so_rather_than_failing_oddly():
     link = client.get("/api/stores/link", params={"store_id": sid}).json()
     assert link["chain_store_id"] == ""
     assert "adapter" in link["reason"]
+
+
+def test_a_japanese_item_is_searched_by_its_english_name():
+    """Chain catalogues are English. Searched as "冷凍ブルーベリー", Wegmans
+    returned nothing (2026-10-10, in the store), so frozen blueberries and
+    peanut butter read as "aisle unknown" while the price comparison — which
+    already searched in English — had found them in 13B and 14B."""
+    op(type="store_upsert", store_name="JP Aisle Store", store_chain="wegmans", store_chain_id="931")
+    sid = stores_by_name()["JP Aisle Store"]["id"]
+    op(type="add", name="冷凍ブルーベリー", item_id=str(uuid.uuid4()))
+    cid = next(i["catalog_id"] for i in client.get("/api/state").json()["items"]
+               if i["name"] == "冷凍ブルーベリー")
+    with lookup._conn:      # the app's own connection: THINCART_DB is whoever imported app first
+        lookup._conn.execute("UPDATE item_catalog SET aliases_json=? WHERE id=?",
+                             ('["frozen blueberries"]', cid))
+    rec = {
+        "sku": "77", "name": "Wegmans Frozen Blueberries", "brand": "Wegmans", "sub_brand": "",
+        "pack_size": "16 oz", "upc": "", "store_number": "931", "amount": 3.99, "unit_price": "",
+        "aisle": "13B", "aisle_side": "R", "section": "5", "shelf": "",
+        "available": True, "source": "wegmans", "fetched_at": lookup.now_iso(),
+        "source_url": "https://www.wegmans.com/shop/product/77",
+    }
+    for limit in (5, 8):
+        lookup.cache_put("product", f"931|frozen blueberries|{limit}", [rec])
+    original = lookup.WEGMANS_KEY
+    try:
+        lookup.WEGMANS_KEY = ""     # anything not cached stays unasked, never fetched
+        r = client.get("/api/aisles", params={"store_id": sid})
+        assert r.status_code == 200, r.text
+        assert r.json()["aisles"][str(cid)]["label"] == "Aisle 13B · right · sec 5"
+        quotes = client.get("/api/prices", params={"catalog_id": cid}).json()["quotes"]
+        assert any(q["store"] == "JP Aisle Store" and q["amount"] == 3.99 for q in quotes)
+        opts = client.get("/api/products/search", params={"catalog_id": cid, "store_id": sid})
+        assert [o["sku"] for o in opts.json()["options"]] == ["77"]
+    finally:
+        lookup.WEGMANS_KEY = original
