@@ -63,6 +63,13 @@ def _per_lb(size: str) -> bool:
     return size.strip().upper() in ("1 LB", "LB")
 
 
+def _weighed(size: str, scan: str) -> bool:
+    """Weighed at the till: priced per pound AND rung up by a PLU (4-5 digits:
+    bananas 4011, drumsticks 09688). A 1 lb bag of carrots is also "1 LB" but
+    carries a 12-digit UPC — a fixed package, bought whole (live, 2026-10-10)."""
+    return _per_lb(size) and bool(re.fullmatch(r"\d{1,5}", scan.strip()))
+
+
 def _minimum_lb(name: str, size: str) -> float | None:
     """The least weight (lb) a per-pound product is sold in, when its name says
     so. Read as a 1 lb package, a "3 lb minimum" family pack at $2.29/lb would
@@ -98,7 +105,8 @@ def parse_search(payload: dict, store: str, stamp: str | None = None) -> list[di
         if not sku or not name or not isinstance(price, (int, float)) or price <= 0:
             continue
         place = _place(str(h.get("location") or ""))
-        least = _minimum_lb(name, str(h.get("size") or ""))
+        weighed = _weighed(str(h.get("size") or ""), str(h.get("scanCode") or ""))
+        least = _minimum_lb(name, str(h.get("size") or "")) if weighed else None
         out.append({
             "sku": sku,
             "name": name,
@@ -108,9 +116,9 @@ def parse_search(payload: dict, store: str, stamp: str | None = None) -> list[di
             "upc": str(h.get("scanCode") or ""),
             "store_number": store,
             "amount": round(float(price) / float(per), 2),
-            # "1 LB" is a per-pound price, weighed at the till: where.compare
-            # prices max(wanted, minimum) pro rata rather than in whole pounds
-            "by_weight": _per_lb(str(h.get("size") or "")),
+            # weighed at the till: where.compare prices max(wanted, minimum)
+            # pro rata rather than in whole pounds
+            "by_weight": weighed,
             "min_weight_oz": least * 16 if least else 0,
             "unit_price": "",
             "aisle": place.get("aisle", ""), "aisle_side": place.get("aisle_side", ""),

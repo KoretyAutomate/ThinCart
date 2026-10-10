@@ -139,14 +139,20 @@ def test_a_minimum_weight_pack_is_priced_at_its_least_purchase():
 
     payload = {"code": 0, "items": [
         {"id": "f", "name": "USDA Chicken Drumsticks Family Pack (3 lb. minimum)", "actualPrice": 2.29,
-         "size": "1 LB", "location": "MEAT"},
-        {"id": "g", "name": "Chicken Drumsticks min. 2 lbs", "actualPrice": 2.50, "size": "1 LB"},
+         "size": "1 LB", "location": "MEAT", "scanCode": "09764"},
+        {"id": "g", "name": "Chicken Drumsticks min. 2 lbs", "actualPrice": 2.50, "size": "1 LB", "scanCode": "09688"},
         {"id": "h", "name": "Mini Peppers", "actualPrice": 3.99, "size": "16 OZ"},
-        {"id": "i", "name": "Ground Beef (1 lb minimum)", "actualPrice": 4.0, "size": "LB"},
-        {"id": "j", "name": "Shrimp .5 lb. minimum", "actualPrice": 4.0, "size": "1 LB"},
-        {"id": "k", "name": "Salmon min. 1 1/2 lbs", "actualPrice": 4.0, "size": "1 LB"},
+        {"id": "i", "name": "Ground Beef (1 lb minimum)", "actualPrice": 4.0, "size": "LB", "scanCode": "09005"},
+        {"id": "j", "name": "Shrimp .5 lb. minimum", "actualPrice": 4.0, "size": "1 LB", "scanCode": "02711"},
+        {"id": "k", "name": "Salmon min. 1 1/2 lbs", "actualPrice": 4.0, "size": "1 LB", "scanCode": "2712"},
+        {"id": "l", "name": "Butter", "actualPrice": 4.0, "size": "1 LB", "scanCode": "034500151184"},
     ]}
-    f, g, h, i, j, k = mccaffreys.parse_search(payload, "1000-7") or []
+    f, g, h, i, j, k, butter = mccaffreys.parse_search(payload, "1000-7") or []
+    assert butter["by_weight"] is False                                # a UPC: a fixed 1 lb package
+    half = {"sku": "hb", "name": "Butter", "pack_size": "8 oz", "amount": 2.50}
+    eight = where.compare([({"id": 9, "name": "M"}, butter, False), ({"id": 3, "name": "E"}, half, False)],
+                          quantity.parse_wanted("8 oz"))
+    assert (eight["cheapest"]["store"], eight["cheapest"]["total"]) == ("E", 2.5)
     assert (i["pack_size"], i["min_weight_oz"]) == ("1 lb", 16)       # bare LB; a 1 lb minimum kept
     assert (j["min_weight_oz"], k["min_weight_oz"]) == (8, 24)         # fractions, not their tails
     quarter = where.compare([({"id": 9, "name": "M"}, i, False)], quantity.parse_wanted("0.25 lb"))

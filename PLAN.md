@@ -2933,4 +2933,7 @@ two 3 lb packs, Codex's second round). Per-pound records also carry
 `by_weight`, so a wanted 3.5 lb costs 3.5 lb pro rata, not 4 whole pounds
 (third round). Minimums are read from quantity's normalised text (".5", "1 1/2"),
 any positive minimum counts, and a bare "LB" size is "1 lb" (fourth round).
+Only items rung up by a PLU (1-5 digit scanCode) are weighed; a "1 LB" item
+with a 12-digit UPC (bagged carrots, butter) is a fixed package (fifth round,
+verified live).
 The unit price is unchanged.
